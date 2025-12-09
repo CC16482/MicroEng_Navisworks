@@ -1,0 +1,93 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net48</TargetFramework>
+		<UseWPF>true</UseWPF>
+		<AssemblyName>AppendDataTool</AssemblyName>
+		<RootNamespace>AppendDataTool</RootNamespace>
+		<PlatformTarget>x64</PlatformTarget>
+
+		<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+		<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+
+		<NAVISWORKS_API_PATH>C:\Program Files\Autodesk\Navisworks Manage 2025\</NAVISWORKS_API_PATH>
+	</PropertyGroup>
+
+	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
+		<DebugSymbols>true</DebugSymbols>
+		<DebugType>full</DebugType>
+		<Optimize>false</Optimize>
+		<OutputPath>bin\Debug\</OutputPath>
+		<DefineConstants>DEBUG;TRACE</DefineConstants>
+		<ErrorReport>prompt</ErrorReport>
+		<WarningLevel>4</WarningLevel>
+	</PropertyGroup>
+
+	<PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
+		<DebugType>pdbonly</DebugType>
+		<Optimize>true</Optimize>
+		<OutputPath>bin\Release\</OutputPath>
+		<DefineConstants>TRACE</DefineConstants>
+		<ErrorReport>prompt</ErrorReport>
+		<WarningLevel>4</WarningLevel>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Reference Include="Autodesk.Navisworks.Api">
+			<HintPath>$(NAVISWORKS_API_PATH)Autodesk.Navisworks.Api.dll</HintPath>
+			<Private>True</Private>
+		</Reference>
+		<Reference Include="Autodesk.Navisworks.ComApi">
+			<HintPath>$(NAVISWORKS_API_PATH)Autodesk.Navisworks.ComApi.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="Autodesk.Navisworks.Interop.ComApi">
+			<HintPath>$(NAVISWORKS_API_PATH)Autodesk.Navisworks.Interop.ComApi.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="Autodesk.Navisworks.Controls">
+			<HintPath>$(NAVISWORKS_API_PATH)Autodesk.Navisworks.Controls.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="AdWindows">
+			<HintPath>$(NAVISWORKS_API_PATH)AdWindows.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+		<Reference Include="System.Windows.Forms" />
+		<Reference Include="WindowsFormsIntegration">
+			<HintPath>$(NAVISWORKS_API_PATH)WindowsFormsIntegration.dll</HintPath>
+			<Private>False</Private>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Update="UI\AppendDataControl.xaml.cs">
+			<DependentUpon>AppendDataControl.xaml</DependentUpon>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Resource Include="Images\1_RSS_Logo.png" />
+		<Resource Include="Images\2_RSS_White.png" />
+		<Resource Include="Images\3_NavTools.png" />
+	</ItemGroup>
+
+	<Target Name="AfterBuild">
+		<PropertyGroup>
+			<PluginName>AppendDataTool</PluginName>
+			<DevId>MyCompany</DevId>
+			<BundleDir>$(AppData)\Autodesk\ApplicationPlugins\$(DevId).$(PluginName).bundle</BundleDir>
+			<ContentsDir>$(BundleDir)\Contents</ContentsDir>
+		</PropertyGroup>
+		<Message Text="Output Path: $(OutputPath)" Importance="high" />
+		<Message Text="Bundle Directory: $(BundleDir)" Importance="high" />
+		<ItemGroup>
+			<BundleFiles Include="$(OutputPath)$(AssemblyName).dll" />
+		</ItemGroup>
+		<RemoveDir Directories="$(BundleDir)" Condition="Exists('$(BundleDir)')" />
+		<MakeDir Directories="$(ContentsDir)" />
+		<Copy SourceFiles="@(BundleFiles)" DestinationFolder="$(ContentsDir)\" />
+		<WriteLinesToFile File="$(BundleDir)\PackageContents.xml" Overwrite="true" Lines="&#xD;&#xA;&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;&#xD;&#xA;&lt;ApplicationPackage&#xD;&#xA;  xmlns:xsi=&quot;http://www.w3.org/2001/XMLSchema-instance&quot;&#xD;&#xA;  xmlns:xsd=&quot;http://www.w3.org/2001/XMLSchema&quot;&#xD;&#xA;  SchemaVersion=&quot;1.0&quot;&#xD;&#xA;  AutodeskProduct=&quot;Navisworks&quot;&#xD;&#xA;  ProductType=&quot;Application&quot;&#xD;&#xA;  Name=&quot;$(PluginName) by $(DevId)&quot;&#xD;&#xA;  Description=&quot;Appends custom data to Navisworks elements.&quot;&#xD;&#xA;  Author=&quot;$(DevId)&quot;&#xD;&#xA;  HelpFile=&quot;./Contents/Help.html&quot;&#xD;&#xA;  SupportedLocales=&quot;Enu&quot;&#xD;&#xA;  ProductCode=&quot;{PUT-A-UNIQUE-GUID-HERE-FOR-YOUR-PLUGIN}&quot; &#xD;&#xA;  UpgradeCode=&quot;{PUT-ANOTHER-UNIQUE-GUID-HERE-FOR-YOUR-PLUGIN-FAMILY}&quot;&gt;&#xD;&#xA;  &lt;CompanyDetails Name=&quot;$(DevId)&quot; Url=&quot;http://www.yourcompany.com&quot; Email=&quot;support@yourcompany.com&quot;/&gt;&#xD;&#xA;  &lt;Components Description=&quot;Main plugin component&quot;&gt;&#xD;&#xA;    &lt;RuntimeRequirements OS=&quot;Win64&quot; Platform=&quot;NAVMAN|NAVSIM&quot; SeriesMin=&quot;Nw22&quot; SeriesMax=&quot;Nw22&quot; /&gt;&#xD;&#xA;    &lt;ComponentEntry AppName=&quot;$(PluginName)&quot; Version=&quot;1.0.0&quot; ModuleName=&quot;./Contents/$(AssemblyName).dll&quot; AppType=&quot;ManagedPlugin&quot; /&gt;&#xD;&#xA;  &lt;/Components&gt;&#xD;&#xA;&lt;/ApplicationPackage&gt;" />
+		<Message Text="Plugin bundle created at $(BundleDir)" Importance="high" />
+	</Target>
+</Project>

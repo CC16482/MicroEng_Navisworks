@@ -9,6 +9,7 @@ using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
 using NavisApp = Autodesk.Navisworks.Api.Application;
 using DrawingColor = System.Drawing.Color;
 using DrawingColorTranslator = System.Drawing.ColorTranslator;
+using ElementHost = System.Windows.Forms.Integration.ElementHost;
 
 namespace MicroEng.Navisworks
 {
@@ -53,39 +54,18 @@ namespace MicroEng.Navisworks
 
         public static void AppendData()
         {
-            var doc = NavisApp.ActiveDocument;
-            if (doc == null)
+            try
             {
-                ShowInfo("No active document.");
-                Log("AppendData: no active document.");
-                return;
+                var dialog = new AppendIntegrateDialog { LogAction = Log };
+                System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(dialog);
+                dialog.ShowDialog();
             }
-
-            var selectedItems = doc.CurrentSelection?.SelectedItems;
-            if (selectedItems == null || selectedItems.Count == 0)
+            catch (Exception ex)
             {
-                ShowInfo("No items selected. Select some items first.");
-                Log("AppendData: no selection.");
-                return;
+                Log($"AppendData dialog failed: {ex}");
+                MessageBox.Show($"Append & Integrate Data failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
-
-            var tagValue = $"ME-AUTO-{DateTime.Now:yyyyMMdd-HHmmss}";
-            var processed = 0;
-            var updated = 0;
-
-            foreach (ModelItem item in selectedItems)
-            {
-                processed++;
-                if (TryWriteMicroEngTag(item, tagValue))
-                {
-                    updated++;
-                }
-            }
-
-            var summary =
-                $"Append Data wrote {CategoryName}.{TagPropertyName}='{tagValue}' to {updated}/{processed} item(s).";
-            ShowInfo(summary);
-            Log(summary);
         }
 
         public static void Reconstruct()
@@ -149,7 +129,7 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private static void Log(string message)
+        internal static void Log(string message)
         {
             System.Diagnostics.Trace.WriteLine($"[MicroEng] {message}");
             LogMessage?.Invoke(message);
@@ -202,21 +182,22 @@ namespace MicroEng.Navisworks
     [Plugin("MicroEng.DockPane", "MENG",
         DisplayName = "MicroEng Tools",
         ToolTip = "Dockable panel for MicroEng tools.")]
-    [DockPanePlugin(400, 300)]
+    [DockPanePlugin(800, 600, FixedSize = false, AutoScroll = true, MinimumHeight = 480, MinimumWidth = 360)]
     public class MicroEngDockPane : DockPanePlugin
     {
-        private MicroEngPanelControl _control;
-
         public override Control CreateControlPane()
         {
-            _control = new MicroEngPanelControl();
-            return _control;
+            var host = new ElementHost
+            {
+                Dock = DockStyle.Fill,
+                Child = new MicroEngPanelControl()
+            };
+            return host;
         }
 
         public override void DestroyControlPane(Control pane)
         {
             pane?.Dispose();
-            _control = null;
         }
     }
 
@@ -259,157 +240,4 @@ namespace MicroEng.Navisworks
         }
     }
 
-    // ========= WinForms UI for the panel =========
-
-    public class MicroEngPanelControl : UserControl
-    {
-        private readonly Button _appendDataButton;
-        private readonly Button _reconstructButton;
-        private readonly Button _zoneFinderButton;
-        private readonly TextBox _logTextBox;
-        private readonly PictureBox _headerLogo;
-
-        public MicroEngPanelControl()
-        {
-            Dock = DockStyle.Fill;
-            BackColor = ThemeAssets.BackgroundPanel;
-            Font = ThemeAssets.DefaultFont;
-
-            var layout = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount = 5,
-                AutoSize = true
-            };
-
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-
-            var headerPanel = new Panel
-            {
-                Dock = DockStyle.Fill,
-                BackColor = ThemeAssets.BackgroundMuted,
-                Padding = new Padding(10, 8, 10, 8),
-                Height = 56
-            };
-
-            _headerLogo = new PictureBox
-            {
-                Image = ThemeAssets.HeaderLogo,
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Dock = DockStyle.Left,
-                Width = 140
-            };
-
-            var headerLabel = new Label
-            {
-                Text = "MicroEng Tools",
-                Dock = DockStyle.Fill,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
-                ForeColor = ThemeAssets.TextPrimary,
-                Padding = new Padding(12, 0, 0, 0)
-            };
-
-            headerPanel.Controls.Add(headerLabel);
-            headerPanel.Controls.Add(_headerLogo);
-
-            _appendDataButton = new Button
-            {
-                Text = "Append Data",
-                Dock = DockStyle.Top,
-                Font = ThemeAssets.DefaultFont,
-                BackColor = ThemeAssets.Accent,
-                ForeColor = DrawingColor.White,
-                FlatStyle = FlatStyle.Flat,
-                Height = 34
-            };
-            _appendDataButton.FlatAppearance.BorderSize = 0;
-            _appendDataButton.FlatAppearance.MouseOverBackColor = ThemeAssets.AccentStrong;
-            _appendDataButton.Click += (s, e) =>
-            {
-                MicroEngActions.AppendData();
-                LogToPanel("[Append Data] executed.");
-            };
-
-            _reconstructButton = new Button
-            {
-                Text = "Reconstruct",
-                Dock = DockStyle.Top,
-                Font = ThemeAssets.DefaultFont,
-                BackColor = ThemeAssets.BackgroundMuted,
-                ForeColor = ThemeAssets.TextPrimary,
-                FlatStyle = FlatStyle.Flat,
-                Height = 34
-            };
-            _reconstructButton.FlatAppearance.BorderColor = ThemeAssets.Accent;
-            _reconstructButton.Click += (s, e) =>
-            {
-                MicroEngActions.Reconstruct();
-                LogToPanel("[Reconstruct] executed.");
-            };
-
-            _zoneFinderButton = new Button
-            {
-                Text = "Zone Finder",
-                Dock = DockStyle.Top,
-                Font = ThemeAssets.DefaultFont,
-                BackColor = ThemeAssets.BackgroundMuted,
-                ForeColor = ThemeAssets.TextPrimary,
-                FlatStyle = FlatStyle.Flat,
-                Height = 34
-            };
-            _zoneFinderButton.FlatAppearance.BorderColor = ThemeAssets.Accent;
-            _zoneFinderButton.Click += (s, e) =>
-            {
-                MicroEngActions.ZoneFinder();
-                LogToPanel("[Zone Finder] executed.");
-            };
-
-            _logTextBox = new TextBox
-            {
-                Dock = DockStyle.Fill,
-                Multiline = true,
-                ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical,
-                Font = ThemeAssets.DefaultFont,
-                BackColor = DrawingColor.White
-            };
-
-            layout.Controls.Add(headerPanel, 0, 0);
-            layout.Controls.Add(_appendDataButton, 0, 1);
-            layout.Controls.Add(_reconstructButton, 0, 2);
-            layout.Controls.Add(_zoneFinderButton, 0, 3);
-            layout.Controls.Add(_logTextBox, 0, 4);
-
-            Controls.Add(layout);
-
-            MicroEngActions.LogMessage += LogToPanel;
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                MicroEngActions.LogMessage -= LogToPanel;
-            }
-
-            base.Dispose(disposing);
-        }
-
-        private void LogToPanel(string message)
-        {
-            if (IsHandleCreated && InvokeRequired)
-            {
-                BeginInvoke((Action)(() => LogToPanel(message)));
-                return;
-            }
-
-            _logTextBox.AppendText($"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}");
-        }
-    }
 }

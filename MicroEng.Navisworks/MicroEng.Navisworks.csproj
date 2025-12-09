@@ -5,6 +5,8 @@
     <!-- Navisworks 2024+ uses .NET Framework 4.8 for .NET API plugins -->
     <!-- This is a .NET Framework target, not .NET Core/.NET 8 -->
     <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>MicroEng.Navisworks</AssemblyName>
     <RootNamespace>MicroEng.Navisworks</RootNamespace>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -39,6 +41,7 @@
     </Reference>
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
+    <Reference Include="WindowsFormsIntegration" />
   </ItemGroup>
 
   <!-- Deploy logos alongside the plugin -->
@@ -49,6 +52,7 @@
     </Content>
   </ItemGroup>
 
+  <!-- Mark design-only XAML mocks as None so they don't compile -->
   <!-- After build, copy dll to Navisworks Plugins\<AssemblyName>\ -->
   <!-- Folder name must match dll name for simple side-loading. -->
   <!-- This follows the typical "side-loading" pattern many devs use. :contentReference[oaicite:4]{index=4} -->
@@ -56,6 +60,48 @@
     <MakeDir Directories="$(NavisPluginsDir)\$(AssemblyName)" />
     <Copy SourceFiles="$(TargetPath)"
           DestinationFolder="$(NavisPluginsDir)\$(AssemblyName)" />
+
+    <!-- Optional AppBundle for side-loading via %AppData% (does not require admin) -->
+    <PropertyGroup>
+      <DevId>MENG</DevId>
+      <PluginName>MicroEng.Navisworks</PluginName>
+      <BundleDir>$(AppData)\Autodesk\ApplicationPlugins\$(DevId).$(PluginName).bundle</BundleDir>
+      <ContentsDir>$(BundleDir)\Contents</ContentsDir>
+      <ProductCode>{5E1CB3C8-6F18-4C3F-9B64-5A9E2C6F8A9A}</ProductCode>
+      <UpgradeCode>{A4A02E74-8A6F-4C0D-9E3A-41F2E3E9E3EE}</UpgradeCode>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <BundleFiles Include="$(TargetDir)*.dll" />
+      <BundleFiles Include="$(TargetDir)Logos\*.png" />
+    </ItemGroup>
+
+    <RemoveDir Directories="$(BundleDir)" Condition="Exists('$(BundleDir)')" />
+    <MakeDir Directories="$(ContentsDir)" />
+    <Copy SourceFiles="@(BundleFiles)" DestinationFolder="$(ContentsDir)\" />
+    <ItemGroup>
+      <PackageLines Include="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;" />
+      <PackageLines Include="&lt;ApplicationPackage" />
+      <PackageLines Include="  xmlns:xsi=&quot;http://www.w3.org/2001/XMLSchema-instance&quot;" />
+      <PackageLines Include="  xmlns:xsd=&quot;http://www.w3.org/2001/XMLSchema&quot;" />
+      <PackageLines Include="  SchemaVersion=&quot;1.0&quot;" />
+      <PackageLines Include="  AutodeskProduct=&quot;Navisworks&quot;" />
+      <PackageLines Include="  ProductType=&quot;Application&quot;" />
+      <PackageLines Include="  Name=&quot;$(PluginName) by $(DevId)&quot;" />
+      <PackageLines Include="  Description=&quot;MicroEng Navisworks tools.&quot;" />
+      <PackageLines Include="  Author=&quot;$(DevId)&quot;" />
+      <PackageLines Include="  SupportedLocales=&quot;Enu&quot;" />
+      <PackageLines Include="  ProductCode=&quot;$(ProductCode)&quot;" />
+      <PackageLines Include="  UpgradeCode=&quot;$(UpgradeCode)&quot;&gt;" />
+      <PackageLines Include="  &lt;CompanyDetails Name=&quot;$(DevId)&quot; Url=&quot;https://example.com&quot; Email=&quot;support@example.com&quot;/&gt;" />
+      <PackageLines Include="  &lt;Components Description=&quot;Main plugin component&quot;&gt;" />
+      <PackageLines Include="    &lt;RuntimeRequirements OS=&quot;Win64&quot; Platform=&quot;NAVMAN|NAVSIM&quot; SeriesMin=&quot;Nw25&quot; SeriesMax=&quot;Nw25&quot; /&gt;" />
+      <PackageLines Include="    &lt;ComponentEntry AppName=&quot;$(PluginName)&quot; Version=&quot;1.0.0&quot; ModuleName=&quot;./Contents/$(AssemblyName).dll&quot; AppType=&quot;ManagedPlugin&quot; /&gt;" />
+      <PackageLines Include="  &lt;/Components&gt;" />
+      <PackageLines Include="&lt;/ApplicationPackage&gt;" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(BundleDir)\PackageContents.xml" Overwrite="true" Lines="@(PackageLines)" />
+    <Message Text="Plugin bundle created at $(BundleDir)" Importance="high" />
   </Target>
 
 </Project>

@@ -1,0 +1,4 @@
+C:\Users\Chris\Documents\VS_Code\RSS_Plugin\obj\Debug\AppendDataTool.csproj.AssemblyReference.cache
+C:\Users\Chris\Documents\VS_Code\RSS_Plugin\obj\Debug\UI\AppendDataControl.g.cs
+C:\Users\Chris\Documents\VS_Code\RSS_Plugin\obj\Debug\AppendDataTool_MarkupCompile.cache
+C:\Users\Chris\Documents\VS_Code\RSS_Plugin\obj\Debug\AppendDataTool_MarkupCompile.lref

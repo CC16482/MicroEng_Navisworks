@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>MicroEng.DesignHost</RootNamespace>
+    <AssemblyName>MicroEng.DesignHost</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MicroEng.Navisworks\MicroEng.Navisworks.csproj" />
+  </ItemGroup>
+</Project>

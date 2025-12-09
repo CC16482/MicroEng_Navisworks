@@ -14,9 +14,13 @@
 MicroEng_Navisworks
 +---MicroEng_Navisworks_tree.txt
 +---MicroEng.Navisworks
+|   +---AppendIntegrateDialog.cs
+|   +---AppendIntegrateExecutor.cs
+|   +---AppendIntegrateModels.cs
 |   +---Class1.cs
 |   +---MicroEng.Navisworks.csproj
-|   \---MicroEngPlugins.cs
+|   +---MicroEngPlugins.cs
+|   \---PropertyPickerDialog.cs
 \---ReferenceProjects
     +---NavisAddinManager-dev
     \---NavisLookup-dev
@@ -39,7 +43,7 @@ MicroEng_Navisworks
   - `NavisApiDir` (defaults to `C:\Program Files\Autodesk\Navisworks Manage 2025`)
   - `NavisPluginsDir` (defaults to `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins`)
 - AfterBuild copies the DLL to `$(NavisPluginsDir)\MicroEng.Navisworks\`.
-- Main code file: `MicroEng.Navisworks/MicroEngPlugins.cs`.
+- Main code files: `MicroEng.Navisworks/MicroEngPlugins.cs` (panel + add-ins) and `MicroEng.Navisworks/AppendIntegrate*.cs` (Append & Integrate Data dialog, execution, templates).
 
 ### Plugin entry points (do not rename IDs)
 - `AppendDataAddIn` -> `MicroEng.AppendData`
@@ -73,12 +77,20 @@ dotnet build `
 4. Run `MicroEng Panel` to show the dockable panel with the three buttons and log box.
 
 ## 7) Tool Behavior (current state)
-- Append Data: Checks current selection; if empty shows a friendly message. For each selected item it creates/reuses the `MicroEng` category and writes/updates a `Tag` string using the COM API (`ME-AUTO-{timestamp}`). Logs results to the docked log textbox (and Debug/Trace).
+- Append Data -> **Append & Integrate Data dialog**:
+  - Opens from the Append Data button in the MicroEng panel (and the Add-In command).
+  - Template bar: pick template, New/Copy/Rename/Delete/Save. Templates persist to `append_templates.json` beside the DLL.
+  - Standard tab: set Target Tab Name (default `MicroEng`); grid of rows (Target Property, Mode = Static/From Property/Expression, Source Property + picker, Static/Expression value, Option, Enabled).
+  - Property picker: uses first selected item to browse its categories/properties; writes the chosen path into the row.
+  - Advanced tab: apply to Items/Groups/Both; create/update target tab; delete blank properties/empty tab; apply to selection only; toggle internal property names for the picker.
+  - Options available (UI + template): None, ConvertToDecimal, ConvertToInteger, ConvertToDate, FormatAsText, SumGroupProperty, UseParentProperty, UseParentRevitProperty, ReadAllPropertiesFromTab, ParseExcelFormula, PerformCalculation, ConvertFromRevit (most are stubs for now; only FormatAsText behavior is applied, the rest are placeholders for future parity with iConstruct).
+  - Run: processes selection (or whole model if unchecked), creates/updates properties via COM API, applies simple FormatAsText handling, stubs the rest. Shows status + message box and logs summary to the docked log.
 - Reconstruct / Zone Finder: Placeholders; still show messages but ready for future logic.
 
 ## 8) Reference Projects (helpers only)
 - `ReferenceProjects/NavisAddinManager-dev`: Hot-load/unload add-ins, run commands, view Debug/Trace inside Navisworks.
 - `ReferenceProjects/NavisLookup-dev`: Inspect selections, properties, and Navisworks objects while developing.
+- Reference documents: `ReferenceDocuments/Append_Data_Instructions.txt` (feature spec) and `ReferenceDocuments/iConstruct_Pro_Append_Data_&_Integrator.docx` (iConstruct behaviors for parity ideas).
 
 ## 9) Roadmap / Next Steps
 - Zone Finder: add input (textbox/dropdown) on the panel and select items by property (Zone/Area/Level), then zoom to selection and log counts.

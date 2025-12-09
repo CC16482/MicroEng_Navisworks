@@ -1,0 +1,104 @@
+{
+  "version": 3,
+  "targets": {
+    ".NETFramework,Version=v4.8": {
+      "MicroEng.Navisworks/1.0.0": {
+        "type": "project",
+        "framework": ".NETFramework,Version=v4.8",
+        "compile": {
+          "bin/placeholder/MicroEng.Navisworks.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/MicroEng.Navisworks.dll": {}
+        }
+      }
+    },
+    ".NETFramework,Version=v4.8/win-x86": {
+      "MicroEng.Navisworks/1.0.0": {
+        "type": "project",
+        "framework": ".NETFramework,Version=v4.8",
+        "compile": {
+          "bin/placeholder/MicroEng.Navisworks.dll": {}
+        },
+        "runtime": {
+          "bin/placeholder/MicroEng.Navisworks.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "MicroEng.Navisworks/1.0.0": {
+      "type": "project",
+      "path": "../MicroEng.Navisworks/MicroEng.Navisworks.csproj",
+      "msbuildProject": "../MicroEng.Navisworks/MicroEng.Navisworks.csproj"
+    }
+  },
+  "projectFileDependencyGroups": {
+    ".NETFramework,Version=v4.8": [
+      "MicroEng.Navisworks >= 1.0.0"
+    ]
+  },
+  "packageFolders": {
+    "C:\\Users\\Chris\\.nuget\\packages\\": {},
+    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+  },
+  "project": {
+    "version": "1.0.0",
+    "restore": {
+      "projectUniqueName": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.DesignHost\\MicroEng.DesignHost.csproj",
+      "projectName": "MicroEng.DesignHost",
+      "projectPath": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.DesignHost\\MicroEng.DesignHost.csproj",
+      "packagesPath": "C:\\Users\\Chris\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.DesignHost\\obj\\",
+      "projectStyle": "PackageReference",
+      "fallbackFolders": [
+        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+      ],
+      "configFilePaths": [
+        "C:\\Users\\Chris\\AppData\\Roaming\\NuGet\\NuGet.Config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+      ],
+      "originalTargetFrameworks": [
+        "net48"
+      ],
+      "sources": {
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "C:\\Program Files\\dotnet\\library-packs": {},
+        "https://api.nuget.org/v3/index.json": {}
+      },
+      "frameworks": {
+        "net48": {
+          "targetAlias": "net48",
+          "projectReferences": {
+            "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\MicroEng.Navisworks.csproj": {
+              "projectPath": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\MicroEng.Navisworks.csproj"
+            }
+          }
+        }
+      },
+      "warningProperties": {
+        "warnAsError": [
+          "NU1605"
+        ]
+      },
+      "restoreAuditProperties": {
+        "enableAudit": "true",
+        "auditLevel": "low",
+        "auditMode": "direct"
+      },
+      "SdkAnalysisLevel": "10.0.100"
+    },
+    "frameworks": {
+      "net48": {
+        "targetAlias": "net48",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
+      }
+    },
+    "runtimes": {
+      "win-x86": {
+        "#import": []
+      }
+    }
+  }
+}

@@ -1,0 +1,155 @@
+<Window x:Class="MicroEng.Navisworks.AppendIntegrateDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MicroEng - Append &amp; Integrate Data"
+        Height="640" Width="900"
+        Background="#f5f7fb"
+        WindowStartupLocation="CenterOwner">
+  <Window.Resources>
+    <SolidColorBrush x:Key="BgPanel" Color="#f5f7fb" />
+    <SolidColorBrush x:Key="BgMuted" Color="#eef1f4" />
+    <SolidColorBrush x:Key="TextPrimary" Color="#111827" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#374151" />
+    <SolidColorBrush x:Key="Accent" Color="#8ba9d9" />
+    <SolidColorBrush x:Key="AccentStrong" Color="#6b89c9" />
+
+    <Style x:Key="PrimaryButton" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource Accent}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Padding" Value="10,6" />
+      <Setter Property="Margin" Value="4" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style x:Key="SecondaryButton" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource BgMuted}" />
+      <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+      <Setter Property="Padding" Value="8,6" />
+      <Setter Property="Margin" Value="4" />
+      <Setter Property="BorderBrush" Value="{StaticResource Accent}" />
+      <Setter Property="BorderThickness" Value="1" />
+    </Style>
+  </Window.Resources>
+
+  <Grid Margin="8">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- Template bar -->
+    <DockPanel Grid.Row="0" Margin="0,0,0,8" LastChildFill="False">
+      <TextBlock VerticalAlignment="Center" Text="Template:" Margin="0,0,6,0" />
+      <ComboBox x:Name="TemplateCombo" Width="220" SelectionChanged="TemplateCombo_SelectionChanged" />
+      <Button Content="New" Style="{StaticResource SecondaryButton}" Click="NewTemplate_Click" />
+      <Button Content="Copy" Style="{StaticResource SecondaryButton}" Click="CopyTemplate_Click" />
+      <Button Content="Rename" Style="{StaticResource SecondaryButton}" Click="RenameTemplate_Click" />
+      <Button Content="Delete" Style="{StaticResource SecondaryButton}" Click="DeleteTemplate_Click" />
+      <Button Content="Save" Style="{StaticResource PrimaryButton}" Click="SaveTemplate_Click" />
+    </DockPanel>
+
+    <!-- Tabs -->
+    <TabControl Grid.Row="1">
+      <TabItem Header="Standard">
+        <Grid Margin="8">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,8">
+            <TextBlock Text="Target Tab Name:" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <TextBox x:Name="TargetTabTextBox" Width="220" />
+          </StackPanel>
+
+          <DataGrid x:Name="RowsGrid"
+                    Grid.Row="1"
+                    AutoGenerateColumns="False"
+                    CanUserAddRows="False"
+                    CanUserDeleteRows="False"
+                    ItemsSource="{Binding Rows}"
+                    HeadersVisibility="Column">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Target Property Name" Binding="{Binding TargetPropertyName}" Width="160" />
+              <DataGridComboBoxColumn x:Name="ModeColumn"
+                                      Header="Mode"
+                                      SelectedItemBinding="{Binding Mode}"
+                                      Width="110" />
+              <DataGridTextColumn Header="Source Property" Binding="{Binding SourcePropertyLabel}" IsReadOnly="True" Width="170" />
+              <DataGridTemplateColumn Header="" Width="40">
+                <DataGridTemplateColumn.CellTemplate>
+                  <DataTemplate>
+                    <Button Content="..." Width="24" Height="22" Click="PickSource_Click" />
+                  </DataTemplate>
+                </DataGridTemplateColumn.CellTemplate>
+              </DataGridTemplateColumn>
+              <DataGridTextColumn Header="Static / Expression Value" Binding="{Binding StaticOrExpressionValue}" Width="160" />
+              <DataGridComboBoxColumn x:Name="OptionColumn"
+                                      Header="Option"
+                                      SelectedItemBinding="{Binding Option}"
+                                      Width="150" />
+              <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="60" />
+            </DataGrid.Columns>
+          </DataGrid>
+
+          <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
+            <Button Content="Add Row" Style="{StaticResource SecondaryButton}" Click="AddRow_Click" />
+            <Button Content="Delete Row" Style="{StaticResource SecondaryButton}" Click="DeleteRow_Click" />
+          </StackPanel>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Advanced">
+        <Grid Margin="12">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <GroupBox Header="Apply Property To" Grid.Column="0" Margin="0,0,8,8">
+            <StackPanel>
+              <RadioButton x:Name="ApplyItemsRadio" Content="Items" />
+              <RadioButton x:Name="ApplyGroupsRadio" Content="Groups" />
+              <RadioButton x:Name="ApplyBothRadio" Content="Items &amp; Groups" />
+            </StackPanel>
+          </GroupBox>
+
+          <GroupBox Header="Tab Creation / Update" Grid.Column="1" Margin="0,0,0,8">
+            <StackPanel>
+              <CheckBox x:Name="CreateTabCheck" Content="Create Target Tab if Not Existing" />
+              <CheckBox x:Name="KeepTabsCheck" Content="Keep Existing Tabs" />
+              <CheckBox x:Name="UpdateTabCheck" Content="Update Existing Target Tab" />
+              <CheckBox x:Name="DeleteBlankCheck" Content="Delete Property If Value Is Blank" />
+              <CheckBox x:Name="DeleteTabBlankCheck" Content="Delete Target Tab If All Values Blank" />
+            </StackPanel>
+          </GroupBox>
+
+          <GroupBox Header="Scope" Grid.Row="1" Grid.Column="0" Margin="0,0,8,0">
+            <StackPanel>
+              <CheckBox x:Name="ApplySelectionCheck" Content="Apply to Selection Only" />
+              <CheckBox x:Name="ShowInternalNamesCheck" Content="Show internal property names" />
+            </StackPanel>
+          </GroupBox>
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+    <!-- Bottom bar -->
+    <Grid Grid.Row="2" Margin="0,8,0,0">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}" />
+      <Button Grid.Column="1" Content="Run" Style="{StaticResource PrimaryButton}" Click="Run_Click" />
+      <Button Grid.Column="2" Content="Close" Style="{StaticResource SecondaryButton}" Click="Close_Click" />
+    </Grid>
+  </Grid>
+</Window>

@@ -1,0 +1,388 @@
+MicroEng – “Append & Integrate Data” UX Framework
+1. Concept
+
+One MicroEng tool that does both:
+
+Append Data (static):
+Push user‑defined key/value pairs into a target tab on items/groups (like iConstruct Append Data’s “Standard” tab). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Integrate Data (mapping):
+Pull values from existing properties (possibly multiple tabs) into a single custom tab with your own property names (like Integrator). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+All of this is handled through templates that can be saved and re‑used.
+
+2. Entry Point
+
+In the MicroEng dock panel, the existing “Append Data” button now opens a modal dialog:
+
+Title: MicroEng – Append & Integrate Data
+
+The simple “one property” behaviour we had before is replaced by this templated dialog.
+
+3. Dialog Layout
+
+Think of the dialog as 3 stacked areas:
+
+Template bar (top)
+
+Main configuration area (centre, with two tabs: Standard and Advanced)
+
+Run / Close + status (bottom)
+
+3.1 Template Bar
+
+Across the top, similar to iConstruct’s template bar: 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Template dropdown – Template: [ MyTemplate v1 ▼ ]
+
+Buttons:
+
+New – create empty template (prompt for name).
+
+Copy – duplicate current template (prompt for new name).
+
+Rename – rename current template.
+
+Delete – delete current template (with confirmation).
+
+Save – save changes to current template.
+
+(Exact icons don’t matter; Codex can use small text buttons or image buttons.)
+
+4. Standard Tab – Mix of Append + Integrate
+
+The Standard tab is where the user defines rows of properties to write to the target MicroEng tab.
+
+4.1 Global Target Tab
+
+At the top of the Standard tab:
+
+Target Tab Name:
+
+Label: Target Tab Name
+
+Control: TextBox (default: MicroEng)
+
+This is the custom data tab to be created/updated in Navisworks (Integrator’s “Target Tab Name”). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Optional later: allow blank → use template name.
+
+4.2 Property Grid
+
+Under Target Tab Name, a grid similar to iConstruct’s tables. Each row defines one MicroEng property:
+
+Columns (per row):
+
+Target Property Name
+
+TextBox.
+
+Default when adding from a source property: same as source name.
+
+Equivalent to Integrator’s New Property Name. 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Mode (how to get the value)
+
+ComboBox:
+
+Static Value
+
+From Property
+
+Expression (optional V1, but spec for future)
+
+This merges:
+
+Append Data’s typed “Property Value” entries.
+
+Integrator’s “pull from existing properties”.
+
+Source Property (for From Property / Expression)
+
+Read‑only TextBox + ... button.
+
+... button opens a property picker dialog:
+
+Shows properties of a sample item (like Integrator’s item/group tabs). User can select any property to map. 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Static / Expression Value
+
+For Static Value: user‑typed string (e.g. Work Package W01).
+
+For Expression: string that can contain keywords / formulas later (e.g. ${Element.Category} or Excel‑style formula; this is aligned with Integrator’s “Option” and “Parse Excel Formula” functionality for future growth). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Option (Transform) (Integrator‑style, optional for V1)
+
+ComboBox with options like:
+
+None
+
+Convert to Decimal
+
+Convert to Integer
+
+Convert to Date
+
+Format as Text
+
+Sum Group Property
+
+Use Parent Property
+
+Read All Properties From Tab
+
+Parse Excel Formula
+
+These correspond directly to the Integrator “Option” keywords listed in the PDF (convert/format/sum/parent/etc.). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+V1 implementation can support only a subset; but the UX supports the full list.
+
+Enabled
+
+Checkbox to temporarily disable a row without deleting it.
+
+Grid actions:
+
++ to add a new row.
+
+X to delete selected row.
+
+Optional: up/down to reorder rows.
+
+5. Property Picker (for “From Property”)
+
+When clicking ... in the Source Property column:
+
+Modal dialog: “Select Source Property”
+
+Left: tree/list of available tabs & properties for the sample item (like Integrator’s Item/Group tabs). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Option to switch between:
+
+Item properties
+
+Group properties
+
+Right: details or preview (optional).
+
+Bottom: OK / Cancel.
+
+When user hits OK:
+
+Source Property column gets something like:
+Item: Element > Category or Group: Zone > Area.
+
+6. Advanced Tab – Execution Behaviour
+
+The Advanced tab combines the Append Data “Advanced” options with Integrator’s configuration. 
+
+iConstruct_Pro_Append_Data_&_In…
+
+6.1 Apply To
+
+Apply Property To:
+
+Radio buttons:
+
+Items
+
+Groups
+
+Items & Groups
+
+Mirrors iConstruct Append Data’s “Apply Property To” selection. 
+
+iConstruct_Pro_Append_Data_&_In…
+
+6.2 Tab Creation / Update
+
+Checkboxes:
+
+Create Target Tab if Not Existing
+
+If checked: create the target tab when missing (Append Data’s “Create New Tab If Non‑Existent”). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Keep Existing Tabs
+
+Don’t delete or overwrite other user tabs (Append Data: “Keep Existing User Tabs”). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Update Existing Target Tab
+
+Behavior when the target tab already exists:
+
+If checked: update in place (Integrator’s “Update Existing Tab”). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+If unchecked: maybe new tab name variant or just append new fields; Codex can pick a sensible default.
+
+Delete Property If Value Is Blank
+
+If a computed/entered value is empty, remove that property from the target tab instead of writing an empty string. (Append Data option.) 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Delete Target Tab If All Values Blank
+
+If all properties in the tab end up blank, delete the tab entirely (Append Data option). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+6.3 Scope
+
+Apply to Selection Only (checkbox)
+
+Checked: process only CurrentSelection.
+
+Unchecked: process entire model (like Integrator’s “Apply to Selection Only” option). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+6.4 Display / Debug Options (optional V1)
+
+Show Internal Property Names (checkbox) – toggle between UI names and internal names in the property picker (Integrator setting). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+Log detailed row results (checkbox) – writes per‑row debug info to panel log.
+
+Out of scope for V1 UI, but slots reserved:
+
+Color & transparency overrides, saved viewpoint, icons (advanced Append Data features). 
+
+iConstruct_Pro_Append_Data_&_In…
+
+7. Bottom Bar – Run & Close
+
+At the bottom of the dialog:
+
+Run (primary button)
+
+Close (secondary button)
+
+Status line (read‑only label) – e.g. Ready, Processing 37 items…, Completed: 37 items processed.
+
+Basic behaviours:
+
+While running:
+
+Disable Run.
+
+Optionally show a simple progress (even just “Processing 10/37…” text).
+
+After completion:
+
+Show a brief MessageBox summary:
+
+Append & Integrate Data complete. Items processed: X, properties created: Y, updated: Z, removed: W.
+
+Log the same summary into the panel log.
+
+8. User Flows
+8.1 Create a New Template
+
+User opens Append & Integrate Data.
+
+Clicks New → enters template name → Standard tab starts empty.
+
+Sets Target Tab Name (e.g. ME_Data).
+
+Adds rows:
+
+Row 1: Target Property Name = "Work Package", Mode = Static Value, Value = WP01.
+
+Row 2: Target Property Name = "System", Mode = From Property, pick source Item: Element > System.
+
+Optionally sets options like Convert to Text for row 2.
+
+Goes to Advanced tab:
+
+Apply Property To: Items & Groups
+
+Create Target Tab if Not Existing = ON
+
+Apply to Selection Only = ON
+
+Update Existing Target Tab = ON
+
+Clicks Save.
+
+8.2 Run Template on Selection
+
+In Navisworks, user selects some model items.
+
+Opens MicroEng panel → clicks Append Data.
+
+Picks a template from dropdown.
+
+Clicks Run.
+
+Tool:
+
+Validates selection & template configuration.
+
+Applies mapping + static values.
+
+Creates/updates target tab on selected items/groups.
+
+User checks properties → sees combined static + integrated data under a single custom tab.
+
+8.3 Run Template on Whole Model
+
+User clears selection or intentionally leaves full model.
+
+In dialog, unchecks Apply to Selection Only.
+
+Clicks Run.
+
+Tool runs across entire model, applying same template everywhere.
+
+9. What You Want Codex To Implement
+
+You can now tell Codex:
+
+To extend the existing dialog/panel to match this UX:
+
+Template bar.
+
+Standard tab grid (target tab name + rows).
+
+Property picker UI.
+
+Advanced tab options.
+
+Run/Close with status.
+
+To back the dialog with a template model (C# class structure) that can be serialized to disk (JSON/XML) for persistence.
+
+To hook Run up to Navisworks API:
+
+Resolve current scope (selection vs whole model).
+
+For each item/group:
+
+Evaluate each enabled row (static/integration/expression + option).
+
+Write into the target tab, respecting advanced options (create tab, update tab, delete blank, etc.).

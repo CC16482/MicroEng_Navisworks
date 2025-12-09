@@ -1,0 +1,33 @@
+# Changelog
+- 2025-10-29 **1.1.2**
+    - Support Version 2026
+- 2025-03-06 **1.1.1**
+  - Support Version 2025
+  - Fix issue ribbon not show in Navisworks 2025
+- 2025-03-04 **1.1.0**
+  - Support Version 2025
+- 2023-04-13 **1.0.9**
+  - Support Version 2024
+- 2023-01-30 **1.0.8**
+  - Add support for Platform Navisworks Simulate, See detail at [Differences between Navisworks Manage and Navisworks Simulate](https://knowledge.autodesk.com/support/navisworks-products/troubleshooting/caas/sfdcarticles/sfdcarticles/Functionality-differences-between-Navisworks-Manage-and-Simulate.html)
+- 2022-12-21 **1.0.7**
+  - Fix issue load relative path with window parallel macOS.
+- 2022-10-11 **1.0.6**
+  - Improve user interface.
+- 2022-06-02 **1.0.5**
+  - Support event ArrowKeyDown and ArrowKeyUp to move between items search and TreeView 
+  - Support press key Esc from keyboard to close Form.
+- 2022-05-16 **1.0.4**
+  - Support copy Content Debug/Trace Output
+  - Fix bug can't use search and fill content form.
+- 2022-05-13 **1.0.3**
+  - Support Debug/Trace Output
+  - Support Dockpanel show/hide result Debug/Trace Output
+- 2022-04-21 **1.0.2**
+  - Support `Crt+MouseWheel` to ZoomIn ZoomOut Command Size
+- 2022-04-20 **1.0.1**
+  - Add panel test lab to try load assembly
+- 2022-04-19 **1.0.0**
+  - First Release.
+  - Support Navis Version : 2020,2021,2022,2023
+

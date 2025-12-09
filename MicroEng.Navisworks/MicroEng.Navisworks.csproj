@@ -1,0 +1,49 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Core project settings -->
+  <PropertyGroup>
+    <!-- Navisworks 2024+ uses .NET Framework 4.8 for .NET API plugins -->
+    <!-- This is a .NET Framework target, not .NET Core/.NET 8 -->
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>MicroEng.Navisworks</AssemblyName>
+    <RootNamespace>MicroEng.Navisworks</RootNamespace>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Platforms>x64</Platforms>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <!-- Default locations (override via msbuild /p:NavisApiDir=... if needed) -->
+  <PropertyGroup>
+    <!-- Adjust path if you use Simulate instead of Manage -->
+    <NavisApiDir Condition="'$(NavisApiDir)'==''">
+      C:\Program Files\Autodesk\Navisworks Manage 2025\api\dotnet
+    </NavisApiDir>
+
+    <NavisPluginsDir Condition="'$(NavisPluginsDir)'==''">
+      C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins
+    </NavisPluginsDir>
+  </PropertyGroup>
+
+  <!-- Navisworks API + WinForms -->
+  <ItemGroup>
+    <Reference Include="Autodesk.Navisworks.Api">
+      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Api.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Autodesk.Navisworks.Api.Interop.ComApi">
+      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Api.Interop.ComApi.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
+  <!-- After build, copy dll to Navisworks Plugins\<AssemblyName>\ -->
+  <!-- Folder name must match dll name for simple side-loading. -->
+  <!-- This follows the typical "side-loading" pattern many devs use. :contentReference[oaicite:4]{index=4} -->
+  <Target Name="AfterBuild">
+    <MakeDir Directories="$(NavisPluginsDir)\$(AssemblyName)" />
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(NavisPluginsDir)\$(AssemblyName)" />
+  </Target>
+
+</Project>

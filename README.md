@@ -36,7 +36,7 @@ MicroEng_Navisworks
 - Navisworks references: `Autodesk.Navisworks.Api.dll`, `Autodesk.Navisworks.Api.Interop.ComApi.dll`.
 - WinForms reference: `System.Windows.Forms`.
 - MSBuild properties (override with `/p:` if needed):
-  - `NavisApiDir` (defaults to `C:\Program Files\Autodesk\Navisworks Manage 2025\api\dotnet`)
+  - `NavisApiDir` (defaults to `C:\Program Files\Autodesk\Navisworks Manage 2025`)
   - `NavisPluginsDir` (defaults to `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins`)
 - AfterBuild copies the DLL to `$(NavisPluginsDir)\MicroEng.Navisworks\`.
 - Main code file: `MicroEng.Navisworks/MicroEngPlugins.cs`.
@@ -57,9 +57,10 @@ dotnet build
 - The build copies the DLL into `$(NavisPluginsDir)\MicroEng.Navisworks\`. Override paths at build time if Navisworks is installed elsewhere:
 ```powershell
 dotnet build `
-  /p:NavisApiDir="D:\Navisworks 2025\api\dotnet" `
+  /p:NavisApiDir="D:\Navisworks 2025" `
   /p:NavisPluginsDir="D:\Navisworks 2025\Plugins"
 ```
+- If you see “Could not resolve Autodesk.Navisworks.Api”, pass `NavisApiDir` explicitly as above (quotes required for spaces).
 
 ## 6) Running in Navisworks
 1. Build the project so the DLL is in the Plugins folder.

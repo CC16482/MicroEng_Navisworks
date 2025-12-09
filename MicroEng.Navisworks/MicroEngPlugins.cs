@@ -1,12 +1,47 @@
 using System;
+using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.Plugins;
 using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
 using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
+using NavisApp = Autodesk.Navisworks.Api.Application;
+using DrawingColor = System.Drawing.Color;
+using DrawingColorTranslator = System.Drawing.ColorTranslator;
 
 namespace MicroEng.Navisworks
 {
+    internal static class ThemeAssets
+    {
+        private static readonly string AssetRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logos");
+        private static readonly Lazy<Bitmap> _ribbonIcon = new(() => LoadBitmap("microeng_logotray.png"));
+        private static readonly Lazy<Bitmap> _headerLogo = new(() => LoadBitmap("microeng-logo2.png"));
+        public static DrawingColor BackgroundPanel => DrawingColorTranslator.FromHtml("#f5f7fb");
+        public static DrawingColor BackgroundMuted => DrawingColorTranslator.FromHtml("#eef1f4");
+        public static DrawingColor Accent => DrawingColorTranslator.FromHtml("#8ba9d9");
+        public static DrawingColor AccentStrong => DrawingColorTranslator.FromHtml("#6b89c9");
+        public static DrawingColor TextPrimary => DrawingColorTranslator.FromHtml("#111827");
+        public static DrawingColor TextSecondary => DrawingColorTranslator.FromHtml("#374151");
+
+        public static Font DefaultFont => new Font("Segoe UI", 9F, FontStyle.Regular);
+        public static Bitmap RibbonIcon => _ribbonIcon.Value;
+        public static Bitmap HeaderLogo => _headerLogo.Value;
+
+        private static Bitmap LoadBitmap(string fileName)
+        {
+            try
+            {
+                var path = Path.Combine(AssetRoot, fileName);
+                return File.Exists(path) ? (Bitmap)Image.FromFile(path) : null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
     // ========= Shared logic for the 3 tools =========
 
     internal static class MicroEngActions
@@ -18,7 +53,7 @@ namespace MicroEng.Navisworks
 
         public static void AppendData()
         {
-            var doc = Application.ActiveDocument;
+            var doc = NavisApp.ActiveDocument;
             if (doc == null)
             {
                 ShowInfo("No active document.");
@@ -55,7 +90,7 @@ namespace MicroEng.Navisworks
 
         public static void Reconstruct()
         {
-            var doc = Application.ActiveDocument;
+            var doc = NavisApp.ActiveDocument;
             if (doc == null)
             {
                 ShowInfo("No active document.");
@@ -68,7 +103,7 @@ namespace MicroEng.Navisworks
 
         public static void ZoneFinder()
         {
-            var doc = Application.ActiveDocument;
+            var doc = NavisApp.ActiveDocument;
             if (doc == null)
             {
                 ShowInfo("No active document.");
@@ -198,7 +233,7 @@ namespace MicroEng.Navisworks
             // e.g. "MicroEng.DockPane.MENG"
             const string dockPanePluginId = "MicroEng.DockPane.MENG";
 
-            var record = Application.Plugins.FindPlugin(dockPanePluginId);
+            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
             if (record == null)
             {
                 MessageBox.Show($"Could not find dock pane plugin '{dockPanePluginId}'.",
@@ -232,24 +267,69 @@ namespace MicroEng.Navisworks
         private readonly Button _reconstructButton;
         private readonly Button _zoneFinderButton;
         private readonly TextBox _logTextBox;
+        private readonly PictureBox _headerLogo;
 
         public MicroEngPanelControl()
         {
             Dock = DockStyle.Fill;
+            BackColor = ThemeAssets.BackgroundPanel;
+            Font = ThemeAssets.DefaultFont;
 
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 4,
+                RowCount = 5,
                 AutoSize = true
             };
+
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+
+            var headerPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = ThemeAssets.BackgroundMuted,
+                Padding = new Padding(10, 8, 10, 8),
+                Height = 56
+            };
+
+            _headerLogo = new PictureBox
+            {
+                Image = ThemeAssets.HeaderLogo,
+                SizeMode = PictureBoxSizeMode.Zoom,
+                Dock = DockStyle.Left,
+                Width = 140
+            };
+
+            var headerLabel = new Label
+            {
+                Text = "MicroEng Tools",
+                Dock = DockStyle.Fill,
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI Semibold", 11F, FontStyle.Bold),
+                ForeColor = ThemeAssets.TextPrimary,
+                Padding = new Padding(12, 0, 0, 0)
+            };
+
+            headerPanel.Controls.Add(headerLabel);
+            headerPanel.Controls.Add(_headerLogo);
 
             _appendDataButton = new Button
             {
                 Text = "Append Data",
-                Dock = DockStyle.Top
+                Dock = DockStyle.Top,
+                Font = ThemeAssets.DefaultFont,
+                BackColor = ThemeAssets.Accent,
+                ForeColor = DrawingColor.White,
+                FlatStyle = FlatStyle.Flat,
+                Height = 34
             };
+            _appendDataButton.FlatAppearance.BorderSize = 0;
+            _appendDataButton.FlatAppearance.MouseOverBackColor = ThemeAssets.AccentStrong;
             _appendDataButton.Click += (s, e) =>
             {
                 MicroEngActions.AppendData();
@@ -259,8 +339,14 @@ namespace MicroEng.Navisworks
             _reconstructButton = new Button
             {
                 Text = "Reconstruct",
-                Dock = DockStyle.Top
+                Dock = DockStyle.Top,
+                Font = ThemeAssets.DefaultFont,
+                BackColor = ThemeAssets.BackgroundMuted,
+                ForeColor = ThemeAssets.TextPrimary,
+                FlatStyle = FlatStyle.Flat,
+                Height = 34
             };
+            _reconstructButton.FlatAppearance.BorderColor = ThemeAssets.Accent;
             _reconstructButton.Click += (s, e) =>
             {
                 MicroEngActions.Reconstruct();
@@ -270,8 +356,14 @@ namespace MicroEng.Navisworks
             _zoneFinderButton = new Button
             {
                 Text = "Zone Finder",
-                Dock = DockStyle.Top
+                Dock = DockStyle.Top,
+                Font = ThemeAssets.DefaultFont,
+                BackColor = ThemeAssets.BackgroundMuted,
+                ForeColor = ThemeAssets.TextPrimary,
+                FlatStyle = FlatStyle.Flat,
+                Height = 34
             };
+            _zoneFinderButton.FlatAppearance.BorderColor = ThemeAssets.Accent;
             _zoneFinderButton.Click += (s, e) =>
             {
                 MicroEngActions.ZoneFinder();
@@ -283,13 +375,16 @@ namespace MicroEng.Navisworks
                 Dock = DockStyle.Fill,
                 Multiline = true,
                 ReadOnly = true,
-                ScrollBars = ScrollBars.Vertical
+                ScrollBars = ScrollBars.Vertical,
+                Font = ThemeAssets.DefaultFont,
+                BackColor = DrawingColor.White
             };
 
-            layout.Controls.Add(_appendDataButton, 0, 0);
-            layout.Controls.Add(_reconstructButton, 0, 1);
-            layout.Controls.Add(_zoneFinderButton, 0, 2);
-            layout.Controls.Add(_logTextBox, 0, 3);
+            layout.Controls.Add(headerPanel, 0, 0);
+            layout.Controls.Add(_appendDataButton, 0, 1);
+            layout.Controls.Add(_reconstructButton, 0, 2);
+            layout.Controls.Add(_zoneFinderButton, 0, 3);
+            layout.Controls.Add(_logTextBox, 0, 4);
 
             Controls.Add(layout);
 

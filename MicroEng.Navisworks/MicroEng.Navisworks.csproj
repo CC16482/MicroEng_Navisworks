@@ -10,18 +10,17 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Platforms>x64</Platforms>
     <LangVersion>latest</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <!-- Default locations (override via msbuild /p:NavisApiDir=... if needed) -->
   <PropertyGroup>
     <!-- Adjust path if you use Simulate instead of Manage -->
-    <NavisApiDir Condition="'$(NavisApiDir)'==''">
-      C:\Program Files\Autodesk\Navisworks Manage 2025\api\dotnet
-    </NavisApiDir>
+    <NavisApiDir Condition="'$(NavisApiDir)'==''">C:\Program Files\Autodesk\Navisworks Manage 2025</NavisApiDir>
+    <NavisPluginsDir Condition="'$(NavisPluginsDir)'==''">C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins</NavisPluginsDir>
 
-    <NavisPluginsDir Condition="'$(NavisPluginsDir)'==''">
-      C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins
-    </NavisPluginsDir>
+    <!-- Help ResolveAssemblyReference find Navisworks assemblies -->
+    <ResolveAssemblyReferenceAdditionalPaths>$(NavisApiDir);$(ResolveAssemblyReferenceAdditionalPaths)</ResolveAssemblyReferenceAdditionalPaths>
   </PropertyGroup>
 
   <!-- Navisworks API + WinForms -->
@@ -30,11 +29,24 @@
       <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Api.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="Autodesk.Navisworks.Api.Interop.ComApi">
-      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Api.Interop.ComApi.dll</HintPath>
+    <Reference Include="Autodesk.Navisworks.ComApi">
+      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.ComApi.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Autodesk.Navisworks.Interop.ComApi">
+      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Interop.ComApi.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <!-- Deploy logos alongside the plugin -->
+  <ItemGroup>
+    <Content Include="..\Logos\*.png">
+      <Link>Logos\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!-- After build, copy dll to Navisworks Plugins\<AssemblyName>\ -->

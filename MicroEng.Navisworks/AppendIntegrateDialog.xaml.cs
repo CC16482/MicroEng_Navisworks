@@ -1,5 +1,6 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Windows;
@@ -17,6 +18,7 @@ namespace MicroEng.Navisworks
         private ObservableCollection<AppendIntegrateTemplate> _templates;
         private AppendIntegrateTemplate _currentTemplate;
         private ObservableCollection<AppendIntegrateRow> _rowBinding;
+        private List<string> _dataProfiles = new();
 
         public Action<string> LogAction { get; set; }
 
@@ -39,6 +41,7 @@ namespace MicroEng.Navisworks
             LoadTemplateIntoUi(_currentTemplate);
             ModeColumn.ItemsSource = Enum.GetValues(typeof(AppendValueMode));
             OptionColumn.ItemsSource = Enum.GetValues(typeof(AppendValueOption));
+            RefreshDataProfiles();
         }
 
         private void TemplateCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -263,6 +266,41 @@ namespace MicroEng.Navisworks
             Grid.SetRow(buttons, 2);
             dialog.Content = panel;
             return dialog.ShowDialog() == true ? box.Text : null;
+        }
+
+        private void RefreshDataProfiles()
+        {
+            _dataProfiles = DataScraperCache.AllSessions
+                .Select(s => string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n)
+                .ToList();
+            DataProfileCombo.ItemsSource = _dataProfiles;
+            if (_dataProfiles.Any())
+            {
+                DataProfileCombo.SelectedItem = _dataProfiles.First();
+                SetLastSessionFromProfile(_dataProfiles.First());
+            }
+        }
+
+        private void DataProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            var selected = DataProfileCombo.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(selected)) return;
+            SetLastSessionFromProfile(selected);
+        }
+
+        private void SetLastSessionFromProfile(string profileName)
+        {
+            var latest = DataScraperCache.AllSessions
+                .Where(s => string.Equals(string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName, profileName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(s => s.Timestamp)
+                .FirstOrDefault();
+            if (latest != null)
+            {
+                DataScraperCache.LastSession = latest;
+                StatusText.Text = $"Using Data Scraper profile '{profileName}' (cached {latest.Timestamp:T}).";
+            }
         }
     }
 }

@@ -70,12 +70,14 @@
             Padding="12">
         <Grid>
             <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
             <Border Grid.Row="0"
@@ -105,7 +107,7 @@
             </Border>
 
             <Button Grid.Row="1"
-                    Content="Append Data"
+                    Content="Data Mapper"
                     Style="{StaticResource PrimaryButton}"
                     Click="AppendData_Click" />
 
@@ -124,13 +126,18 @@
                     Style="{StaticResource SecondaryButton}"
                     Click="DataScraper_Click" />
 
-            <TextBlock Grid.Row="5"
+            <Button Grid.Row="5"
+                    Content="Data Matrix"
+                    Style="{StaticResource SecondaryButton}"
+                    Click="DataMatrix_Click" />
+
+            <TextBlock Grid.Row="6"
                        Text="Log"
                        Foreground="{StaticResource TextSecondary}"
                        FontWeight="Bold"
                        Margin="0,8,0,4" />
 
-            <TextBox Grid.Row="6"
+            <TextBox Grid.Row="7"
                      x:Name="LogTextBox"
                      Text="Ready"
                      AcceptsReturn="True"

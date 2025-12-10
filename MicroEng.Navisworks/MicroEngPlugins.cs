@@ -62,8 +62,8 @@ namespace MicroEng.Navisworks
             }
             catch (Exception ex)
             {
-                Log($"AppendData dialog failed: {ex}");
-                MessageBox.Show($"Append & Integrate Data failed to open: {ex.Message}", "MicroEng",
+                Log($"Data Mapper dialog failed: {ex}");
+                MessageBox.Show($"Data Mapper failed to open: {ex.Message}", "MicroEng",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -124,7 +124,7 @@ namespace MicroEng.Navisworks
             }
             catch (Exception ex)
             {
-                Log($"AppendData: failed for '{item.DisplayName}': {ex.Message}");
+                Log($"Data Mapper write failed for '{item.DisplayName}': {ex.Message}");
                 return false;
             }
         }
@@ -134,13 +134,35 @@ namespace MicroEng.Navisworks
             System.Diagnostics.Trace.WriteLine($"[MicroEng] {message}");
             LogMessage?.Invoke(message);
         }
+
+        public static void DataMatrix()
+        {
+            const string dockPanePluginId = "MicroEng.DataMatrix.DockPane.MENG";
+            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find Data Matrix dock pane plugin '{dockPanePluginId}'.",
+                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!record.IsLoaded)
+            {
+                record.LoadPlugin();
+            }
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+            {
+                pane.Visible = true;
+            }
+        }
     }
 
     // ========= Standalone Add-In commands (nice for NavisAddinManager testing) =========
 
     [Plugin("MicroEng.AppendData", "MENG",
-        DisplayName = "MicroEng Append Data",
-        ToolTip = "Append data to the current selection.")]
+        DisplayName = "MicroEng Data Mapper",
+        ToolTip = "Map and append data to the current selection.")]
     [AddInPlugin(AddInLocation.AddIn)]
     public class AppendDataAddIn : AddInPlugin
     {

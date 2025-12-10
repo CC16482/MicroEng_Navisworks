@@ -15,6 +15,7 @@ namespace MicroEng.Navisworks
         private ScrapeScopeType _lastScope = ScrapeScopeType.CurrentSelection;
         private string _lastSelectionSet;
         private string _lastSearchSet;
+        private List<RawRow> _rawRows = new();
 
         public DataScraperWindow()
         {
@@ -62,14 +63,8 @@ namespace MicroEng.Navisworks
 
         private void RefreshProfile()
         {
-            var profileFilter = ProfileNameBox?.Text?.Trim();
+            // Always show the latest run for each unique profile (no filter)
             var sessions = DataScraperCache.AllSessions.AsEnumerable();
-            if (!string.IsNullOrWhiteSpace(profileFilter))
-            {
-                sessions = sessions.Where(s => string.Equals(s.ProfileName, profileFilter, StringComparison.OrdinalIgnoreCase));
-            }
-
-            // get latest per profile
             var latestPerProfile = sessions
                 .GroupBy(s => string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.OrderByDescending(s => s.Timestamp).First())
@@ -141,6 +136,20 @@ namespace MicroEng.Navisworks
                 .ToList();
             PropertiesGrid.ItemsSource = _currentProperties;
             PropertySummary.Text = $"{_currentProperties.Count} properties from session {session.Timestamp:T}";
+
+            _rawRows = session.RawEntries
+                .Select(r => new RawRow
+                {
+                    Profile = r.Profile,
+                    Scope = r.Scope,
+                    ItemPath = r.ItemPath,
+                    Category = r.Category,
+                    Name = r.Name,
+                    DataType = r.DataType,
+                    Value = r.Value
+                }).ToList();
+            RawDataGrid.ItemsSource = _rawRows;
+            RawSummaryText.Text = $"{_rawRows.Count} raw entries.";
         }
 
         private void FilterBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -158,6 +167,26 @@ namespace MicroEng.Navisworks
                                 p.Category.IndexOf(text, StringComparison.OrdinalIgnoreCase) >= 0)
                     .ToList();
             }
+        }
+
+        private void RawFilterBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_rawRows == null) return;
+            var text = RawFilterBox.Text?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(text))
+            {
+                RawDataGrid.ItemsSource = _rawRows;
+            }
+            else
+            {
+                RawDataGrid.ItemsSource = _rawRows
+                    .Where(r => (r.Category?.IndexOf(text, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0
+                             || (r.Name?.IndexOf(text, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0
+                             || (r.Value?.IndexOf(text, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0
+                             || (r.ItemPath?.IndexOf(text, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0)
+                    .ToList();
+            }
+            RawSummaryText.Text = $"{(RawDataGrid.ItemsSource as System.Collections.ICollection)?.Count} raw entries.";
         }
 
         private void Rerun_Click(object sender, RoutedEventArgs e)
@@ -196,7 +225,7 @@ namespace MicroEng.Navisworks
 
         private void ProfileNameBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            RefreshProfile();
+            // Profile name text is used when running a scrape; it no longer filters the Profile tab.
         }
 
         private void SelectionSetRadio_Checked(object sender, RoutedEventArgs e)
@@ -235,5 +264,16 @@ namespace MicroEng.Navisworks
         public int ItemCount { get; }
         public int DistinctValueCount { get; }
         public string SampleValuesString { get; }
+    }
+
+    internal class RawRow
+    {
+        public string Profile { get; set; }
+        public string Scope { get; set; }
+        public string ItemPath { get; set; }
+        public string Category { get; set; }
+        public string Name { get; set; }
+        public string DataType { get; set; }
+        public string Value { get; set; }
     }
 }

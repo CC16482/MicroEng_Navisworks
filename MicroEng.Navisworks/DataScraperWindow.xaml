@@ -139,6 +139,28 @@
           <TextBlock x:Name="PropertySummary" Grid.Row="2" Margin="0,6,0,0" Foreground="{StaticResource TextSecondary}" />
         </Grid>
       </TabItem>
+      <TabItem Header="Raw Data">
+        <Grid Margin="6">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <TextBox x:Name="RawFilterBox" Grid.Row="0" Margin="0,0,0,6" TextChanged="RawFilterBox_TextChanged" />
+          <DataGrid x:Name="RawDataGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Profile" Binding="{Binding Profile}" Width="100" />
+              <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="140" />
+              <DataGridTextColumn Header="Item" Binding="{Binding ItemPath}" Width="180" />
+              <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="150" />
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="180" />
+              <DataGridTextColumn Header="Type" Binding="{Binding DataType}" Width="100" />
+              <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*" />
+            </DataGrid.Columns>
+          </DataGrid>
+          <TextBlock x:Name="RawSummaryText" Grid.Row="2" Margin="0,6,0,0" Foreground="{StaticResource TextSecondary}" />
+        </Grid>
+      </TabItem>
     </TabControl>
 
     <Grid Grid.Row="2">

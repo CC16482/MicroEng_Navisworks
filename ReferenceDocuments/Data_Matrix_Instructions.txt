@@ -1,0 +1,494 @@
+1. Big Picture: Data Matrix on top of Data Scraper
+
+Key rule:
+👉 Data Matrix never re‑scans Navisworks.
+It always builds its grid from DataScraperCache.
+
+You already have:
+
+DataScraperCache.AllSessions – all ScrapeSession runs in this NW session.
+
+DataScraperCache.LastSession – current “active” ScrapeSession.
+
+Each ScrapeSession has:
+
+ProfileName (e.g. ME_Zones, ME_Elec, Default).
+
+ScopeType, ScopeDescription, ItemsScanned.
+
+Properties = distinct catalog of properties per profile.
+
+RawEntries = flat rows with:
+
+item identifier (path or similar)
+
+category (tab)
+
+property name
+
+data type
+
+value
+
+Data Matrix will:
+
+Use ScrapeSessions as its data source.
+
+Pivot ScrapeSession.RawEntries into one row per item, one column per attribute.
+
+Use the property catalog from ScrapeSession.Properties to define columns.
+
+So:
+
+Data Scraper = scanner + cache
+Data Matrix = pivot + viewer + editor
+
+2. Data Matrix Active Source Concept
+
+Instead of inventing a new “data profile” layer, we treat Data Scraper Profile Names as Data Matrix’s data source.
+
+2.1 Source selection in the UI
+
+At the top of Data Matrix:
+
+Data Source (Scraper Profile): [ ME_Zones ▼ ]
+
+Items = distinct ProfileName values from DataScraperCache.AllSessions, ideally showing timestamp of latest run.
+
+When user selects a profile:
+
+Data Matrix finds the latest ScrapeSession for that ProfileName.
+
+Sets DataScraperCache.LastSession to that session (so Append Data / Integrator stay in sync).
+
+Rebuilds the grid from that ScrapeSession.
+
+If no ScrapeSessions exist:
+
+Show a friendly message in the panel:
+
+“No Data Scraper sessions found. Run Data Scraper first to populate the cache.”
+
+Disable grid + view preset controls.
+
+3. Data Models (updated to rely on ScrapeSession)
+
+We keep the Data Matrix models, but they derive everything from ScrapeSession.
+
+3.1 Attribute definition
+
+Each column corresponds to a “normalised attribute”, which is really a unique (Category, PropertyName) pair from ScrapeSession.Properties.
+
+public class DataMatrixAttributeDefinition
+{
+    // Stable key – use Category + PropertyName from the ScrapeSession property catalog
+    public string Id { get; set; }             // e.g. "Element|Level"
+
+    // Friendly info
+    public string Category { get; set; }       // e.g. "Element"
+    public string PropertyName { get; set; }   // e.g. "Level"
+    public string DisplayName { get; set; }    // default "Level" or "Element: Level"
+
+    public Type DataType { get; set; }         // typeof(string), typeof(double), etc.
+
+    // View behaviour
+    public bool IsEditable { get; set; }       // true if profile allows editing
+    public bool IsVisibleByDefault { get; set; }
+    public int DefaultWidth { get; set; }      // px
+    public int DisplayOrder { get; set; }      // default column order
+}
+
+
+In V1, you can auto‑build these from ScrapeSession.Properties and later let the user tweak defaults.
+
+3.2 View presets (unchanged concept)
+
+View preset = saved view for a given Scraper ProfileName:
+
+public enum SortDirection { None, Ascending, Descending }
+
+public class DataMatrixSortDefinition
+{
+    public string AttributeId { get; set; }
+    public SortDirection Direction { get; set; }
+    public int Priority { get; set; } // 0 = primary sort key
+}
+
+public enum DataMatrixFilterOperator
+{
+    None,
+    Contains,
+    Equals,
+    NotEquals,
+    GreaterThan,
+    LessThan,
+    Blank,
+    NotBlank,
+    InList
+}
+
+public class DataMatrixColumnFilter
+{
+    public string AttributeId { get; set; }
+    public DataMatrixFilterOperator Operator { get; set; }
+    public string? Value { get; set; }            // for text/number/date
+    public List<string>? ValuesList { get; set; } // for InList
+}
+
+// View preset is now tied to a Data Scraper profile name:
+public class DataMatrixViewPreset
+{
+    public string Id { get; set; }                     // GUID/string
+    public string Name { get; set; }                   // "QA – Missing IDs"
+    public string ScraperProfileName { get; set; }     // "ME_Zones"
+
+    public List<string> VisibleAttributeIds { get; set; } = new();
+    public List<DataMatrixSortDefinition> SortDefinitions { get; set; } = new();
+    public List<DataMatrixColumnFilter> Filters { get; set; } = new();
+}
+
+
+So:
+
+Data Scraper profile decides the attribute universe.
+
+Data Matrix view preset decides which columns, sort & filters.
+
+3.3 Rows built from ScrapeSession.RawEntries
+
+We pivot RawEntries into one row per logical item.
+
+Assuming a raw entry type like:
+
+public class ScrapedRawEntry
+{
+    public string ProfileName { get; set; }
+    public string ScopeType { get; set; }
+    public string ScopeDescription { get; set; }
+
+    public string ItemKey { get; set; }              // stable per item (e.g. path)
+    public string ItemDisplayName { get; set; }      // e.g. model item display name
+
+    public string Category { get; set; }
+    public string PropertyName { get; set; }
+    public string DataTypeName { get; set; }         // "String", "Double", etc.
+    public string? ValueAsString { get; set; }       // serialised value
+}
+
+
+Data Matrix row:
+
+public class DataMatrixRow
+{
+    // Key to re-find ModelItem later
+    public string ItemKey { get; set; }
+    public string ElementDisplayName { get; set; }
+
+    // Optional: resolved lazy Navisworks ModelItem
+    public Autodesk.Navisworks.Api.ModelItem? ModelItem { get; set; }
+
+    // Values keyed by AttributeDefinition.Id ("Category|PropertyName")
+    public Dictionary<string, object?> Values { get; set; } = new();
+}
+
+
+Row building algorithm for a given ScrapeSession:
+
+Build a map of attribute definitions:
+
+var attributesById = BuildAttributeDefinitions(scrapeSession); 
+// from scrapeSession.Properties
+
+
+Group RawEntries by ItemKey:
+
+var rowsByItemKey = new Dictionary<string, DataMatrixRow>();
+
+foreach (var entry in scrapeSession.RawEntries)
+{
+    if (!rowsByItemKey.TryGetValue(entry.ItemKey, out var row))
+    {
+        row = new DataMatrixRow
+        {
+            ItemKey = entry.ItemKey,
+            ElementDisplayName = entry.ItemDisplayName
+        };
+        rowsByItemKey.Add(entry.ItemKey, row);
+    }
+
+    var attrId = $"{entry.Category}|{entry.PropertyName}";
+    // optional: check attr exists in attributesById
+    object? typedValue = ConvertFromString(entry.ValueAsString, entry.DataTypeName);
+    row.Values[attrId] = typedValue;
+}
+
+var allRows = rowsByItemKey.Values.ToList();
+
+
+That allRows collection is what you bind your grid to.
+
+Note: if Data Scraper doesn’t currently expose ItemKey/ItemDisplayName, you can extend it or have Codex add those fields to RawEntries.
+
+4. Data Matrix UI (adapted for Scraper)
+4.1 Top toolbar
+
+On DataMatrixPanel:
+
+Data Source: [ ME_Zones ▼ ]
+
+Populated from DataScraperCache.AllSessions.Select(s => s.ProfileName).Distinct().
+
+When changed → pick latest ScrapeSession with that ProfileName.
+
+View: [ (Default) ▼ ] + [Save] [Save As] [Delete]
+
+Presets for that ScraperProfileName.
+
+Buttons:
+
+Columns… – column chooser based on DataMatrixAttributeDefinition for the current ScrapeSession.
+
+Sync selection toggle.
+
+Selected only checkbox (quick filter).
+
+Export ▼ → Filtered to CSV…, All to CSV…, Filtered to Excel… (stub OK).
+
+If DataScraperCache.AllSessions is empty, disable everything and show a message.
+
+4.2 Grid
+
+DataGridView (WinForms) using BindingList<DataMatrixRow>.
+
+Columns created from current attribute definitions for the selected ScrapeSession:
+
+Column name = attribute.DisplayName.
+
+DataPropertyName can be e.g. the attribute Id, but since Values is a dictionary, you can use CellFormatting / CellParsing events to bridge.
+
+Features:
+
+Column reordering via drag & drop.
+
+Visibility toggling via Columns dialog.
+
+Clicking header toggles sort (None → Asc → Desc), with Shift + click for multi-column.
+
+Filter button or header context menu per column to configure DataMatrixColumnFilter.
+
+Filtering is always applied to the full row list for that ScrapeSession.
+
+4.3 Status bar
+
+E.g.:
+
+Rows: 3,215 (filtered from 12,340) | Data Source: ME_Zones | View: QA – Missing IDs
+
+5. Selection Sync (using Scraper data)
+5.1 Grid → Navisworks
+
+When Sync selection is ON:
+
+On grid SelectionChanged:
+
+For each selected DataMatrixRow, we need a ModelItem.
+
+Options (depending on what Data Scraper stored):
+
+If RawEntry has a ModelItem, or DataMatrixRow already holds one:
+
+Use it directly.
+
+If RawEntry only has an ItemPath:
+
+Use Navisworks API to resolve it:
+
+var doc = Application.ActiveDocument;
+var path = ComApiBridge.ToInwOaPath(row.ItemKey); // or your own helper
+var modelItem = doc.ResolveModelPath(path);
+
+
+Whatever pattern you choose, once you have all ModelItems:
+
+var collection = new ModelItemCollection(modelItems);
+doc.CurrentSelection.CopyFrom(collection);
+// Optionally:
+doc.ActiveView?.FocusOnCurrentSelection();
+
+5.2 Navisworks → Grid
+
+If you want two-way sync:
+
+Listen to selection changed events.
+
+For each selected ModelItem, compute its ItemKey (the same key Data Scraper used).
+
+Find matching DataMatrixRow by row.ItemKey.
+
+Select those rows in the grid.
+
+If “Selected only” is checked, show only those rows in the grid (quick filter).
+
+6. Inline Editing with Scraper in mind
+
+Editing flows shouldn’t change Data Scraper’s snapshot (it’s historical), they should edit the actual model, and you can optionally re-run Data Scraper if you want refreshed metadata later.
+
+For editable attributes (IsEditable = true):
+
+User edits a cell.
+
+Data Matrix:
+
+Updates row.Values[attributeId].
+
+Calls a writer to push the change into Navisworks:
+
+public interface IDataMatrixWriter
+{
+    void ApplyCellEdit(DataMatrixAttributeDefinition attribute,
+                       DataMatrixRow row,
+                       object? newValue);
+}
+
+
+Inside this writer:
+
+Resolve ModelItem for row if not already present.
+
+Use attribute.Category + attribute.PropertyName to update that property on the ModelItem using Navisworks API (managed or COM).
+
+Highlight the edited cell temporarily (e.g. yellow background).
+
+Optionally show a flag in the status bar: 3 edits not yet re-scraped.
+
+Important: Data Scraper’s ScrapeSession is not auto-updated; it’s a snapshot. If you want Data Matrix and Append Data to “see” the new values in their metadata, you run Data Scraper again for that profile.
+
+7. View Presets with Scraper Profiles
+
+Now:
+
+ViewPresets are per Scraper ProfileName, not global.
+
+Use something like:
+
+public interface IDataMatrixViewPresetManager
+{
+    IEnumerable<DataMatrixViewPreset> GetPresets(string scraperProfileName);
+    DataMatrixViewPreset? GetPreset(string scraperProfileName, string presetId);
+    void SavePreset(DataMatrixViewPreset preset);
+    void DeletePreset(string scraperProfileName, string presetId);
+}
+
+
+Storage:
+
+In-memory to start.
+
+Optional JSON persistence: e.g.
+
+%AppData%\MicroEng\Navisworks\DataMatrix\ME_Zones.presets.json
+
+
+When user switches Data Source (Scraper profile), you:
+
+Rebuild rows from the new ScrapeSession.
+
+Load presets for that profile.
+
+Apply the selected preset (or a default one).
+
+8. Export (built on current grid view)
+
+Nothing changes conceptually, just remember all data is from ScrapeSession:
+
+Export Filtered:
+
+Use current visible, filtered DataMatrixRow list and visible columns.
+
+Export All:
+
+Use all rows for the current ScrapeSession and all columns (or all visible columns only, your choice).
+
+Include metadata like:
+
+Scraper profile name
+
+Scope description
+
+Scrape timestamp
+
+View preset name
+
+Export timestamp
+
+9. Dock Pane & Panel Skeleton (same idea, now with Scraper awareness)
+
+If you don’t already have it, something like this in DataMatrixPlugins.cs:
+
+using System.Windows.Forms;
+using Autodesk.Navisworks.Api;
+using Autodesk.Navisworks.Api.Plugins;
+
+namespace MicroEng.Navisworks
+{
+    [Plugin("MicroEng.DataMatrix.DockPane", "MENG",
+        DisplayName = "MicroEng Data Matrix",
+        ToolTip = "Tabular view of scraped model data.")]
+    [DockPanePlugin(800, 400)]
+    public class DataMatrixDockPane : DockPanePlugin
+    {
+        private DataMatrixPanel _panel;
+
+        public override Control CreateControlPane()
+        {
+            _panel = new DataMatrixPanel();
+            return _panel;
+        }
+
+        public override void DestroyControlPane(Control pane)
+        {
+            _panel?.Dispose();
+            _panel = null;
+            base.DestroyControlPane(pane);
+        }
+    }
+
+    [Plugin("MicroEng.DataMatrix.Command", "MENG",
+        DisplayName = "Data Matrix",
+        ToolTip = "Show/hide the MicroEng Data Matrix panel.")]
+    [AddInPlugin(AddInLocation.AddIn)]
+    public class DataMatrixCommand : AddInPlugin
+    {
+        public override int Execute(params string[] parameters)
+        {
+            const string paneId = "MicroEng.DataMatrix.DockPane.MENG";
+
+            var record = Application.Plugins.FindPlugin(paneId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find Data Matrix dock pane plugin '{paneId}'.",
+                    "MicroEng Data Matrix",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return 0;
+            }
+
+            if (!record.IsLoaded)
+                record.LoadPlugin();
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+                pane.Visible = !pane.Visible;
+
+            return 0;
+        }
+    }
+
+    public class DataMatrixPanel : UserControl
+    {
+        // Codex will fill this in.
+        public DataMatrixPanel()
+        {
+            Dock = DockStyle.Fill;
+        }
+    }
+}

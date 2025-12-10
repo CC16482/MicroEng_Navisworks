@@ -27,10 +27,12 @@ namespace MicroEng.Navisworks
             };
 
             var propertyMap = new Dictionary<string, ScrapedProperty>(StringComparer.OrdinalIgnoreCase);
+            var raw = new List<RawEntry>();
 
             foreach (var item in items)
             {
                 session.ItemsScanned++;
+                var itemPath = item.TryGetDisplayName();
                 foreach (var category in item.PropertyCategories)
                 {
                     if (category == null) continue;
@@ -53,23 +55,33 @@ namespace MicroEng.Navisworks
                         }
                         sp.ItemCount++;
 
+                        string display = string.Empty;
                         try
                         {
-                            var display = prop.Value?.IsDisplayString == true
+                            display = prop.Value?.IsDisplayString == true
                                 ? prop.Value.ToDisplayString()
                                 : prop.Value?.ToString();
-                            if (!string.IsNullOrWhiteSpace(display) && !sp.SampleValues.Contains(display))
+                            if (!string.IsNullOrWhiteSpace(display) && !sp.SampleValues.Contains(display) && sp.SampleValues.Count < 10)
                             {
-                                if (sp.SampleValues.Count < 10)
-                                {
-                                    sp.SampleValues.Add(display);
-                                }
+                                sp.SampleValues.Add(display);
                             }
                         }
                         catch
                         {
                             // ignore sample capture errors
                         }
+
+                        raw.Add(new RawEntry
+                        {
+                            Profile = profileName,
+                            Scope = scopeDescription,
+                            ItemKey = item.InstanceGuid.ToString(),
+                            ItemPath = itemPath,
+                            Category = cat,
+                            Name = name,
+                            DataType = prop.Value?.DataType.ToString() ?? "Unknown",
+                            Value = display
+                        });
                     }
                 }
             }
@@ -80,6 +92,7 @@ namespace MicroEng.Navisworks
             }
 
             session.Properties = propertyMap.Values.OrderBy(p => p.Category).ThenBy(p => p.Name).ToList();
+            session.RawEntries = raw;
             DataScraperCache.AddSession(session);
             return session;
         }
@@ -128,6 +141,22 @@ namespace MicroEng.Navisworks
                     foreach (var child in Traverse(item.Children))
                         yield return child;
                 }
+            }
+        }
+
+    }
+
+    internal static class ModelItemExtensions
+    {
+        public static string TryGetDisplayName(this ModelItem item)
+        {
+            try
+            {
+                return item?.DisplayName ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
             }
         }
     }

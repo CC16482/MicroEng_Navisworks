@@ -19,9 +19,9 @@ namespace MicroEng.Navisworks
 
         private void AppendData_Click(object sender, RoutedEventArgs e)
         {
-            LogToPanel("Opening Append & Integrate Data dialog...");
+            LogToPanel("Opening Data Mapper...");
             MicroEngActions.AppendData();
-            LogToPanel("Append & Integrate Data dialog closed.");
+            LogToPanel("Data Mapper closed.");
         }
 
         private void Reconstruct_Click(object sender, RoutedEventArgs e)
@@ -48,6 +48,20 @@ namespace MicroEng.Navisworks
             {
                 LogToPanel($"[Data Scraper] failed to open: {ex.Message}");
                 System.Windows.MessageBox.Show($"Data Scraper failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void DataMatrix_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                MicroEngActions.DataMatrix();
+            }
+            catch (Exception ex)
+            {
+                LogToPanel($"[Data Matrix] failed to open: {ex.Message}");
+                System.Windows.MessageBox.Show($"Data Matrix failed to open: {ex.Message}", "MicroEng",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }

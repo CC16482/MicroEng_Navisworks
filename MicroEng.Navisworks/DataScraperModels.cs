@@ -23,12 +23,26 @@ namespace MicroEng.Navisworks
         public string ScopeDescription { get; set; }
         public int ItemsScanned { get; set; }
         public List<ScrapedProperty> Properties { get; set; } = new();
+        public List<RawEntry> RawEntries { get; set; } = new();
+    }
+
+    internal class RawEntry
+    {
+        public string Profile { get; set; }
+        public string Scope { get; set; }
+        public string ItemKey { get; set; }
+        public string ItemPath { get; set; }
+        public string Category { get; set; }
+        public string Name { get; set; }
+        public string DataType { get; set; }
+        public string Value { get; set; }
     }
 
     internal static class DataScraperCache
     {
         public static ScrapeSession LastSession { get; set; }
         public static List<ScrapeSession> AllSessions { get; } = new();
+        public static event Action<ScrapeSession> SessionAdded;
 
         public static IEnumerable<string> GetAllPropertyNames()
         {
@@ -46,6 +60,7 @@ namespace MicroEng.Navisworks
         {
             LastSession = session;
             AllSessions.Add(session);
+            SessionAdded?.Invoke(session);
         }
     }
 }

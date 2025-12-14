@@ -1,0 +1,88 @@
+<UserControl x:Class="MicroEng.Navisworks.DataMatrixControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="600"
+             d:DesignWidth="900"
+             Background="#f5f7fb">
+    <UserControl.Resources>
+        <SolidColorBrush x:Key="BgPanel" Color="#f5f7fb" />
+        <SolidColorBrush x:Key="BgMuted" Color="#eef1f4" />
+        <SolidColorBrush x:Key="TextPrimary" Color="#111827" />
+        <SolidColorBrush x:Key="TextSecondary" Color="#374151" />
+        <SolidColorBrush x:Key="Accent" Color="#8ba9d9" />
+
+        <Style x:Key="SecondaryButton" TargetType="Button">
+            <Setter Property="Background" Value="{StaticResource BgMuted}" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+            <Setter Property="Padding" Value="8,6" />
+            <Setter Property="Margin" Value="4" />
+            <Setter Property="BorderBrush" Value="{StaticResource Accent}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0"
+                Background="{StaticResource BgMuted}"
+                Padding="8"
+                BorderBrush="#d0d7de"
+                BorderThickness="0,0,0,1">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" >
+                <TextBlock Text="Data Source:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                <ComboBox x:Name="ProfileCombo" Width="180" Margin="0,0,8,0"/>
+                <Button x:Name="RefreshProfilesButton" Content="Refresh" Style="{StaticResource SecondaryButton}"/>
+
+                <TextBlock Text="View:" VerticalAlignment="Center" Margin="12,0,6,0"/>
+                <ComboBox x:Name="ViewPresetCombo" Width="160" Margin="0,0,4,0"/>
+                <Button x:Name="SaveViewButton" Content="Save" Style="{StaticResource SecondaryButton}"/>
+                <Button x:Name="SaveViewAsButton" Content="Save As" Style="{StaticResource SecondaryButton}"/>
+                <Button x:Name="DeleteViewButton" Content="Delete" Style="{StaticResource SecondaryButton}"/>
+
+                <Button x:Name="ColumnsButton" Content="Columns..." Style="{StaticResource SecondaryButton}" Margin="12,0,0,0"/>
+                <ToggleButton x:Name="SyncToggle" Content="Sync selection" Margin="8,0,0,0"/>
+                <CheckBox x:Name="SelectedOnlyCheck" Content="Selected only" Margin="8,0,0,0"/>
+
+                <Menu Margin="8,0,0,0">
+                    <MenuItem Header="Export">
+                        <MenuItem Header="Filtered to CSV..." x:Name="ExportFilteredMenu"/>
+                        <MenuItem Header="All to CSV..." x:Name="ExportAllMenu"/>
+                    </MenuItem>
+                </Menu>
+            </StackPanel>
+        </Border>
+
+        <DataGrid Grid.Row="1"
+                  x:Name="MatrixGrid"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False"
+                  CanUserDeleteRows="False"
+                  HeadersVisibility="Column"
+                  IsReadOnly="False"
+                  SelectionMode="Extended"
+                  SelectionUnit="FullRow"
+                  Margin="4"
+                  Sorting="MatrixGrid_Sorting"
+                  SelectionChanged="MatrixGrid_SelectionChanged"/>
+
+        <StatusBar Grid.Row="2" Background="{StaticResource BgMuted}">
+            <StatusBarItem>
+                <TextBlock x:Name="RowsStatus" Text="Rows: 0" />
+            </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock x:Name="ProfileStatus" Text="Profile: -" />
+            </StatusBarItem>
+            <StatusBarItem>
+                <TextBlock x:Name="ViewStatus" Text="View: (Default)" />
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</UserControl>

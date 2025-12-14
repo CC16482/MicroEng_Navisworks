@@ -17,11 +17,15 @@ namespace MicroEng.Navisworks
         private string _lastSearchSet;
         private List<RawRow> _rawRows = new();
 
-        public DataScraperWindow()
+        public DataScraperWindow(string initialProfile = null)
         {
             InitializeComponent();
             try
             {
+                if (!string.IsNullOrWhiteSpace(initialProfile))
+                {
+                    ProfileNameBox.Text = initialProfile;
+                }
                 LoadSets();
                 RefreshHistory();
                 RefreshProfile();

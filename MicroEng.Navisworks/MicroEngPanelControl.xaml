@@ -76,7 +76,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -107,37 +106,32 @@
             </Border>
 
             <Button Grid.Row="1"
-                    Content="Data Mapper"
-                    Style="{StaticResource PrimaryButton}"
-                    Click="AppendData_Click" />
-
-            <Button Grid.Row="2"
-                    Content="Reconstruct"
-                    Style="{StaticResource SecondaryButton}"
-                    Click="Reconstruct_Click" />
-
-            <Button Grid.Row="3"
-                    Content="Zone Finder"
-                    Style="{StaticResource SecondaryButton}"
-                    Click="ZoneFinder_Click" />
-
-            <Button Grid.Row="4"
                     Content="Data Scraper"
                     Style="{StaticResource SecondaryButton}"
                     Click="DataScraper_Click" />
 
-            <Button Grid.Row="5"
+            <Button Grid.Row="2"
+                    Content="Data Mapper"
+                    Style="{StaticResource PrimaryButton}"
+                    Click="AppendData_Click" />
+
+            <Button Grid.Row="3"
                     Content="Data Matrix"
                     Style="{StaticResource SecondaryButton}"
                     Click="DataMatrix_Click" />
 
-            <TextBlock Grid.Row="6"
+            <Button Grid.Row="4"
+                    Content="Space Mapper"
+                    Style="{StaticResource SecondaryButton}"
+                    Click="SpaceMapper_Click" />
+
+            <TextBlock Grid.Row="5"
                        Text="Log"
                        Foreground="{StaticResource TextSecondary}"
                        FontWeight="Bold"
                        Margin="0,8,0,4" />
 
-            <TextBox Grid.Row="7"
+            <TextBox Grid.Row="6"
                      x:Name="LogTextBox"
                      Text="Ready"
                      AcceptsReturn="True"

@@ -2,6 +2,7 @@ using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.Plugins;
 using NavisApp = Autodesk.Navisworks.Api.Application;
+using ElementHost = System.Windows.Forms.Integration.ElementHost;
 
 namespace MicroEng.Navisworks
 {
@@ -11,18 +12,19 @@ namespace MicroEng.Navisworks
     [DockPanePlugin(900, 600, FixedSize = false, AutoScroll = true)]
     public class DataMatrixDockPane : DockPanePlugin
     {
-        private DataMatrixPanel _panel;
-
         public override Control CreateControlPane()
         {
-            _panel = new DataMatrixPanel();
-            return _panel;
+            var host = new ElementHost
+            {
+                Dock = DockStyle.Fill,
+                Child = new DataMatrixControl()
+            };
+            return host;
         }
 
         public override void DestroyControlPane(Control pane)
         {
-            _panel?.Dispose();
-            _panel = null;
+            pane?.Dispose();
             base.DestroyControlPane(pane);
         }
     }

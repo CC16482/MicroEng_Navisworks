@@ -1,112 +1,76 @@
 # MicroEng_Navisworks - Developer Guide
 
-## 1) Overview
-- Purpose: custom automation toolkit for Autodesk Navisworks 2025.
-- Assembly: `MicroEng.Navisworks.dll`
-- Target: .NET Framework 4.8 (`net48`)
-- UI: Dockable panel (`MicroEng.DockPane`) hosting the MicroEng buttons (Data Mapper, Reconstruct, Zone Finder, Data Scraper, Data Matrix toggle).
+## Overview
+- Navisworks 2025 automation toolkit written in C# targeting .NET Framework 4.8 (`net48`).
+- Main assembly: `MicroEng.Navisworks.dll` with WPF UI (`UseWPF` + `UseWindowsForms` for ElementHost).
+- Dockable MicroEng panel (`MicroEng.DockPane`) hosts buttons for Data Scraper, Data Mapper (Append Data), Data Matrix, and Space Mapper. Reconstruct / Zone Finder remain add-in stubs only.
+- Data Matrix and Space Mapper are WPF dock panes; Data Scraper opens its own window; the panel log captures messages raised via `MicroEngActions.Log`.
+- Branding/colours come from `MICROENG_THEME_GUIDE.md` and the `Logos` folder (`microeng_logotray.png`, `microeng-logo2.png`).
 
-## 2) Repository Layout
+## Repository Layout (trimmed)
 ```
 MicroEng_Navisworks
-+---MicroEng_Navisworks_tree.txt
-+---MicroEng.Navisworks
-|   +---AppendIntegrateDialog.cs
-|   +---AppendIntegrateExecutor.cs
-|   +---AppendIntegrateModels.cs
-|   +---Class1.cs
-|   +---MicroEng.Navisworks.csproj
-|   +---MicroEngPlugins.cs
-|   \---PropertyPickerDialog.cs
-\---ReferenceProjects
-    +---NavisAddinManager-dev
-    \---NavisLookup-dev
+├─ MicroEng.Navisworks/              # Main plugin project
+│  ├─ MicroEng.Navisworks.csproj     # net48, UseWPF, Navisworks refs
+│  ├─ MicroEngPlugins.cs             # Plugin registrations, shared actions
+│  ├─ MicroEngPanelControl.xaml(.cs) # Docked launcher + log
+│  ├─ DataMatrixControl.xaml(.cs)    # WPF Data Matrix dock pane
+│  ├─ SpaceMapperControl.xaml(.cs)   # WPF Space Mapper dock pane
+│  ├─ AppendIntegrate*.cs            # Data Mapper (Append & Integrate) engine/templates
+│  ├─ DataScraper*.cs                # Data Scraper window & services
+│  ├─ SpaceMapper*.cs                # Space Mapper services/models/engines
+│  └─ Logos\ (linked from repo root)
+├─ Logos/                            # PNG assets for ribbon/panels
+├─ ReferenceDocuments/               # Specs (Data Matrix, Space Mapper, etc.)
+├─ ReferenceProjects/                # Sample/utility projects (not built)
+└─ MICROENG_THEME_GUIDE.md
 ```
-- `MicroEng.Navisworks/`: Main plugin project loaded by Navisworks.
-- `ReferenceProjects/`: Upstream tools kept for debugging/snooping. They are not built into the main DLL.
 
-## 3) Prerequisites
-- Autodesk Navisworks Manage 2025 (or Simulate 2025 with path tweaks).
-- .NET 8 SDK (for `dotnet build`).
+## Prerequisites
+- Autodesk Navisworks Manage 2025 (or Simulate with path tweaks).
 - .NET Framework 4.8 Developer Pack.
-- VS Code with C# extensions.
-- Permission to write into the Navisworks Plugins folder (default `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins`).
+- .NET 8+ SDK for `dotnet build`.
+- Permission to copy into `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins`.
 
-## 4) Project: MicroEng.Navisworks
-- Target framework: `net48`.
-- Navisworks references: `Autodesk.Navisworks.Api.dll`, `Autodesk.Navisworks.Api.Interop.ComApi.dll`.
-- WinForms reference: `System.Windows.Forms`.
-- MSBuild properties (override with `/p:` if needed):
-  - `NavisApiDir` (defaults to `C:\Program Files\Autodesk\Navisworks Manage 2025`)
-  - `NavisPluginsDir` (defaults to `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins`)
-- AfterBuild copies the DLL to `$(NavisPluginsDir)\MicroEng.Navisworks\`.
-- Main code files: `MicroEng.Navisworks/MicroEngPlugins.cs` (panel + add-ins) and `MicroEng.Navisworks/AppendIntegrate*.cs` (Append & Integrate Data dialog, execution, templates).
-
-### Plugin entry points (do not rename IDs)
-- `AppendDataAddIn` -> `MicroEng.AppendData` (displayed as **Data Mapper**)
-- `ReconstructAddIn` -> `MicroEng.Reconstruct`
-- `ZoneFinderAddIn` -> `MicroEng.ZoneFinder`
-- `DataMatrixCommand` -> `MicroEng.DataMatrix.Command` (toggles the Data Matrix dock pane)
-- `MicroEngPanelCommand` -> `MicroEng.PanelCommand` (toggles the dock pane)
-- `MicroEngDockPane` -> `MicroEng.DockPane` (hosts `MicroEngPanelControl`)
-
-## 5) Build and Deploy
+## Build & Deploy
 ```powershell
-cd MicroEng.Navisworks
-dotnet build
+cd C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks
+dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
+  /p:NavisApiDir="C:\Program Files\Autodesk\Navisworks Manage 2025"
+# Optional if your plugins folder is different
+# /p:NavisPluginsDir="C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins"
 ```
-- Output: `MicroEng.Navisworks/bin/Debug/net48/MicroEng.Navisworks.dll`.
-- The build copies the DLL into `$(NavisPluginsDir)\MicroEng.Navisworks\`. Override paths at build time if Navisworks is installed elsewhere:
-```powershell
-dotnet build `
-  /p:NavisApiDir="D:\Navisworks 2025" `
-  /p:NavisPluginsDir="D:\Navisworks 2025\Plugins"
-```
-- If you see “Could not resolve Autodesk.Navisworks.Api”, pass `NavisApiDir` explicitly as above (quotes required for spaces).
+- The build copies `MicroEng.Navisworks.dll` (and Logos) to `$(NavisPluginsDir)\MicroEng.Navisworks\`.
+- `ResolveAssemblyReferenceAdditionalPaths` uses `NavisApiDir`, so point it to the folder that contains `Autodesk.Navisworks.Api.dll` and friends.
 
-## 6) Running in Navisworks
-1. Build the project so the DLL is in the Plugins folder.
-2. Start Navisworks Manage 2025 and open a model.
-3. In the Add-Ins tab you should see:
-   - MicroEng Data Mapper
-   - MicroEng Reconstruct
-   - MicroEng Zone Finder
-   - MicroEng Data Matrix
-   - MicroEng Panel
-4. Run `MicroEng Panel` to show the dockable panel with the buttons and log box, or `Data Matrix` to open the grid viewer dock pane.
+## Running in Navisworks
+1. Build so the DLL is present in the Plugins folder.
+2. Launch Navisworks Manage 2025 and load a model.
+3. Add-Ins tab shows:
+   - MicroEng Data Mapper (Append Data)
+   - MicroEng Data Matrix (dockable)
+   - MicroEng Space Mapper (dockable)
+   - MicroEng Data Scraper
+   - MicroEng Panel (toggles the docked launcher/log)
+4. Reconstruct and Zone Finder are add-in placeholders only; they are not shown on the panel.
 
-## 7) Tool Behavior (current state)
-- Data Mapper (formerly Append & Integrate Data):
-  - Opens from the Data Mapper button in the MicroEng panel (and the Add-In command).
-  - Template bar: pick template, New/Copy/Rename/Delete/Save. Templates persist to `append_templates.json` beside the DLL.
-  - Standard tab: set Target Tab Name (default `MicroEng`); grid of rows (Target Property, Mode = Static/From Property/Expression, Source Property + picker, Static/Expression value, Option, Enabled).
-  - Property picker: uses first selected item to browse its categories/properties; writes the chosen path into the row.
-  - Advanced tab: apply to Items/Groups/Both; create/update target tab; delete blank properties/empty tab; apply to selection only; toggle internal property names for the picker.
-  - Options available (UI + template): None, ConvertToDecimal, ConvertToInteger, ConvertToDate, FormatAsText, SumGroupProperty, UseParentProperty, UseParentRevitProperty, ReadAllPropertiesFromTab, ParseExcelFormula, PerformCalculation, ConvertFromRevit (most are stubs for now; only FormatAsText behavior is applied, the rest are placeholders for future parity with iConstruct).
-  - Run: processes selection (or whole model if unchecked), creates/updates properties via COM API, applies simple FormatAsText handling, stubs the rest. Shows status + message box and logs summary to the docked log.
-- Data Scraper:
-  - Scans a chosen scope (single item, current selection, entire model) and caches results in `DataScraperCache`.
-  - Stores `ScrapeSession` objects with a profile name, scope description, property catalog, and raw entries (item key/path, category, property, type, value).
-  - UI tabs: Profile (latest run per profile), History (all runs), Properties (distinct property catalog), Raw Data (ungrouped per-item property rows).
-  - Logs summary to the MicroEng panel; Append/Data Mapper uses the last session for property suggestions.
-- Data Matrix:
-  - Dockable grid viewer that **never re-scans** Navisworks; it pivots the cached ScrapeSession from Data Scraper into rows/columns.
-  - Top toolbar: select Data Scraper profile, apply view presets, toggle column chooser, sync selection, filter to current selection, and export CSV (filtered/all).
-  - Grid supports column sorting (with Shift for multi-sort), per-column filters, and column visibility presets. Selection can sync to Navisworks.
-  - Presets are stored in-memory per profile (save, save-as, delete). Exports include profile/scope metadata in the CSV header.
-- Reconstruct / Zone Finder: Placeholders; still show messages but ready for future logic.
+## Tool Behavior (current)
+- **Append Data (Data Mapper button / `MicroEng.AppendData`)**: Tags the current selection. Creates/reuses the `MicroEng` custom tab and writes/updates a `Tag` string set to `ME-AUTO-<timestamp>` for each selected item. Logs counts to the docked log; shows a friendly message if nothing is selected.
+- **Data Scraper**: Scans model properties into `DataScraperCache` (profiles, distinct properties, raw entries). Source of truth for Data Matrix/Space Mapper metadata.
+- **Data Matrix** (dock pane `MicroEng.DataMatrix.DockPane`): WPF grid built from the latest ScrapeSession. Supports column chooser (toggle properties on/off), presets per profile, selection sync back to Navisworks, and CSV export (filtered/all).
+- **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata and CPU intersection engine (GPU stubbed for now).
+- **MicroEng Panel**: WPF launcher with branding/logo and log textbox that listens to `MicroEngActions.LogMessage`.
 
-## 8) Reference Projects (helpers only)
-- `ReferenceProjects/NavisAddinManager-dev`: Hot-load/unload add-ins, run commands, view Debug/Trace inside Navisworks.
-- `ReferenceProjects/NavisLookup-dev`: Inspect selections, properties, and Navisworks objects while developing.
-- Reference documents: `ReferenceDocuments/Append_Data_Instructions.txt` (feature spec) and `ReferenceDocuments/iConstruct_Pro_Append_Data_&_Integrator.docx` (iConstruct behaviors for parity ideas).
+## Notes
+- Theme/branding: follow `MICROENG_THEME_GUIDE.md` and use logos in `Logos/`.
+- Data Matrix & Space Mapper use WPF hosted in ElementHost for dock panes; the main panel is also WPF.
+- If Navisworks assemblies are not found at build time, set `NavisApiDir` to the root install folder containing `Autodesk.Navisworks.Api.dll`.
 
-## 9) Roadmap / Next Steps
-- Zone Finder: add input (textbox/dropdown) on the panel and select items by property (Zone/Area/Level), then zoom to selection and log counts.
-- Reconstruct: rebuild search sets or other derived data grouped by `MicroEng.Tag`.
-- Architecture: move logic out of `MicroEngActions` into helper classes; consider WPF panel for richer UI; add JSON-based config for property names/zones.
+## Known issues / tips
+- Space Mapper UI clipping: keep `SpaceMapperControl.xaml` rooted in a simple Grid (header row + content row) and ensure the dock pane is `[DockPanePlugin(..., FixedSize=false, AutoScroll=true)]` with `ElementHost` docked fill. If the pane looks truncated, delete old plugin copies from `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\` (and any AppData bundle), rebuild, redeploy, then dock the pane before resizing.
+ - CPU Normal mode only: Space Mapper currently forces CPU Normal processing. Geometry extraction uses bbox fallback; COM triangle extraction TODO remains for Navis main thread only.
 
-## 10) Working with Codex
-- Main file to edit: `MicroEng.Navisworks/MicroEngPlugins.cs`.
-- Keep plugin IDs and class names unchanged.
-- Prefer incremental changes: add helpers first, then wire into commands, then test via NavisAddinManager and NavisLookup.
+## Working with Codex
+- Primary entry points live in `MicroEngPlugins.cs`.
+- UI work: `MicroEngPanelControl.xaml`, `DataMatrixControl.xaml`, `SpaceMapperControl.xaml`.
+- Do not rename plugin IDs/classes (`MicroEng.AppendData`, `MicroEng.DockPane`, `MicroEng.DataMatrix.DockPane`, `MicroEng.SpaceMapper.DockPane`, etc.).

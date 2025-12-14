@@ -1,0 +1,222 @@
+Short answer: you can absolutely ship a solid CPU Normal mode without going insane. The tricky bit is geometry extraction; the rest is just careful data structures and not abusing the Navisworks API.
+
+I’ll break it into:
+
+What “CPU Normal” actually is (behaviour spec)
+
+Algorithm design (broad phase + narrow phase)
+
+Navisworks‑specific recommendations (threading, COM, performance)
+
+How to position this in your architecture
+
+Codex prompt you can paste
+
+I’ll describe the code structure, but keep it focused rather than dumping a half‑working wall of C#.
+
+1. Behaviour spec – what you’re aiming to match
+
+From the iConstruct Zone Tools docs, CPU Normal is:
+
+“Processes objects that have at least one point (vertex) within the bounding object. Runs on the CPU. Note that this will not pick up objects that are larger than the zone and that don’t have at least one point ie some flooring may have this configuration.” 
+
+iConstruct_Pro_Zone_Tools
+
+So your CPU Normal should:
+
+Use only vertex‑inside‑zone tests (no heavy face‑face intersection).
+
+Run entirely on CPU.
+
+Be reasonably fast on big models (tens of thousands of elements).
+
+Accept that very large objects crossing a zone can be missed, same limitation as theirs.
+
+You can still layer your own “partial” classification on top (e.g. if some vertices inside, some outside → partial), but don’t try to be as perfect as the future GPU/Intensive engines.
+
+2. Algorithm design
+
+Think of it as 3 stages:
+
+Stage 1 – Pre‑extract geometry (serial, on Navisworks UI thread)
+
+Goal: turn Navisworks ModelItems into pure data snapshots you can safely use off‑thread.
+
+For each zone and target element:
+
+Compute a bounding box (AABB) from ModelItem.BoundingBox.
+
+Extract a reasonable set of world‑space vertices:
+
+For normal detail, you can use all triangle vertices.
+
+For speed, you can decimate (e.g. sample every Nth vertex).
+
+Store this in your own structs, e.g.:
+
+class ZoneGeometry
+{
+    public string ZoneId;            // your key
+    public BoundingBox3D Bounds;     // from Navisworks
+    public List<Vector3D> Vertices;  // vertices of the zone volume
+    // optionally precomputed face planes for point-in-polyhedron
+}
+
+class TargetGeometry
+{
+    public string ItemKey;           // same key as Data Scraper
+    public BoundingBox3D Bounds;
+    public List<Vector3D> Vertices;
+}
+
+
+Important: Navisworks COM/.NET geometry is not thread‑safe. Do the extraction phase on the main Navisworks thread, then run the actual intersection math on pure double arrays/structs off‑thread.
+
+Stage 2 – Broad phase (cheap pruning)
+
+You don’t want to run expensive tests between all zones and all targets.
+
+For each ZoneGeometry:
+
+Loop all TargetGeometry (or use a spatial index later).
+
+If zone.Bounds and target.Bounds do not intersect, skip that pair.
+
+If they intersect, add the pair to a “candidates” list.
+
+Even a naïve nested loop with AABB checks will cut the problem drastically. Later you can accelerate with:
+
+Spatial binning (grid / octree).
+
+Separate lists by level/selection sets per your target rules.
+
+Stage 3 – Narrow phase (vertex‑inside‑zone tests)
+
+For each candidate pair:
+
+Build (once per zone) a representation that lets you do point‑in‑polyhedron tests cheaply:
+
+E.g. precompute plane equations for each face of the zone’s mesh.
+
+Each plane: n · x + d <= 0 means “inside”.
+
+For that zone, for each target vertex v:
+
+For each plane P:
+
+If n · v + d > 0 for any plane → vertex is outside; break.
+
+If v satisfied all plane inequalities → vertex is inside the zone; you can stop and mark:
+
+IsInside = true.
+
+Classification logic:
+
+If no vertices are inside:
+
+In CPU Normal: classify as outside; you accept that some big crossing objects are missed (same as Zone Tools’ Normal mode). 
+
+iConstruct_Pro_Zone_Tools
+
+If at least one vertex is inside:
+
+Basic CPU Normal:
+
+Mark object as “inside zone”.
+
+Your extension:
+
+Optionally examine bounding boxes / some vertices:
+
+If all vertices are inside zone → Contained.
+
+If some inside, some outside → Partial.
+
+From here, you feed Contained/Partial through your settings:
+
+If “Treat Partial as Contained” is on → treat Partial as Contained.
+
+If you have multiple zones hitting same element, you apply your multi‑zone resolution (first/largest/closest/combined).
+
+This is all straight maths on simple data types; no more Navisworks calls in this phase.
+
+3. Navisworks‑specific recommendations
+3.1 Geometry extraction via COM
+
+Navisworks’ managed ModelItem doesn’t expose the full mesh; you go through COM:
+
+Use Autodesk.Navisworks.Api.Interop.ComApi.ComApiBridge.
+
+Convert ModelItem → InwOaPath.
+
+Use InwOpState10.GetGeometry3 to get geometry fragments & primitives.
+
+Extract triangles and their vertices in world coordinates.
+
+Your extractor should basically:
+
+Take a ModelItem.
+
+Build a ZoneGeometry / TargetGeometry with:
+
+ModelItem.BoundingBox() to get the AABB.
+
+A List<Vector3D> of vertices, in world coordinates.
+
+Cache these per ItemKey so later passes don’t re‑hit COM.
+
+This is the one “fiddly” bit, but it’s a one‑time investment and you can reuse it for Space Mapper, clash‑like tools, etc.
+
+3.2 Threading strategy
+
+Main thread:
+
+Build lists of ZoneGeometry and TargetGeometry using COM + .NET Navisworks API.
+
+Worker thread(s):
+
+Run the broad‑phase AABB intersection and narrow‑phase point‑in‑polyhedron.
+
+This can be multi‑threaded with Parallel.ForEach, because now you’re just crunching doubles in memory.
+
+Main thread again:
+
+Take the ZoneTargetIntersection results and write properties back to the Navisworks model (again via Navisworks API / COM).
+
+If you keep that discipline, you avoid almost all thread‑safety headaches.
+
+3.3 Tuning accuracy vs speed
+
+Within the CPU Normal mode you still have tuning knobs:
+
+Vertex sampling:
+
+Use all vertices for zones (they’re fewer).
+
+Sample fewer vertices for large, detailed elements to reduce cost.
+
+Bounding box approximations:
+
+For very rough/fast fallback, you could start with:
+
+“Element centre inside zone AABB?” before going to full polyhedron test.
+
+You can start simple (bounding box + a few vertices) and iterate.
+
+4. How this fits into your architecture
+
+You already have the idea of an ISpatialIntersectionEngine and SpaceMapperProcessingMode. CPU Normal just becomes the first real implementation:
+
+CpuIntersectionEngine : ISpatialIntersectionEngine
+
+Internally it runs the 3 stages above and returns a list of ZoneTargetIntersection objects for Space Mapper to consume.
+
+Later, if you build a GPU engine, its implementation can:
+
+Reuse the same ZoneGeometry / TargetGeometry data structures.
+
+Offload the narrow phase to CUDA.
+
+Still return ZoneTargetIntersection to the caller.
+
+Same API, different engine behind the scenes.

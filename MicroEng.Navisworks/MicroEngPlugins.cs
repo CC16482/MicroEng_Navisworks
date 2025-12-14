@@ -56,14 +56,52 @@ namespace MicroEng.Navisworks
         {
             try
             {
-                var dialog = new AppendIntegrateDialog { LogAction = Log };
-                System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(dialog);
-                dialog.ShowDialog();
+                var doc = NavisApp.ActiveDocument;
+                if (doc == null)
+                {
+                    ShowInfo("No active document.");
+                    return;
+                }
+
+                var selectedItems = doc.CurrentSelection?.SelectedItems;
+                var total = selectedItems?.Count ?? 0;
+                if (selectedItems == null || total == 0)
+                {
+                    ShowInfo("Nothing selected. Select one or more items and run Append Data again.");
+                    Log("Append Data skipped - no selection.");
+                    return;
+                }
+
+                var tagValue = $"ME-AUTO-{DateTime.Now:yyyyMMdd-HHmmss}";
+                var success = 0;
+                var failed = 0;
+
+                foreach (ModelItem item in selectedItems)
+                {
+                    if (item == null) continue;
+
+                    if (TryWriteMicroEngTag(item, tagValue))
+                    {
+                        success++;
+                    }
+                    else
+                    {
+                        failed++;
+                    }
+                }
+
+                var summary = $"Append Data: tagged {success}/{total} selected items with '{tagValue}'.";
+                Log(summary);
+
+                if (failed > 0)
+                {
+                    Log($"Append Data encountered {failed} write errors. Check Trace for details.");
+                }
             }
             catch (Exception ex)
             {
-                Log($"Data Mapper dialog failed: {ex}");
-                MessageBox.Show($"Data Mapper failed to open: {ex.Message}", "MicroEng",
+                Log($"Append Data failed: {ex}");
+                MessageBox.Show($"Append Data failed: {ex.Message}", "MicroEng",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -107,24 +145,54 @@ namespace MicroEng.Navisworks
                 var path = ComBridge.ToInwOaPath(item);
                 var propertyNode = (ComApi.InwGUIPropertyNode2)state.GetGUIPropertyNode(path, true);
 
-                var propertyVector = (ComApi.InwOaPropertyVec)state.ObjectFactory(
-                    ComApi.nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
+                // Try to reuse an existing MicroEng tab so we don't blow away other properties
+                ComApi.InwOaPropertyVec propertyVector = null;
+                try
+                {
+                    var getMethod = propertyNode.GetType().GetMethod("GetUserDefined");
+                    propertyVector = getMethod?.Invoke(propertyNode, new object[] { 0, CategoryName }) as ComApi.InwOaPropertyVec;
+                }
+                catch
+                {
+                    // ignore read failures and fall back to creating a fresh vector
+                }
 
-                var tagProperty = (ComApi.InwOaProperty)state.ObjectFactory(
-                    ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
+                if (propertyVector == null)
+                {
+                    propertyVector = (ComApi.InwOaPropertyVec)state.ObjectFactory(
+                        ComApi.nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
+                }
 
-                tagProperty.name = TagPropertyName;
-                tagProperty.UserName = TagPropertyName;
+                // Find or create the Tag property on that tab
+                ComApi.InwOaProperty tagProperty = null;
+                foreach (ComApi.InwOaProperty prop in propertyVector.Properties())
+                {
+                    if (prop == null) continue;
+                    if (string.Equals(prop.name, TagPropertyName, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(prop.UserName, TagPropertyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        tagProperty = prop;
+                        break;
+                    }
+                }
+
+                if (tagProperty == null)
+                {
+                    tagProperty = (ComApi.InwOaProperty)state.ObjectFactory(
+                        ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
+                    tagProperty.name = TagPropertyName;
+                    tagProperty.UserName = TagPropertyName;
+                    propertyVector.Properties().Add(tagProperty);
+                }
+
                 tagProperty.value = tagValue;
-
-                propertyVector.Properties().Add(tagProperty);
 
                 propertyNode.SetUserDefined(0, CategoryName, CategoryName, propertyVector);
                 return true;
             }
             catch (Exception ex)
             {
-                Log($"Data Mapper write failed for '{item.DisplayName}': {ex.Message}");
+                Log($"Append Data write failed for '{item?.DisplayName}': {ex.Message}");
                 return false;
             }
         }
@@ -142,6 +210,28 @@ namespace MicroEng.Navisworks
             if (record == null)
             {
                 MessageBox.Show($"Could not find Data Matrix dock pane plugin '{dockPanePluginId}'.",
+                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!record.IsLoaded)
+            {
+                record.LoadPlugin();
+            }
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+            {
+                pane.Visible = true;
+            }
+        }
+
+        public static void SpaceMapper()
+        {
+            const string dockPanePluginId = "MicroEng.SpaceMapper.DockPane.MENG";
+            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find Space Mapper dock pane plugin '{dockPanePluginId}'.",
                     "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }

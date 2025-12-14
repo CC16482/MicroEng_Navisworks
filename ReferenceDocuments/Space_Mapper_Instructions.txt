@@ -1,0 +1,611 @@
+ice, Space Mapper is going to be a beast 👹. I’ll treat this as a design + spec + code skeleton you can paste into Codex.
+
+I’ll assume:
+
+You already have Data Scraper + DataScraperCache implemented as you described.
+
+You’re comfortable having Codex generate most of the C# implementation in MicroEng.Navisworks.
+
+1. Concept: MicroEng – Space Mapper
+
+Space Mapper uses zone / room / space geometry to push zone attributes down into the elements inside them.
+It’s a separate window (like Data Scraper / Data Mapper) with:
+
+Strong GPU‑accelerated geometry engine, with CPU fallback.
+
+Rich processing settings (offsets, partial behavior, multi‑zone logic).
+
+Flexible targeting rules (multiple tree levels, selection sets, viewpoints).
+
+Integration with Data Scraper for cached zone & element metadata.
+
+Post‑run statistics & logging.
+
+It’s your answer to iConstruct’s Zone Tools, but more flexible and tightly integrated with your other tools. (Zone Tools uses CUDA, has Normal / GPU Quick / GPU Intensive modes, treat partial as contained, multi‑zone flag, target write level etc. 
+
+iConstruct_Pro_Zone_Tools
+
+)
+
+2. UI Layout (Window)
+
+Think of this as MicroEng Space Mapper dialog, opened from a MicroEng panel button.
+
+2.1 High‑level layout
+
+Header (top bar)
+
+Scraper Profile: [ ME_Zones ▼ ]
+(list of profile names from DataScraperCache.AllSessions – typically a “Zones/Rooms/Spaces” profile).
+
+Scope: [ Entire Model | Current View | Current Selection | Selection Set | Search Set ]
+
+Run Data Scraper… button (opens Data Scraper with profile preselected).
+
+Tabs:
+
+Zones & Targets
+
+Processing Settings
+
+Attribute Mapping
+
+Results / Stats
+
+2.2 Zones & Targets tab
+Zone Source
+
+Zone Source:
+
+Radio or dropdown:
+
+Zone Selection Set (choose selection set containing zones)
+
+Zone Search Set (choose search set)
+
+Data Scraper Zones (use items identified as “zone/room/space” in the active ScrapeSession)
+
+Optional list/grid showing detected zones:
+
+ID / Name / Category / Volume, etc. (read from the ScrapeSession cache, not live).
+
+Target Rules
+
+We go beyond “Target Write Level = 2” (one fixed tree level). 
+
+iConstruct_Pro_Zone_Tools
+
+Introduce a Target Rules grid:
+
+Each Target Rule row:
+
+Rule Name
+
+Target Type (dropdown):
+
+Selection Tree Level (by depth)
+
+Selection Set
+
+Search Set
+
+Current Selection
+
+Visible In View
+
+Tree Level Range:
+
+If Target Type = Selection Tree Level, we allow a range:
+
+Min Level (int)
+
+Max Level (int)
+(e.g. Level 0 only, Level 1–2, etc.)
+
+Category Filter (optional):
+
+Property filter “only apply to elements where [Category/Family/Type] = …”
+
+Apply To:
+
+Contained Only
+
+Partial Only
+
+Contained + Partial
+
+Enabled checkbox.
+
+This lets you have multiple target levels in one run, different filters, and more control than iConstruct’s single “Target Write Level”.
+
+2.3 Processing Settings tab
+
+This is your “supercharged” version of iConstruct’s Processing Settings. 
+
+iConstruct_Pro_Zone_Tools
+
+Check boxes:
+
+Treat Partial as Contained
+
+Tag Partial Separately (write “Partial” vs “Contained” flags)
+
+Enable Multiple Zones (if element touches >1 zone, combine info)
+
+Resolve Overlaps By (radio):
+
+First Zone
+
+Largest Volume
+
+Closest Zone Center
+
+Custom Priority (zone property, e.g. ZonePriority)
+
+Offsets / 3D buffer:
+
+3D Offset: [ 0.000 ] Units (positive = grow zone, negative = shrink zone)
+
+Applied uniformly in X/Y/Z.
+
+Offset Top: [ 0.000 ] (move top plane up/down)
+
+Offset Bottom: [ 0.000 ] (move bottom plane up/down)
+
+Offset Sides: [ 0.000 ] (lateral buffer)
+
+Offset Mode: (dropdown)
+
+From Zone Geometry (offset bounding volume)
+
+Scale From Centroid (uniform scaling from centroid)
+
+Bounding Box Only (approx. with AABB – faster)
+
+Processing Mode:
+
+Based on iConstruct’s Normal / GPU Quick / GPU Intensive, but extended: 
+
+iConstruct_Pro_Zone_Tools
+
+Auto (Recommended)
+
+Detect presence & capability of NVIDIA / compute device; choose best.
+
+CPU – Normal
+
+Vertex‑based intersection; uses CPU only.
+
+GPU – Quick
+
+Faster GPU‑accelerated vertex/box tests.
+
+GPU – Intensive
+
+Full face‑face intersection tests; slowest but most accurate.
+
+Debug
+
+CPU but logs debug shapes / counts.
+
+You implement this behind an engine interface (details below).
+
+Performance Tuning:
+
+Max Threads: (optional advanced numeric)
+
+Batch Size: (for GPU/CPU chunking)
+
+Enable Cancellation (allows cancel from UI).
+
+2.4 Attribute Mapping tab
+
+This is analogous to Append Data/Integrator but for zones → elements.
+
+Each mapping row:
+
+Zone Property (category + property; sourced from Data Scraper’s active ScrapeSession for the chosen profile)
+
+Target Attribute:
+
+Category/Tab name on target element (e.g. ME_SpaceInfo)
+
+Target Property Name (e.g. Zone Name, Zone ID, Space Type)
+
+Write Mode:
+
+Overwrite
+
+Only If Blank
+
+Append (with separator)
+
+Partial Flag Tag (text to use in partial case: e.g. Partial, Overlap).
+
+Multi‑Zone combine: (if multiple zones):
+
+First
+
+Concatenate (comma)
+
+Min, Max, Average (for numeric properties)
+
+Editable? (whether user can override these values in Data Matrix later).
+
+These rows can be saved as Space Mapper templates (JSON) – similar to iConstruct templates but under your naming.
+
+2.5 Results / Stats tab
+
+After running:
+
+Summary:
+
+Zones processed, Targets processed.
+
+Elements tagged (contained).
+
+Elements tagged (partial).
+
+Elements with multiple zones.
+
+Elements skipped (filtered out).
+
+Time taken, processing mode used (CPU/GPU).
+
+Charts/Tables:
+
+Breakdown per zone (how many elements tagged).
+
+Breakdown by rule.
+
+Buttons:
+
+Export Stats to CSV
+
+Colourise Zones (optional: apply temporary NW overrides per zone)
+
+View Affected Elements (select in Navisworks)
+
+Additionally, log to the MicroEng panel, e.g.:
+
+Space Mapper: 432 zones processed, 18,734 elements tagged (13,250 contained, 2,100 partial, 3,384 multi-zone). Mode=GPU_Intensive, 14.2s.
+
+3. Integration with Data Scraper
+
+Space Mapper assumes that Data Scraper has already run for the zone profile.
+
+3.1 Using ScrapeSession as metadata
+
+Given active ScrapeSession for the chosen ScraperProfileName:
+
+Zone identification
+
+Use ScrapeSession.RawEntries where elements have a property that identifies them as Zones/Rooms/Spaces.
+
+Alternatively, rely on the selection set assigned as Zone Source but still use Scraper’s property catalog to pick which properties to map.
+
+Zone properties
+
+For mapping UI: Zone property dropdown is populated from ScrapeSession.Properties for that profile (category, property, type, sample values).
+
+Data type hints
+
+For combining multi‑zone values (numeric vs string).
+
+3.2 Linking to Data Matrix & Data Mapper
+
+After Space Mapper run, you can:
+
+Optionally trigger a re‑Scrape for the same profile (or another, like ME_SpaceInfo) to refresh Data Scraper / Data Matrix property sets.
+
+Because DataScraperCache.LastSession is updated, Append Data and Data Matrix will see new attributes and values.
+
+4. Core Processing Algorithm
+
+At a high level:
+
+Resolve:
+
+Zones set (List<ModelItem> zones) from:
+
+Selection set / search set / scraped item keys.
+
+Target candidates (List<ModelItem>) based on Target Rules:
+
+For each rule, collect ModelItems according to type (tree level, selection set, etc.) and filters.
+
+Build geometry representations:
+
+For each zone:
+
+Get bounding volume / geometry (via Navisworks API or COM).
+
+Apply offsets (3D offset, top/bottom offsets).
+
+For each target:
+
+Get bounding volume / geometry or at least bounding boxes.
+
+Intersections:
+
+Use ISpatialIntersectionEngine to evaluate relationships:
+
+Contains, Intersects (partial), Touches.
+
+For each (zone, target) relationship that passes criteria:
+
+Compute zone info to write (per mapping row).
+
+Apply partial rules:
+
+If Treat Partial as Contained, mark as contained.
+
+Else, mark as partial and write PartialFlagTag.
+
+Handle multi‑zone:
+
+Use conflict resolution settings & aggregator (First/Concat/Min/Max/Avg).
+
+Write results:
+
+Use writer service to push mapped values to target’s properties.
+
+Track stats per zone and per rule.
+
+Show Results / log.
+
+5. GPU + CPU Architecture
+
+Rather than baking CUDA calls into space mapper directly, define:
+
+public enum SpaceMapperProcessingMode
+{
+    Auto,
+    CpuNormal,
+    GpuQuick,
+    GpuIntensive,
+    Debug
+}
+
+public interface ISpatialIntersectionEngine
+{
+    SpaceMapperProcessingMode Mode { get; }
+
+    // Input: zones, targets, engine-specific config (offsets, etc.)
+    IList<ZoneTargetIntersection> ComputeIntersections(
+        IReadOnlyList<ZoneGeometry> zones,
+        IReadOnlyList<TargetGeometry> targets,
+        SpatialProcessingSettings settings,
+        IProgress<SpaceMapperProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+}
+
+
+Where:
+
+public class ZoneGeometry
+{
+    public string ZoneId { get; set; }
+    public Autodesk.Navisworks.Api.ModelItem ModelItem { get; set; }
+    // Precomputed geometry representation (bounding box, triangles, etc.)
+}
+
+public class TargetGeometry
+{
+    public string ItemKey { get; set; }              // same key used by Data Scraper
+    public Autodesk.Navisworks.Api.ModelItem ModelItem { get; set; }
+}
+
+public class ZoneTargetIntersection
+{
+    public string ZoneId { get; set; }
+    public string TargetItemKey { get; set; }
+    public bool IsContained { get; set; }
+    public bool IsPartial { get; set; }
+    public double OverlapVolume { get; set; }        // optional, for priority
+}
+
+
+Implementations:
+
+CpuIntersectionEngine : ISpatialIntersectionEngine
+
+Uses Navisworks COM geometry & bounding boxes.
+
+CudaIntersectionEngine : ISpatialIntersectionEngine
+
+Wraps a native CUDA library via C++/CLI or P/Invoke (not implemented yet, but interface ready).
+
+Space Mapper chooses engine:
+
+ISpatialIntersectionEngine CreateEngine(SpaceMapperProcessingMode requested)
+{
+    // Pseudocode:
+    if (requested == SpaceMapperProcessingMode.Auto)
+    {
+        if (CudaAvailable())
+            return new CudaIntersectionEngine(SpaceMapperProcessingMode.GpuIntensive);
+        else
+            return new CpuIntersectionEngine(SpaceMapperProcessingMode.CpuNormal);
+    }
+
+    // more cases ...
+}
+
+
+So you can tell Codex to stub CudaIntersectionEngine but fully implement CpuIntersectionEngine.
+
+6. Key Config Classes
+6.1 Target Rule
+public enum SpaceMapperTargetType
+{
+    SelectionTreeLevel,
+    SelectionSet,
+    SearchSet,
+    CurrentSelection,
+    VisibleInView
+}
+
+public enum SpaceMembershipMode
+{
+    ContainedOnly,
+    PartialOnly,
+    ContainedAndPartial
+}
+
+public class SpaceMapperTargetRule
+{
+    public string Name { get; set; }
+    public SpaceMapperTargetType TargetType { get; set; }
+
+    // Tree level selection (for SelectionTreeLevel)
+    public int? MinTreeLevel { get; set; }
+    public int? MaxTreeLevel { get; set; }
+
+    // For SelectionSet/SearchSet
+    public string? SetName { get; set; }
+
+    public string? CategoryFilter { get; set; }   // or full property filter later
+    public SpaceMembershipMode MembershipMode { get; set; }
+
+    public bool Enabled { get; set; } = true;
+}
+
+6.2 Processing settings & offsets
+public class SpaceMapperProcessingSettings
+{
+    public SpaceMapperProcessingMode ProcessingMode { get; set; }
+
+    public bool TreatPartialAsContained { get; set; }
+    public bool TagPartialSeparately { get; set; }
+    public bool EnableMultipleZones { get; set; }
+
+    public double Offset3D { get; set; }          // uniform offset in all directions
+    public double OffsetTop { get; set; }
+    public double OffsetBottom { get; set; }
+    public double OffsetSides { get; set; }
+
+    public string Units { get; set; } = "Millimeters";
+
+    public string OverlapResolutionMode { get; set; } // "First", "LargestVolume", etc.
+
+    public int? MaxThreads { get; set; }
+    public int? BatchSize { get; set; }
+}
+
+6.3 Mapping definition
+public enum MultiZoneCombineMode
+{
+    First,
+    Concatenate,
+    Min,
+    Max,
+    Average
+}
+
+public enum WriteMode
+{
+    Overwrite,
+    OnlyIfBlank,
+    Append
+}
+
+public class SpaceMapperMappingDefinition
+{
+    public string Name { get; set; }
+
+    public string ZoneCategory { get; set; }
+    public string ZonePropertyName { get; set; }
+
+    public string TargetCategory { get; set; }    // new tab, e.g. "ME_SpaceInfo"
+    public string TargetPropertyName { get; set; }
+
+    public WriteMode WriteMode { get; set; }
+    public string AppendSeparator { get; set; } = ", ";
+
+    public string PartialFlagValue { get; set; } = "Partial";
+
+    public MultiZoneCombineMode MultiZoneCombineMode { get; set; } = MultiZoneCombineMode.First;
+
+    public bool IsEditable { get; set; } = true;
+}
+
+7. Plugin Skeleton for Space Mapper Window
+
+In SpaceMapperPlugins.cs:
+
+using System.Windows.Forms;
+using Autodesk.Navisworks.Api;
+using Autodesk.Navisworks.Api.Plugins;
+
+namespace MicroEng.Navisworks
+{
+    [Plugin("MicroEng.SpaceMapper.DockPane", "MENG",
+        DisplayName = "MicroEng Space Mapper",
+        ToolTip = "Map zone/room/space data onto elements.")]
+    [DockPanePlugin(900, 550)]
+    public class SpaceMapperDockPane : DockPanePlugin
+    {
+        private SpaceMapperPanel _panel;
+
+        public override Control CreateControlPane()
+        {
+            _panel = new SpaceMapperPanel();
+            return _panel;
+        }
+
+        public override void DestroyControlPane(Control pane)
+        {
+            _panel?.Dispose();
+            _panel = null;
+            base.DestroyControlPane(pane);
+        }
+    }
+
+    [Plugin("MicroEng.SpaceMapper.Command", "MENG",
+        DisplayName = "Space Mapper",
+        ToolTip = "Show/hide the MicroEng Space Mapper window.")]
+    [AddInPlugin(AddInLocation.AddIn)]
+    public class SpaceMapperCommand : AddInPlugin
+    {
+        public override int Execute(params string[] parameters)
+        {
+            const string paneId = "MicroEng.SpaceMapper.DockPane.MENG";
+
+            var record = Application.Plugins.FindPlugin(paneId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find Space Mapper dock pane plugin '{paneId}'.",
+                    "MicroEng Space Mapper",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return 0;
+            }
+
+            if (!record.IsLoaded)
+                record.LoadPlugin();
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+                pane.Visible = !pane.Visible;
+
+            return 0;
+        }
+    }
+
+    public class SpaceMapperPanel : UserControl
+    {
+        public SpaceMapperPanel()
+        {
+            Dock = DockStyle.Fill;
+            // TODO: build header, tabs, etc. like Data Scraper / Data Mapper style.
+        }
+
+        // Methods like:
+        // - LoadScraperProfilesFromCache();
+        // - RunSpaceMapping();
+        // - ShowResults();
+    }
+}
+
+
+Codex can flesh out SpaceMapperPanel using the UI layout above.

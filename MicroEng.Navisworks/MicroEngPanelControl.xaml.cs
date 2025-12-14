@@ -66,6 +66,20 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private void SpaceMapper_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                MicroEngActions.SpaceMapper();
+            }
+            catch (Exception ex)
+            {
+                LogToPanel($"[Space Mapper] failed to open: {ex.Message}");
+                System.Windows.MessageBox.Show($"Space Mapper failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void LogToPanel(string message)
         {
             if (Dispatcher.CheckAccess())

@@ -14,6 +14,11 @@ namespace MicroEng.Navisworks
 {
     public partial class AppendIntegrateDialog : Window
     {
+        static AppendIntegrateDialog()
+        {
+            AssemblyResolver.EnsureRegistered();
+        }
+
         private readonly AppendIntegrateTemplateStore _store;
         private ObservableCollection<AppendIntegrateTemplate> _templates;
         private AppendIntegrateTemplate _currentTemplate;
@@ -28,6 +33,7 @@ namespace MicroEng.Navisworks
             RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
 
             InitializeComponent();
+            MicroEngWpfUiTheme.ApplyTo(this);
             _store = new AppendIntegrateTemplateStore(AppDomain.CurrentDomain.BaseDirectory);
             _templates = new ObservableCollection<AppendIntegrateTemplate>(_store.Load());
             _currentTemplate = _templates.FirstOrDefault() ?? AppendIntegrateTemplate.CreateDefault("Default");

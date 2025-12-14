@@ -1,64 +1,82 @@
 <Window x:Class="MicroEng.Navisworks.DataScraperWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         Title="Data Scraper"
         Height="640" Width="900"
-        Background="#f5f7fb"
+        Background="{DynamicResource AppBackgroundBrush}"
         WindowStartupLocation="CenterOwner">
   <Window.Resources>
-    <SolidColorBrush x:Key="BgPanel" Color="#f5f7fb" />
-    <SolidColorBrush x:Key="BgMuted" Color="#eef1f4" />
-    <SolidColorBrush x:Key="TextPrimary" Color="#111827" />
-    <SolidColorBrush x:Key="TextSecondary" Color="#374151" />
-    <SolidColorBrush x:Key="Accent" Color="#8ba9d9" />
-    <Style x:Key="PrimaryButton" TargetType="Button">
-      <Setter Property="Background" Value="{StaticResource Accent}" />
-      <Setter Property="Foreground" Value="White" />
-      <Setter Property="Padding" Value="10,6" />
-      <Setter Property="Margin" Value="4" />
-      <Setter Property="BorderThickness" Value="0" />
-    </Style>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="pack://application:,,,/MicroEng.Navisworks;component/Assets/Theme/MicroEngUiKit.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
   </Window.Resources>
 
-  <Grid Margin="10">
+  <Grid Margin="{StaticResource PagePadding}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <GroupBox Header="Profile" Grid.Row="0" Padding="8" Margin="0,0,0,8">
+    <ui:Card Grid.Row="0" Padding="10" Margin="0,0,0,8">
       <Grid>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
-          <TextBlock Text="Profile Name:" VerticalAlignment="Center" Margin="0,0,6,0" />
-          <TextBox x:Name="ProfileNameBox" Width="240" TextChanged="ProfileNameBox_TextChanged" />
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="3*" />
+          <ColumnDefinition Width="2*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Vertical">
+          <TextBlock Text="Data Scraper" Style="{StaticResource PageTitleText}" />
+          <TextBlock Text="Scan a scope and cache properties for Data Matrix / Mapper." Style="{StaticResource SubtleText}" />
         </StackPanel>
-        <GroupBox Header="Scope" Grid.Row="1" Padding="8">
+
+        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,8,0">
+          <TextBlock Text="Profile Name:" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <TextBox x:Name="ProfileNameBox" Width="200" Style="{StaticResource InputTextBoxStyle}" TextChanged="ProfileNameBox_TextChanged" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+          <Button Content="Run Scrape" Style="{StaticResource PrimaryButtonStyle}" Click="Run_Click" />
+          <Button Content="Close" Style="{StaticResource SecondaryButtonStyle}" Click="Close_Click" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Grid.ColumnSpan="3" Style="{StaticResource CardBorder}">
           <Grid>
             <Grid.ColumnDefinitions>
               <ColumnDefinition Width="2*" />
               <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <StackPanel>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="Scope" Style="{StaticResource SectionTitleText}" Grid.ColumnSpan="2" />
+
+            <StackPanel Grid.Row="1">
               <RadioButton x:Name="SingleItemRadio" Content="Single Item (pick current selection)" IsChecked="True" />
               <RadioButton x:Name="CurrentSelectionRadio" Content="Current Selection" />
               <RadioButton x:Name="SelectionSetRadio" Content="Selection Set (coming soon)" IsEnabled="False" />
               <RadioButton x:Name="SearchSetRadio" Content="Search Set (coming soon)" IsEnabled="False" />
               <RadioButton x:Name="EntireModelRadio" Content="Entire Model" />
             </StackPanel>
-            <StackPanel Grid.Column="1">
-              <ComboBox x:Name="SelectionSetCombo" Margin="0,0,0,6" IsEnabled="False" />
-              <ComboBox x:Name="SearchSetCombo" Margin="0,0,0,6" IsEnabled="False" />
-              <Button Content="Refresh Sets" Click="RefreshSets_Click" />
+            <StackPanel Grid.Column="1" Grid.Row="1">
+              <ComboBox x:Name="SelectionSetCombo" Style="{StaticResource InputComboBoxStyle}" IsEnabled="False" />
+              <ComboBox x:Name="SearchSetCombo" Style="{StaticResource InputComboBoxStyle}" IsEnabled="False" />
+              <Button Content="Refresh Sets" Style="{StaticResource SecondaryButtonStyle}" Click="RefreshSets_Click" />
             </StackPanel>
           </Grid>
-        </GroupBox>
+        </Border>
       </Grid>
-    </GroupBox>
+    </ui:Card>
 
     <TabControl Grid.Row="1" Margin="0,0,0,8">
       <TabItem Header="Profile">
@@ -126,7 +144,7 @@
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
           <TextBox x:Name="FilterBox" Grid.Row="0" Margin="0,0,0,6" TextChanged="FilterBox_TextChanged" />
-          <DataGrid x:Name="PropertiesGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True">
+          <DataGrid x:Name="PropertiesGrid" Grid.Row="1" Style="{StaticResource DataGridStandardStyle}" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="150" />
               <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="200" />
@@ -147,7 +165,7 @@
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
           <TextBox x:Name="RawFilterBox" Grid.Row="0" Margin="0,0,0,6" TextChanged="RawFilterBox_TextChanged" />
-          <DataGrid x:Name="RawDataGrid" Grid.Row="1" AutoGenerateColumns="False" IsReadOnly="True">
+          <DataGrid x:Name="RawDataGrid" Grid.Row="1" Style="{StaticResource DataGridStandardStyle}" IsReadOnly="True">
             <DataGrid.Columns>
               <DataGridTextColumn Header="Profile" Binding="{Binding Profile}" Width="100" />
               <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="140" />

@@ -4,7 +4,7 @@ using System.Runtime.Serialization;
 
 namespace MicroEng.Navisworks
 {
-    internal enum SpaceMapperProcessingMode
+    public enum SpaceMapperProcessingMode
     {
         Auto,
         CpuNormal,
@@ -13,7 +13,7 @@ namespace MicroEng.Navisworks
         Debug
     }
 
-    internal enum SpaceMapperTargetType
+    public enum SpaceMapperTargetType
     {
         SelectionTreeLevel,
         SelectionSet,
@@ -22,14 +22,14 @@ namespace MicroEng.Navisworks
         VisibleInView
     }
 
-    internal enum SpaceMembershipMode
+    public enum SpaceMembershipMode
     {
         ContainedOnly,
         PartialOnly,
         ContainedAndPartial
     }
 
-    internal enum MultiZoneCombineMode
+    public enum MultiZoneCombineMode
     {
         First,
         Concatenate,
@@ -38,14 +38,14 @@ namespace MicroEng.Navisworks
         Average
     }
 
-    internal enum WriteMode
+    public enum WriteMode
     {
         Overwrite,
         OnlyIfBlank,
         Append
     }
 
-    internal enum SpaceMapperScope
+    public enum SpaceMapperScope
     {
         EntireModel,
         CurrentView,
@@ -54,14 +54,14 @@ namespace MicroEng.Navisworks
         SearchSet
     }
 
-    internal enum ZoneSourceType
+    public enum ZoneSourceType
     {
         DataScraperZones,
         ZoneSelectionSet,
         ZoneSearchSet
     }
 
-    internal enum TargetSourceType
+    public enum TargetSourceType
     {
         EntireModel,
         Visible,

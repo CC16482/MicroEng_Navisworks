@@ -13,6 +13,11 @@ namespace MicroEng.Navisworks
 {
     public partial class DataMatrixControl : UserControl
     {
+        static DataMatrixControl()
+        {
+            AssemblyResolver.EnsureRegistered();
+        }
+
         private readonly DataMatrixRowBuilder _builder = new();
         private readonly IDataMatrixPresetManager _presetManager = new InMemoryPresetManager();
         private readonly DataMatrixExporter _exporter = new();
@@ -28,6 +33,7 @@ namespace MicroEng.Navisworks
         public DataMatrixControl()
         {
             InitializeComponent();
+            MicroEngWpfUiTheme.ApplyTo(this);
             Loaded += (_, __) => InitializeUi();
         }
 

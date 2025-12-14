@@ -3,136 +3,65 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              mc:Ignorable="d"
              d:DesignHeight="520" d:DesignWidth="380"
              MinWidth="360"
              MinHeight="520"
-             Background="#f5f7fb">
+             Background="{DynamicResource ApplicationBackgroundBrush}">
     <UserControl.Resources>
-        <SolidColorBrush x:Key="BgPanel" Color="#f5f7fb" />
-        <SolidColorBrush x:Key="BgMuted" Color="#eef1f4" />
-        <SolidColorBrush x:Key="TextPrimary" Color="#111827" />
-        <SolidColorBrush x:Key="TextSecondary" Color="#374151" />
-        <SolidColorBrush x:Key="Accent" Color="#8ba9d9" />
-        <SolidColorBrush x:Key="AccentStrong" Color="#6b89c9" />
-
-        <Style x:Key="PrimaryButton" TargetType="Button">
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                CornerRadius="6"
-                                BorderThickness="0"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="Background" Value="{StaticResource Accent}" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="Padding" Value="10,8" />
-            <Setter Property="Margin" Value="0,6,0,6" />
-            <Setter Property="FontFamily" Value="Segoe UI" />
-            <Setter Property="FontSize" Value="12" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
-
-        <Style x:Key="SecondaryButton" TargetType="Button">
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Setter Property="Background" Value="{StaticResource BgMuted}" />
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
-            <Setter Property="Padding" Value="10,8" />
-            <Setter Property="Margin" Value="0,4,0,4" />
-            <Setter Property="BorderBrush" Value="{StaticResource Accent}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="FontFamily" Value="Segoe UI" />
-            <Setter Property="FontSize" Value="12" />
-        </Style>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="pack://application:,,,/MicroEng.Navisworks;component/Assets/Theme/MicroEngUiKit.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </UserControl.Resources>
 
-    <Border Background="{StaticResource BgPanel}"
-            BorderBrush="#d0d7de"
-            BorderThickness="1"
-            CornerRadius="8"
-            Padding="12">
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-            <Border Grid.Row="0"
-                    Background="{StaticResource BgMuted}"
-                    Padding="10,8"
-                    CornerRadius="6"
-                    Margin="0,0,0,10">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="160" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Image Source="pack://siteoforigin:,,,/Logos/microeng-logo2.png"
-                           Height="32"
-                           Stretch="Uniform"
+        <ui:Card Grid.Row="0" Padding="10" Margin="0,0,0,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="160" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Image Source="pack://siteoforigin:,,,/Logos/microeng-logo2.png"
+                       Height="32"
+                       Stretch="Uniform"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Center" />
+                <TextBlock Grid.Column="1"
+                           Text="MicroEng Tools"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Foreground="{StaticResource TextPrimary}"
                            HorizontalAlignment="Left"
-                           VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="1"
-                               Text="MicroEng Tools"
-                               FontSize="14"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               Foreground="{StaticResource TextPrimary}"
-                               HorizontalAlignment="Left"
-                               Margin="12,0,0,0" />
-                </Grid>
-            </Border>
+                           Margin="12,0,0,0" />
+            </Grid>
+        </ui:Card>
 
-            <Button Grid.Row="1"
-                    Content="Data Scraper"
-                    Style="{StaticResource SecondaryButton}"
-                    Click="DataScraper_Click" />
+        <ui:Card Grid.Row="1" Padding="10" Margin="0,0,0,8">
+            <StackPanel>
+                <ui:Button Content="Data Scraper" Appearance="Secondary" Margin="0,4" Click="DataScraper_Click"/>
+                <ui:Button Content="Data Mapper" Appearance="Primary" Margin="0,4" Click="AppendData_Click"/>
+                <ui:Button Content="Data Matrix" Appearance="Secondary" Margin="0,4" Click="DataMatrix_Click"/>
+                <ui:Button Content="Space Mapper" Appearance="Secondary" Margin="0,4" Click="SpaceMapper_Click"/>
+            </StackPanel>
+        </ui:Card>
 
-            <Button Grid.Row="2"
-                    Content="Data Mapper"
-                    Style="{StaticResource PrimaryButton}"
-                    Click="AppendData_Click" />
-
-            <Button Grid.Row="3"
-                    Content="Data Matrix"
-                    Style="{StaticResource SecondaryButton}"
-                    Click="DataMatrix_Click" />
-
-            <Button Grid.Row="4"
-                    Content="Space Mapper"
-                    Style="{StaticResource SecondaryButton}"
-                    Click="SpaceMapper_Click" />
-
-            <TextBlock Grid.Row="5"
-                       Text="Log"
-                       Foreground="{StaticResource TextSecondary}"
-                       FontWeight="Bold"
-                       Margin="0,8,0,4" />
-
-            <TextBox Grid.Row="6"
-                     x:Name="LogTextBox"
+        <ui:Card Grid.Row="2" Padding="10" Margin="0,0,0,0">
+            <StackPanel>
+                <TextBlock Text="Log"
+                           FontWeight="SemiBold"
+                           Margin="0,0,0,6"
+                           Foreground="{StaticResource TextPrimary}" />
+            <TextBox x:Name="LogTextBox"
                      Text="Ready"
                      AcceptsReturn="True"
                      IsReadOnly="True"
@@ -142,6 +71,7 @@
                      Background="White"
                      FontFamily="Segoe UI"
                      FontSize="11" />
-        </Grid>
-    </Border>
+            </StackPanel>
+        </ui:Card>
+    </Grid>
 </UserControl>

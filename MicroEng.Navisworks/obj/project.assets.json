@@ -1,11 +1,275 @@
 {
   "version": 3,
   "targets": {
-    ".NETFramework,Version=v4.8": {}
+    ".NETFramework,Version=v4.8": {
+      "System.Buffers/4.6.1": {
+        "type": "package",
+        "compile": {
+          "lib/net462/System.Buffers.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net462/System.Buffers.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net462/_._": {}
+        }
+      },
+      "System.Memory/4.6.3": {
+        "type": "package",
+        "dependencies": {
+          "System.Buffers": "4.6.1",
+          "System.Numerics.Vectors": "4.6.1",
+          "System.Runtime.CompilerServices.Unsafe": "6.1.2"
+        },
+        "compile": {
+          "lib/net462/System.Memory.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net462/System.Memory.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net462/_._": {}
+        }
+      },
+      "System.Numerics.Vectors/4.6.1": {
+        "type": "package",
+        "frameworkAssemblies": [
+          "System.Numerics"
+        ],
+        "compile": {
+          "lib/net462/System.Numerics.Vectors.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net462/System.Numerics.Vectors.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net462/_._": {}
+        }
+      },
+      "System.Runtime.CompilerServices.Unsafe/6.1.2": {
+        "type": "package",
+        "frameworkAssemblies": [
+          "mscorlib"
+        ],
+        "compile": {
+          "lib/net462/System.Runtime.CompilerServices.Unsafe.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net462/System.Runtime.CompilerServices.Unsafe.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net462/_._": {}
+        }
+      },
+      "WPF-UI/4.1.0": {
+        "type": "package",
+        "dependencies": {
+          "System.Memory": "4.6.3",
+          "WPF-UI.Abstractions": "4.1.0"
+        },
+        "compile": {
+          "lib/net472/Wpf.Ui.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/net472/Wpf.Ui.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
+      "WPF-UI.Abstractions/4.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/net462/Wpf.Ui.Abstractions.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/net462/Wpf.Ui.Abstractions.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      }
+    }
   },
-  "libraries": {},
+  "libraries": {
+    "System.Buffers/4.6.1": {
+      "sha512": "N8GXpmiLMtljq7gwvyS+1QvKT/W2J8sNAvx+HVg4NGmsG/H+2k/y9QI23auLJRterrzCiDH+IWAw4V/GPwsMlw==",
+      "type": "package",
+      "path": "system.buffers/4.6.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "PACKAGE.md",
+        "buildTransitive/net461/System.Buffers.targets",
+        "buildTransitive/net462/_._",
+        "lib/net462/System.Buffers.dll",
+        "lib/net462/System.Buffers.xml",
+        "lib/netcoreapp2.0/_._",
+        "lib/netstandard2.0/System.Buffers.dll",
+        "lib/netstandard2.0/System.Buffers.xml",
+        "lib/netstandard2.1/_._",
+        "system.buffers.4.6.1.nupkg.sha512",
+        "system.buffers.nuspec"
+      ]
+    },
+    "System.Memory/4.6.3": {
+      "sha512": "qdcDOgnFZY40+Q9876JUHnlHu7bosOHX8XISRoH94fwk6hgaeQGSgfZd8srWRZNt5bV9ZW2TljcegDNxsf+96A==",
+      "type": "package",
+      "path": "system.memory/4.6.3",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "PACKAGE.md",
+        "buildTransitive/net461/System.Memory.targets",
+        "buildTransitive/net462/_._",
+        "lib/net462/System.Memory.dll",
+        "lib/net462/System.Memory.xml",
+        "lib/netcoreapp2.1/_._",
+        "lib/netstandard2.0/System.Memory.dll",
+        "lib/netstandard2.0/System.Memory.xml",
+        "lib/netstandard2.1/_._",
+        "system.memory.4.6.3.nupkg.sha512",
+        "system.memory.nuspec"
+      ]
+    },
+    "System.Numerics.Vectors/4.6.1": {
+      "sha512": "sQxefTnhagrhoq2ReR0D/6K0zJcr9Hrd6kikeXsA1I8kOCboTavcUC4r7TSfpKFeE163uMuxZcyfO1mGO3EN8Q==",
+      "type": "package",
+      "path": "system.numerics.vectors/4.6.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "PACKAGE.md",
+        "buildTransitive/net461/System.Numerics.Vectors.targets",
+        "buildTransitive/net462/_._",
+        "lib/net462/System.Numerics.Vectors.dll",
+        "lib/net462/System.Numerics.Vectors.xml",
+        "lib/netcoreapp2.0/_._",
+        "lib/netstandard2.0/System.Numerics.Vectors.dll",
+        "lib/netstandard2.0/System.Numerics.Vectors.xml",
+        "lib/netstandard2.1/_._",
+        "system.numerics.vectors.4.6.1.nupkg.sha512",
+        "system.numerics.vectors.nuspec"
+      ]
+    },
+    "System.Runtime.CompilerServices.Unsafe/6.1.2": {
+      "sha512": "2hBr6zdbIBTDE3EhK7NSVNdX58uTK6iHW/P/Axmm9sl1xoGSLqDvMtpecn226TNwHByFokYwJmt/aQQNlO5CRw==",
+      "type": "package",
+      "path": "system.runtime.compilerservices.unsafe/6.1.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "PACKAGE.md",
+        "buildTransitive/net461/System.Runtime.CompilerServices.Unsafe.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net6.0/_._",
+        "buildTransitive/netcoreapp2.0/System.Runtime.CompilerServices.Unsafe.targets",
+        "lib/net462/System.Runtime.CompilerServices.Unsafe.dll",
+        "lib/net462/System.Runtime.CompilerServices.Unsafe.xml",
+        "lib/net6.0/System.Runtime.CompilerServices.Unsafe.dll",
+        "lib/net6.0/System.Runtime.CompilerServices.Unsafe.xml",
+        "lib/net7.0/_._",
+        "lib/netstandard2.0/System.Runtime.CompilerServices.Unsafe.dll",
+        "lib/netstandard2.0/System.Runtime.CompilerServices.Unsafe.xml",
+        "system.runtime.compilerservices.unsafe.6.1.2.nupkg.sha512",
+        "system.runtime.compilerservices.unsafe.nuspec"
+      ]
+    },
+    "WPF-UI/4.1.0": {
+      "sha512": "bL+ehJIgRl9bh8imYFJ33DsJrqcU6xfmbEBPlghW/jaBYtbCEDLfuxsEAVITYQjAxTJjPy+DT5vll3XOSCmHgQ==",
+      "type": "package",
+      "path": "wpf-ui/4.1.0",
+      "hasTools": true,
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.md",
+        "README.md",
+        "ThirdPartyNotices.txt",
+        "lib/net10.0-windows7.0/Wpf.Ui.dll",
+        "lib/net10.0-windows7.0/Wpf.Ui.pdb",
+        "lib/net10.0-windows7.0/Wpf.Ui.xml",
+        "lib/net462/Wpf.Ui.dll",
+        "lib/net462/Wpf.Ui.pdb",
+        "lib/net462/Wpf.Ui.xml",
+        "lib/net472/Wpf.Ui.dll",
+        "lib/net472/Wpf.Ui.pdb",
+        "lib/net472/Wpf.Ui.xml",
+        "lib/net481/Wpf.Ui.dll",
+        "lib/net481/Wpf.Ui.pdb",
+        "lib/net481/Wpf.Ui.xml",
+        "lib/net8.0-windows7.0/Wpf.Ui.dll",
+        "lib/net8.0-windows7.0/Wpf.Ui.pdb",
+        "lib/net8.0-windows7.0/Wpf.Ui.xml",
+        "lib/net9.0-windows7.0/Wpf.Ui.dll",
+        "lib/net9.0-windows7.0/Wpf.Ui.pdb",
+        "lib/net9.0-windows7.0/Wpf.Ui.xml",
+        "tools/VisualStudioToolsManifest.xml",
+        "wpf-ui.4.1.0.nupkg.sha512",
+        "wpf-ui.nuspec"
+      ]
+    },
+    "WPF-UI.Abstractions/4.1.0": {
+      "sha512": "SzwdKzoA9ZlNXitVPUBAp79Pao5iRM/miny7/yIQGJwKzfx5bojjzNG4jV9B861ub5zer/AioDwCDc2cUpCoMA==",
+      "type": "package",
+      "path": "wpf-ui.abstractions/4.1.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.md",
+        "README.md",
+        "ThirdPartyNotices.txt",
+        "lib/net10.0/Wpf.Ui.Abstractions.dll",
+        "lib/net10.0/Wpf.Ui.Abstractions.pdb",
+        "lib/net10.0/Wpf.Ui.Abstractions.xml",
+        "lib/net462/Wpf.Ui.Abstractions.dll",
+        "lib/net462/Wpf.Ui.Abstractions.pdb",
+        "lib/net462/Wpf.Ui.Abstractions.xml",
+        "lib/net8.0/Wpf.Ui.Abstractions.dll",
+        "lib/net8.0/Wpf.Ui.Abstractions.pdb",
+        "lib/net8.0/Wpf.Ui.Abstractions.xml",
+        "lib/net9.0/Wpf.Ui.Abstractions.dll",
+        "lib/net9.0/Wpf.Ui.Abstractions.pdb",
+        "lib/net9.0/Wpf.Ui.Abstractions.xml",
+        "lib/netstandard2.0/Wpf.Ui.Abstractions.dll",
+        "lib/netstandard2.0/Wpf.Ui.Abstractions.pdb",
+        "lib/netstandard2.0/Wpf.Ui.Abstractions.xml",
+        "lib/netstandard2.1/Wpf.Ui.Abstractions.dll",
+        "lib/netstandard2.1/Wpf.Ui.Abstractions.pdb",
+        "lib/netstandard2.1/Wpf.Ui.Abstractions.xml",
+        "wpf-ui.abstractions.4.1.0.nupkg.sha512",
+        "wpf-ui.abstractions.nuspec"
+      ]
+    }
+  },
   "projectFileDependencyGroups": {
-    ".NETFramework,Version=v4.8": []
+    ".NETFramework,Version=v4.8": [
+      "WPF-UI >= 4.1.0"
+    ]
   },
   "packageFolders": {
     "C:\\Users\\Chris\\.nuget\\packages\\": {},
@@ -32,7 +296,9 @@
         "net48"
       ],
       "sources": {
-        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {}
+        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
+        "C:\\Program Files\\dotnet\\library-packs": {},
+        "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
         "net48": {
@@ -50,12 +316,18 @@
         "auditLevel": "low",
         "auditMode": "direct"
       },
-      "SdkAnalysisLevel": "9.0.300"
+      "SdkAnalysisLevel": "10.0.100"
     },
     "frameworks": {
       "net48": {
         "targetAlias": "net48",
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.300\\RuntimeIdentifierGraph.json"
+        "dependencies": {
+          "WPF-UI": {
+            "target": "Package",
+            "version": "[4.1.0, )"
+          }
+        },
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100\\RuntimeIdentifierGraph.json"
       }
     }
   }

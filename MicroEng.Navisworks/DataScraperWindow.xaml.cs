@@ -10,6 +10,11 @@ namespace MicroEng.Navisworks
 {
     public partial class DataScraperWindow : Window
     {
+        static DataScraperWindow()
+        {
+            AssemblyResolver.EnsureRegistered();
+        }
+
         private readonly DataScraperService _service = new();
         private List<ScrapedPropertyView> _currentProperties = new();
         private ScrapeScopeType _lastScope = ScrapeScopeType.CurrentSelection;
@@ -20,6 +25,7 @@ namespace MicroEng.Navisworks
         public DataScraperWindow(string initialProfile = null)
         {
             InitializeComponent();
+            MicroEngWpfUiTheme.ApplyTo(this);
             try
             {
                 if (!string.IsNullOrWhiteSpace(initialProfile))

@@ -51,6 +51,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="WPF-UI" Version="4.1.0" />
+  </ItemGroup>
 
   <!-- Mark design-only XAML mocks as None so they don't compile -->
   <!-- After build, copy dll to Navisworks Plugins\<AssemblyName>\ -->
@@ -58,8 +61,12 @@
   <!-- This follows the typical "side-loading" pattern many devs use. :contentReference[oaicite:4]{index=4} -->
   <Target Name="AfterBuild">
     <MakeDir Directories="$(NavisPluginsDir)\$(AssemblyName)" />
-    <Copy SourceFiles="$(TargetPath)"
-          DestinationFolder="$(NavisPluginsDir)\$(AssemblyName)" />
+    <ItemGroup>
+      <PluginFiles Include="$(TargetDir)**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PluginFiles)"
+          DestinationFiles="@(PluginFiles->'$(NavisPluginsDir)\$(AssemblyName)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
 
     <!-- Optional AppBundle for side-loading via %AppData% (does not require admin) -->
     <PropertyGroup>

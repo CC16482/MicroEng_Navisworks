@@ -7,79 +7,59 @@
              mc:Ignorable="d"
              d:DesignHeight="600"
              d:DesignWidth="900"
-             Background="#f5f7fb">
+             Background="{DynamicResource AppBackgroundBrush}">
     <UserControl.Resources>
-        <SolidColorBrush x:Key="BgPanel" Color="#f5f7fb" />
-        <SolidColorBrush x:Key="BgMuted" Color="#eef1f4" />
-        <SolidColorBrush x:Key="TextPrimary" Color="#111827" />
-        <SolidColorBrush x:Key="TextSecondary" Color="#374151" />
-        <SolidColorBrush x:Key="Accent" Color="#8ba9d9" />
-        <SolidColorBrush x:Key="AccentStrong" Color="#6b89c9" />
-        <x:Array x:Key="TargetTypes" Type="{x:Type local:SpaceMapperTargetType}">
-            <local:SpaceMapperTargetType>SelectionTreeLevel</local:SpaceMapperTargetType>
-            <local:SpaceMapperTargetType>SelectionSet</local:SpaceMapperTargetType>
-            <local:SpaceMapperTargetType>SearchSet</local:SpaceMapperTargetType>
-            <local:SpaceMapperTargetType>CurrentSelection</local:SpaceMapperTargetType>
-            <local:SpaceMapperTargetType>VisibleInView</local:SpaceMapperTargetType>
-        </x:Array>
-        <x:Array x:Key="MembershipModes" Type="{x:Type local:SpaceMembershipMode}">
-            <local:SpaceMembershipMode>ContainedOnly</local:SpaceMembershipMode>
-            <local:SpaceMembershipMode>PartialOnly</local:SpaceMembershipMode>
-            <local:SpaceMembershipMode>ContainedAndPartial</local:SpaceMembershipMode>
-        </x:Array>
-        <x:Array x:Key="WriteModes" Type="{x:Type local:WriteMode}">
-            <local:WriteMode>Overwrite</local:WriteMode>
-            <local:WriteMode>OnlyIfBlank</local:WriteMode>
-            <local:WriteMode>Append</local:WriteMode>
-        </x:Array>
-        <x:Array x:Key="CombineModes" Type="{x:Type local:MultiZoneCombineMode}">
-            <local:MultiZoneCombineMode>First</local:MultiZoneCombineMode>
-            <local:MultiZoneCombineMode>Concatenate</local:MultiZoneCombineMode>
-            <local:MultiZoneCombineMode>Min</local:MultiZoneCombineMode>
-            <local:MultiZoneCombineMode>Max</local:MultiZoneCombineMode>
-            <local:MultiZoneCombineMode>Average</local:MultiZoneCombineMode>
-        </x:Array>
-
-        <Style x:Key="PrimaryButton" TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource Accent}" />
-            <Setter Property="Foreground" Value="White" />
-            <Setter Property="Padding" Value="10,6" />
-            <Setter Property="Margin" Value="4" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="FontWeight" Value="SemiBold" />
-        </Style>
-
-        <Style x:Key="SecondaryButton" TargetType="Button">
-            <Setter Property="Background" Value="{StaticResource BgMuted}" />
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
-            <Setter Property="Padding" Value="8,6" />
-            <Setter Property="Margin" Value="4" />
-            <Setter Property="BorderBrush" Value="{StaticResource Accent}" />
-            <Setter Property="BorderThickness" Value="1" />
-        </Style>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="pack://application:,,,/MicroEng.Navisworks;component/Assets/Theme/MicroEngUiKit.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <x:Array x:Key="TargetTypes" Type="{x:Type local:SpaceMapperTargetType}">
+                <local:SpaceMapperTargetType>SelectionTreeLevel</local:SpaceMapperTargetType>
+                <local:SpaceMapperTargetType>SelectionSet</local:SpaceMapperTargetType>
+                <local:SpaceMapperTargetType>SearchSet</local:SpaceMapperTargetType>
+                <local:SpaceMapperTargetType>CurrentSelection</local:SpaceMapperTargetType>
+                <local:SpaceMapperTargetType>VisibleInView</local:SpaceMapperTargetType>
+            </x:Array>
+            <x:Array x:Key="MembershipModes" Type="{x:Type local:SpaceMembershipMode}">
+                <local:SpaceMembershipMode>ContainedOnly</local:SpaceMembershipMode>
+                <local:SpaceMembershipMode>PartialOnly</local:SpaceMembershipMode>
+                <local:SpaceMembershipMode>ContainedAndPartial</local:SpaceMembershipMode>
+            </x:Array>
+            <x:Array x:Key="WriteModes" Type="{x:Type local:WriteMode}">
+                <local:WriteMode>Overwrite</local:WriteMode>
+                <local:WriteMode>OnlyIfBlank</local:WriteMode>
+                <local:WriteMode>Append</local:WriteMode>
+            </x:Array>
+            <x:Array x:Key="CombineModes" Type="{x:Type local:MultiZoneCombineMode}">
+                <local:MultiZoneCombineMode>First</local:MultiZoneCombineMode>
+                <local:MultiZoneCombineMode>Concatenate</local:MultiZoneCombineMode>
+                <local:MultiZoneCombineMode>Min</local:MultiZoneCombineMode>
+                <local:MultiZoneCombineMode>Max</local:MultiZoneCombineMode>
+                <local:MultiZoneCombineMode>Average</local:MultiZoneCombineMode>
+            </x:Array>
+        </ResourceDictionary>
     </UserControl.Resources>
 
-    <Grid>
+    <Grid Margin="{StaticResource PagePadding}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0"
-                Background="{StaticResource BgMuted}"
-                Padding="8"
-                BorderBrush="#d0d7de"
-                BorderThickness="0,0,0,1">
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" >
-                <TextBlock Text="Scraper Profile:" Margin="0,0,6,0" VerticalAlignment="Center" />
-                <ComboBox x:Name="ProfileCombo" Width="160" Margin="0,0,8,0" />
-                <Button x:Name="RefreshProfilesButton" Content="Refresh" Style="{StaticResource SecondaryButton}" />
+        <Border Grid.Row="0" Style="{StaticResource CardBorder}">
+            <StackPanel Orientation="Vertical">
+                <TextBlock Text="Space Mapper" Style="{StaticResource PageTitleText}" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="Scraper Profile:" Margin="0,0,6,0" VerticalAlignment="Center" />
+                    <ComboBox x:Name="ProfileCombo" Width="160" Style="{StaticResource InputComboBoxStyle}" Margin="0,0,8,0" />
+                    <Button x:Name="RefreshProfilesButton" Content="Refresh" Style="{StaticResource ToolbarButtonStyle}" />
 
-                <TextBlock Text="Scope:" Margin="12,0,6,0" VerticalAlignment="Center" />
-                <ComboBox x:Name="ScopeCombo" Width="140" Margin="0,0,8,0" />
+                    <TextBlock Text="Scope:" Margin="12,0,6,0" VerticalAlignment="Center" />
+                    <ComboBox x:Name="ScopeCombo" Width="140" Style="{StaticResource InputComboBoxStyle}" Margin="0,0,8,0" />
 
-                <Button x:Name="RunScraperButton" Content="Run Data Scraper..." Style="{StaticResource SecondaryButton}" />
-                <Button x:Name="RunButton" Content="Run Space Mapper" Style="{StaticResource PrimaryButton}" />
+                    <Button x:Name="RunScraperButton" Content="Run Data Scraper..." Style="{StaticResource ToolbarButtonStyle}" />
+                    <Button x:Name="RunButton" Content="Run Space Mapper" Style="{StaticResource PrimaryButtonStyle}" />
+                </StackPanel>
             </StackPanel>
         </Border>
 
@@ -107,12 +87,13 @@
                     </StackPanel>
 
                     <StackPanel Orientation="Horizontal" Grid.Row="2" Margin="0,0,0,6">
-                        <Button x:Name="AddRuleButton" Content="Add Rule" Style="{StaticResource SecondaryButton}"/>
-                        <Button x:Name="DeleteRuleButton" Content="Delete Rule" Style="{StaticResource SecondaryButton}"/>
+                        <Button x:Name="AddRuleButton" Content="Add Rule" Style="{StaticResource SecondaryButtonStyle}"/>
+                        <Button x:Name="DeleteRuleButton" Content="Delete Rule" Style="{StaticResource SecondaryButtonStyle}"/>
                     </StackPanel>
 
                     <DataGrid x:Name="TargetRulesGrid"
                               Grid.Row="3"
+                              Style="{StaticResource DataGridStandardStyle}"
                               AutoGenerateColumns="False"
                               CanUserAddRows="False"
                               CanUserDeleteRows="False"
@@ -194,14 +175,15 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,6">
-                        <Button x:Name="AddMappingButton" Content="Add Mapping" Style="{StaticResource SecondaryButton}"/>
-                        <Button x:Name="DeleteMappingButton" Content="Delete Mapping" Style="{StaticResource SecondaryButton}"/>
-                        <Button x:Name="SaveTemplateButton" Content="Save Template" Style="{StaticResource SecondaryButton}"/>
-                        <Button x:Name="LoadTemplateButton" Content="Load Template" Style="{StaticResource SecondaryButton}"/>
+                        <Button x:Name="AddMappingButton" Content="Add Mapping" Style="{StaticResource SecondaryButtonStyle}"/>
+                        <Button x:Name="DeleteMappingButton" Content="Delete Mapping" Style="{StaticResource SecondaryButtonStyle}"/>
+                        <Button x:Name="SaveTemplateButton" Content="Save Template" Style="{StaticResource SecondaryButtonStyle}"/>
+                        <Button x:Name="LoadTemplateButton" Content="Load Template" Style="{StaticResource SecondaryButtonStyle}"/>
                     </StackPanel>
 
                     <DataGrid x:Name="MappingGrid"
                               Grid.Row="1"
+                              Style="{StaticResource DataGridStandardStyle}"
                               AutoGenerateColumns="False"
                               CanUserAddRows="False"
                               CanUserDeleteRows="False"
@@ -236,7 +218,7 @@
                     </Grid.RowDefinitions>
 
                     <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,6">
-                        <Button x:Name="ExportStatsButton" Content="Export Stats to CSV" Style="{StaticResource SecondaryButton}"/>
+                        <Button x:Name="ExportStatsButton" Content="Export Stats to CSV" Style="{StaticResource SecondaryButtonStyle}"/>
                     </StackPanel>
 
                     <TextBox x:Name="ResultsSummaryBox"
@@ -249,6 +231,7 @@
 
                     <DataGrid x:Name="ResultsGrid"
                               Grid.Row="2"
+                              Style="{StaticResource DataGridStandardStyle}"
                               AutoGenerateColumns="False"
                               CanUserAddRows="False"
                               CanUserDeleteRows="False"

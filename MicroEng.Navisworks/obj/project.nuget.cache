@@ -1,8 +1,15 @@
 {
   "version": 2,
-  "dgSpecHash": "BY9gNoGEer4=",
+  "dgSpecHash": "bRMrVZFaCwk=",
   "success": true,
   "projectFilePath": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\MicroEng.Navisworks.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\Chris\\.nuget\\packages\\system.buffers\\4.6.1\\system.buffers.4.6.1.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\system.memory\\4.6.3\\system.memory.4.6.3.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\system.numerics.vectors\\4.6.1\\system.numerics.vectors.4.6.1.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\system.runtime.compilerservices.unsafe\\6.1.2\\system.runtime.compilerservices.unsafe.6.1.2.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\wpf-ui\\4.1.0\\wpf-ui.4.1.0.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\wpf-ui.abstractions\\4.1.0\\wpf-ui.abstractions.4.1.0.nupkg.sha512"
+  ],
   "logs": []
 }

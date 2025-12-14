@@ -4,8 +4,15 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\Logos\microeng_logotray.png
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\MicroEng.Navisworks.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\MicroEng.Navisworks.pdb
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\System.Buffers.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\System.Memory.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\System.Numerics.Vectors.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\System.Runtime.CompilerServices.Unsafe.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\Wpf.Ui.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\Wpf.Ui.Abstractions.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.csproj.AssemblyReference.cache
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\AppendIntegrateDialog.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\Assets\Theme\MicroEngUiKit.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataMatrixControl.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataScraperWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEngPanelControl.baml
@@ -24,5 +31,6 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.AssemblyInfo.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.csproj.CoreCompileInputs.cache
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.sourcelink.json
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.51BD3962.Up2Date
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.pdb

@@ -5,6 +5,12 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.exe.config
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.exe
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.pdb
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\System.Buffers.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\System.Memory.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\System.Numerics.Vectors.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\System.Runtime.CompilerServices.Unsafe.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\Wpf.Ui.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\Wpf.Ui.Abstractions.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.Navisworks.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.Navisworks.pdb
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\obj\Debug\net48\MicroEng.DesignHost.csproj.AssemblyReference.cache

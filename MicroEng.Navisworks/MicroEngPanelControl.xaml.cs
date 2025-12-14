@@ -7,9 +7,15 @@ namespace MicroEng.Navisworks
 {
     public partial class MicroEngPanelControl : UserControl
     {
+        static MicroEngPanelControl()
+        {
+            AssemblyResolver.EnsureRegistered();
+        }
+
         public MicroEngPanelControl()
         {
             InitializeComponent();
+            MicroEngWpfUiTheme.ApplyTo(this);
 
             if (!DesignerProperties.GetIsInDesignMode(this))
             {

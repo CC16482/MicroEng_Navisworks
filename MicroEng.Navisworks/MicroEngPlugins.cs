@@ -1,11 +1,10 @@
 using System;
 using System.Drawing;
 using System.IO;
+using System.Reflection;
 using System.Windows.Forms;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.Plugins;
-using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
-using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
 using NavisApp = Autodesk.Navisworks.Api.Application;
 using DrawingColor = System.Drawing.Color;
 using DrawingColorTranslator = System.Drawing.ColorTranslator;
@@ -47,61 +46,28 @@ namespace MicroEng.Navisworks
 
     internal static class MicroEngActions
     {
-        private const string CategoryName = "MicroEng";
-        private const string TagPropertyName = "Tag";
-
         public static event Action<string> LogMessage;
+
+        static MicroEngActions()
+        {
+            AssemblyResolver.EnsureRegistered();
+        }
 
         public static void AppendData()
         {
             try
             {
-                var doc = NavisApp.ActiveDocument;
-                if (doc == null)
+                var window = new AppendIntegrateDialog
                 {
-                    ShowInfo("No active document.");
-                    return;
-                }
-
-                var selectedItems = doc.CurrentSelection?.SelectedItems;
-                var total = selectedItems?.Count ?? 0;
-                if (selectedItems == null || total == 0)
-                {
-                    ShowInfo("Nothing selected. Select one or more items and run Append Data again.");
-                    Log("Append Data skipped - no selection.");
-                    return;
-                }
-
-                var tagValue = $"ME-AUTO-{DateTime.Now:yyyyMMdd-HHmmss}";
-                var success = 0;
-                var failed = 0;
-
-                foreach (ModelItem item in selectedItems)
-                {
-                    if (item == null) continue;
-
-                    if (TryWriteMicroEngTag(item, tagValue))
-                    {
-                        success++;
-                    }
-                    else
-                    {
-                        failed++;
-                    }
-                }
-
-                var summary = $"Append Data: tagged {success}/{total} selected items with '{tagValue}'.";
-                Log(summary);
-
-                if (failed > 0)
-                {
-                    Log($"Append Data encountered {failed} write errors. Check Trace for details.");
-                }
+                    LogAction = Log
+                };
+                ElementHost.EnableModelessKeyboardInterop(window);
+                window.Show();
             }
             catch (Exception ex)
             {
-                Log($"Append Data failed: {ex}");
-                MessageBox.Show($"Append Data failed: {ex.Message}", "MicroEng",
+                Log($"Data Mapper failed: {ex}");
+                MessageBox.Show($"Data Mapper failed: {ex.Message}", "MicroEng",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -135,66 +101,6 @@ namespace MicroEng.Navisworks
         private static void ShowInfo(string message)
         {
             MessageBox.Show(message, "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Information);
-        }
-
-        private static bool TryWriteMicroEngTag(ModelItem item, string tagValue)
-        {
-            try
-            {
-                var state = ComBridge.State;
-                var path = ComBridge.ToInwOaPath(item);
-                var propertyNode = (ComApi.InwGUIPropertyNode2)state.GetGUIPropertyNode(path, true);
-
-                // Try to reuse an existing MicroEng tab so we don't blow away other properties
-                ComApi.InwOaPropertyVec propertyVector = null;
-                try
-                {
-                    var getMethod = propertyNode.GetType().GetMethod("GetUserDefined");
-                    propertyVector = getMethod?.Invoke(propertyNode, new object[] { 0, CategoryName }) as ComApi.InwOaPropertyVec;
-                }
-                catch
-                {
-                    // ignore read failures and fall back to creating a fresh vector
-                }
-
-                if (propertyVector == null)
-                {
-                    propertyVector = (ComApi.InwOaPropertyVec)state.ObjectFactory(
-                        ComApi.nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
-                }
-
-                // Find or create the Tag property on that tab
-                ComApi.InwOaProperty tagProperty = null;
-                foreach (ComApi.InwOaProperty prop in propertyVector.Properties())
-                {
-                    if (prop == null) continue;
-                    if (string.Equals(prop.name, TagPropertyName, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(prop.UserName, TagPropertyName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        tagProperty = prop;
-                        break;
-                    }
-                }
-
-                if (tagProperty == null)
-                {
-                    tagProperty = (ComApi.InwOaProperty)state.ObjectFactory(
-                        ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
-                    tagProperty.name = TagPropertyName;
-                    tagProperty.UserName = TagPropertyName;
-                    propertyVector.Properties().Add(tagProperty);
-                }
-
-                tagProperty.value = tagValue;
-
-                propertyNode.SetUserDefined(0, CategoryName, CategoryName, propertyVector);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Log($"Append Data write failed for '{item?.DisplayName}': {ex.Message}");
-                return false;
-            }
         }
 
         internal static void Log(string message)
@@ -352,4 +258,58 @@ namespace MicroEng.Navisworks
         }
     }
 
+    internal static class AssemblyResolver
+    {
+        private static bool _registered;
+
+        public static void EnsureRegistered()
+        {
+            if (_registered) return;
+            AppDomain.CurrentDomain.AssemblyResolve += OnResolve;
+            _registered = true;
+        }
+
+        private static Assembly OnResolve(object sender, ResolveEventArgs args)
+        {
+            try
+            {
+                var requested = new AssemblyName(args.Name);
+                var name = requested.Name ?? string.Empty;
+                // Ignore resource satellite probes (we don't ship them).
+                if (name.EndsWith(".resources", StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith("Janus.Windows.UI.v3.resources", StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                var candidates = new[]
+                {
+                    Path.Combine(baseDir ?? string.Empty, requested.Name + ".dll"),
+                    Path.Combine(asmDir ?? string.Empty, requested.Name + ".dll")
+                };
+
+                foreach (var path in candidates)
+                {
+                    if (File.Exists(path))
+                    {
+                        // Only log assemblies we actually load (reduces noise).
+                        MicroEngActions.Log($"[AssemblyResolve] Loading {requested.Name} from {path}");
+                        return Assembly.LoadFrom(path);
+                    }
+                }
+                // Keep failures quiet for non-MicroEng assemblies to avoid noisy logs.
+                if (name.Contains("MicroEng", StringComparison.OrdinalIgnoreCase) ||
+                    name.Contains("Wpf.Ui", StringComparison.OrdinalIgnoreCase))
+                {
+                    MicroEngActions.Log($"[AssemblyResolve] Failed to resolve {requested.FullName}. BaseDir={baseDir}, AsmDir={asmDir}");
+                }
+            }
+            catch
+            {
+                // swallow
+            }
+            return null;
+        }
+    }
 }

@@ -10,6 +10,11 @@ namespace MicroEng.Navisworks
 {
     public partial class SpaceMapperControl : UserControl
     {
+        static SpaceMapperControl()
+        {
+            AssemblyResolver.EnsureRegistered();
+        }
+
         internal ObservableCollection<SpaceMapperTargetRule> TargetRules { get; } = new();
         internal ObservableCollection<SpaceMapperMappingDefinition> Mappings { get; } = new();
         internal ObservableCollection<ZoneSummary> ZoneSummaries { get; } = new();
@@ -19,6 +24,7 @@ namespace MicroEng.Navisworks
         public SpaceMapperControl()
         {
             InitializeComponent();
+            MicroEngWpfUiTheme.ApplyTo(this);
             DataContext = this;
             Loaded += (_, __) => InitializeUi();
         }

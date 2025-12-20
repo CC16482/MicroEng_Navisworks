@@ -12,13 +12,33 @@ namespace MicroEng.Navisworks
     {
         public override Control CreateControlPane()
         {
-            var host = new ElementHost
+            MicroEngActions.Init();
+            MicroEngActions.Log("SpaceMapperDockPane: CreateControlPane start");
+
+            try
             {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                Child = new SpaceMapperControl()
-            };
-            return host;
+                var host = new ElementHost
+                {
+                    Dock = DockStyle.Fill,
+                    AutoSize = true,
+                    Child = new SpaceMapperControl()
+                };
+                MicroEngActions.Log("SpaceMapperDockPane: CreateControlPane created ElementHost");
+                return host;
+            }
+            catch (System.Exception ex)
+            {
+                MicroEngActions.Log($"SpaceMapperDockPane: CreateControlPane failed: {ex}");
+                return new ElementHost
+                {
+                    Dock = DockStyle.Fill,
+                    Child = new System.Windows.Controls.TextBlock
+                    {
+                        Text = "Space Mapper failed to load. See MicroEng.log for details.",
+                        Margin = new System.Windows.Thickness(12)
+                    }
+                };
+            }
         }
 
         public override void DestroyControlPane(Control pane)
@@ -36,23 +56,39 @@ namespace MicroEng.Navisworks
     {
         public override int Execute(params string[] parameters)
         {
+            MicroEngActions.Init();
+
             const string paneId = "MicroEng.SpaceMapper.DockPane.MENG";
 
-            var record = Autodesk.Navisworks.Api.Application.Plugins.FindPlugin(paneId);
-            if (record == null)
+            try
             {
-                MessageBox.Show($"Could not find Space Mapper dock pane plugin '{paneId}'.",
-                    "MicroEng Space Mapper",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
-                return 0;
+                var record = Autodesk.Navisworks.Api.Application.Plugins.FindPlugin(paneId);
+                if (record == null)
+                {
+                    MessageBox.Show($"Could not find Space Mapper dock pane plugin '{paneId}'.",
+                        "MicroEng Space Mapper",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                    return 0;
+                }
+
+                if (!record.IsLoaded)
+                {
+                    MicroEngActions.Log("SpaceMapperCommand: loading plugin");
+                    record.LoadPlugin();
+                }
+
+                if (record.LoadedPlugin is DockPanePlugin pane)
+                {
+                    MicroEngActions.Log("SpaceMapperCommand: toggling visibility");
+                    pane.Visible = !pane.Visible;
+                }
             }
-
-            if (!record.IsLoaded)
-                record.LoadPlugin();
-
-            if (record.LoadedPlugin is DockPanePlugin pane)
-                pane.Visible = !pane.Visible;
+            catch (System.Exception ex)
+            {
+                MicroEngActions.Log($"SpaceMapperCommand failed: {ex}");
+                MessageBox.Show($"Space Mapper failed: {ex.Message}", "MicroEng Space Mapper", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
 
             return 0;
         }

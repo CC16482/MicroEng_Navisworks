@@ -3,81 +3,118 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:local="clr-namespace:MicroEng.Navisworks"
+             xmlns:system="clr-namespace:System;assembly=System"
              mc:Ignorable="d"
              d:DesignHeight="600"
              d:DesignWidth="900"
-             Background="{DynamicResource AppBackgroundBrush}">
-    <UserControl.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="pack://application:,,,/MicroEng.Navisworks;component/Assets/Theme/MicroEngUiKit.xaml" />
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </UserControl.Resources>
+             Background="{DynamicResource ApplicationBackgroundBrush}"
+             Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+             FontSize="12">
+  <UserControl.Resources>
+           <ResourceDictionary>
+                   <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+                   <ResourceDictionary.MergedDictionaries>
+                   <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+                   </ResourceDictionary.MergedDictionaries>
+               </ResourceDictionary>
+           </UserControl.Resources>
 
-    <Grid Margin="{StaticResource PagePadding}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+        <Grid Margin="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Style="{StaticResource CardBorder}">
+        <!-- Use ui:Card for layout containers (CardControl offsets Content to the right by design). -->
+        <ui:Card Grid.Row="0"
+                 Padding="10"
+                 Margin="0,0,0,8"
+                 HorizontalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Top">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
+
                 <StackPanel Orientation="Vertical">
-                    <TextBlock Text="Data Matrix" Style="{StaticResource PageTitleText}" />
-                    <TextBlock Text="Tabular view of the latest scrape session." Style="{StaticResource SubtleText}" />
+                    <ui:TextBlock Text="Data Matrix" FontSize="16" FontWeight="SemiBold" />
+                    <ui:TextBlock Text="Tabular view of the latest scrape session."
+                                  Margin="0,4,0,0"
+                                  FontSize="12"
+                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+                <WrapPanel Grid.Row="1" Grid.ColumnSpan="2" VerticalAlignment="Center" Margin="0,8,0,0">
                     <TextBlock Text="Data Source:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                    <ComboBox x:Name="ProfileCombo" Width="160" Style="{StaticResource InputComboBoxStyle}" />
-                    <Button x:Name="RefreshProfilesButton" Content="Refresh" Style="{StaticResource ToolbarButtonStyle}" />
+                    <ComboBox x:Name="ProfileCombo" Width="180" Margin="0,0,8,0" />
+                    <ui:Button x:Name="RefreshProfilesButton" Content="Refresh" Margin="0,0,12,0" />
 
-                    <TextBlock Text="View:" VerticalAlignment="Center" Margin="12,0,6,0"/>
-                    <ComboBox x:Name="ViewPresetCombo" Width="140" Style="{StaticResource InputComboBoxStyle}" />
-                    <Button x:Name="SaveViewButton" Content="Save" Style="{StaticResource ToolbarButtonStyle}"/>
-                    <Button x:Name="SaveViewAsButton" Content="Save As" Style="{StaticResource ToolbarButtonStyle}"/>
-                    <Button x:Name="DeleteViewButton" Content="Delete" Style="{StaticResource ToolbarButtonStyle}"/>
+                    <TextBlock Text="View:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="ViewPresetCombo" Width="160" Margin="0,0,8,0" />
+                    <ui:Button x:Name="SaveViewButton" Content="Save" Margin="0,0,8,0"/>
+                    <ui:Button x:Name="SaveViewAsButton" Content="Save As" Margin="0,0,8,0"/>
+                    <ui:Button x:Name="DeleteViewButton" Content="Delete" Margin="0,0,12,0"/>
 
-                    <Button x:Name="ColumnsButton" Content="Columns..." Style="{StaticResource ToolbarButtonStyle}" Margin="12,0,0,0"/>
-                    <ToggleButton x:Name="SyncToggle" Content="Sync selection" Margin="8,0,0,0"/>
-                    <CheckBox x:Name="SelectedOnlyCheck" Content="Selected only" Margin="8,0,0,0"/>
+                    <ui:Button x:Name="ColumnsButton" Content="Columns..." Margin="0,0,12,0"/>
+                    <ui:ToggleSwitch x:Name="SyncToggle" OffContent="Sync selection" OnContent="Sync selection" Margin="0,0,12,0" />
+                    <CheckBox x:Name="SelectedOnlyCheck"
+                              Content="Selected only"
+                              Margin="0,0,12,0"
+                              IsThreeState="False" />
 
-                    <Menu Margin="8,0,0,0">
-                        <MenuItem Header="Export">
-                            <MenuItem Header="Filtered to CSV..." x:Name="ExportFilteredMenu"/>
-                            <MenuItem Header="All to CSV..." x:Name="ExportAllMenu"/>
-                        </MenuItem>
-                    </Menu>
-                </StackPanel>
+                    <ui:DropDownButton Content="Export" Margin="8,0,0,0">
+                        <ui:DropDownButton.Flyout>
+                            <ContextMenu>
+                                <MenuItem Header="Filtered to CSV..." x:Name="ExportFilteredMenu"/>
+                                <MenuItem Header="All to CSV..." x:Name="ExportAllMenu"/>
+                            </ContextMenu>
+                        </ui:DropDownButton.Flyout>
+                    </ui:DropDownButton>
+                </WrapPanel>
             </Grid>
-        </Border>
+        </ui:Card>
 
-        <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="0">
-            <DataGrid x:Name="MatrixGrid"
-                      Style="{StaticResource DataGridStandardStyle}"
-                      IsReadOnly="False"
-                      Sorting="MatrixGrid_Sorting"
-                      SelectionChanged="MatrixGrid_SelectionChanged"
-                      />
-        </Border>
+        <ui:Card Grid.Row="1"
+                 Padding="0"
+                 Margin="0,0,0,8"
+                 HorizontalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Stretch">
+             <ui:DataGrid x:Name="MatrixGrid"
+                          IsReadOnly="False"
+                          GridLinesVisibility="All"
+                          HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                          VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                          FontSize="12"
+                          RowHeight="28"
+                          ColumnHeaderHeight="30"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          Sorting="MatrixGrid_Sorting"
+                          SelectionChanged="MatrixGrid_SelectionChanged" />
+        </ui:Card>
 
-        <StatusBar Grid.Row="2" Background="{StaticResource CardBackgroundBrush}" BorderBrush="{StaticResource CardBorderBrush}" BorderThickness="1">
-            <StatusBarItem>
-                <TextBlock x:Name="RowsStatus" Text="Rows: 0" />
-            </StatusBarItem>
-            <StatusBarItem>
-                <TextBlock x:Name="ProfileStatus" Text="Profile: -" />
-            </StatusBarItem>
-            <StatusBarItem>
-                <TextBlock x:Name="ViewStatus" Text="View: (Default)" />
-            </StatusBarItem>
-        </StatusBar>
+        <ui:Card Grid.Row="2"
+                 Padding="10"
+                 HorizontalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Center">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0">
+                <TextBlock x:Name="RowsStatus" Text="Rows: 0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,12,0"/>
+                <TextBlock x:Name="ProfileStatus" Text="Profile: -" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,12,0"/>
+                <TextBlock x:Name="ViewStatus" Text="View: (Default)" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </ui:Card>
     </Grid>
 </UserControl>

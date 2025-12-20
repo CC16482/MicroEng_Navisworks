@@ -3,75 +3,99 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:MicroEng.Navisworks"
+             xmlns:system="clr-namespace:System;assembly=System"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              mc:Ignorable="d"
              d:DesignHeight="520" d:DesignWidth="380"
              MinWidth="360"
              MinHeight="520"
-             Background="{DynamicResource ApplicationBackgroundBrush}">
-    <UserControl.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-            <ResourceDictionary Source="pack://application:,,,/MicroEng.Navisworks;component/Assets/Theme/MicroEngUiKit.xaml" />
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </UserControl.Resources>
+             Background="{DynamicResource ApplicationBackgroundBrush}"
+             Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+             FontSize="12">
 
-    <Grid Margin="8">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- Use ui:Card for layout containers (CardControl offsets Content to the right by design). -->
+    <ui:Card Grid.Row="0"
+             Padding="20,12"
+             Margin="0,0,0,12"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Top">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <ui:TextBlock Text="MicroEng Tools" FontSize="16" FontWeight="SemiBold" />
+
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+          <ui:TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,8,0" />
+          <ui:ToggleSwitch x:Name="ThemeToggle" OffContent="Dark" OnContent="Light" />
+          <ui:Button Margin="10,0,0,0"
+                     Padding="8,6"
+                     ToolTip="Settings"
+                     Click="Settings_Click">
+            <ui:SymbolIcon Symbol="Settings16" Filled="True" />
+          </ui:Button>
+        </StackPanel>
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="1"
+             Padding="20,12"
+             Margin="0,0,0,12"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Top">
+      <StackPanel>
+        <ui:Button x:Name="DataScraperButton" Content="Data Scraper" Appearance="Secondary" Margin="0,0,0,8" Click="DataScraper_Click" />
+        <ui:Button x:Name="DataMapperButton" Content="Data Mapper" Appearance="Secondary" Margin="0,0,0,8" Click="AppendData_Click" />
+        <ui:Button x:Name="DataMatrixButton" Content="Data Matrix" Appearance="Secondary" Margin="0,0,0,8" Click="DataMatrix_Click" />
+        <ui:Button x:Name="SpaceMapperButton" Content="Space Mapper" Appearance="Secondary" Click="SpaceMapper_Click" />
+      </StackPanel>
+    </ui:Card>
+
+    <ui:Card Grid.Row="2"
+             Padding="20,12"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
+      <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-
-        <ui:Card Grid.Row="0" Padding="10" Margin="0,0,0,8">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="160" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Image Source="pack://siteoforigin:,,,/Logos/microeng-logo2.png"
-                       Height="32"
-                       Stretch="Uniform"
-                       HorizontalAlignment="Left"
-                       VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1"
-                           Text="MicroEng Tools"
-                           FontSize="14"
-                           FontWeight="SemiBold"
-                           VerticalAlignment="Center"
-                           Foreground="{StaticResource TextPrimary}"
-                           HorizontalAlignment="Left"
-                           Margin="12,0,0,0" />
-            </Grid>
-        </ui:Card>
-
-        <ui:Card Grid.Row="1" Padding="10" Margin="0,0,0,8">
-            <StackPanel>
-                <ui:Button Content="Data Scraper" Appearance="Secondary" Margin="0,4" Click="DataScraper_Click"/>
-                <ui:Button Content="Data Mapper" Appearance="Primary" Margin="0,4" Click="AppendData_Click"/>
-                <ui:Button Content="Data Matrix" Appearance="Secondary" Margin="0,4" Click="DataMatrix_Click"/>
-                <ui:Button Content="Space Mapper" Appearance="Secondary" Margin="0,4" Click="SpaceMapper_Click"/>
-            </StackPanel>
-        </ui:Card>
-
-        <ui:Card Grid.Row="2" Padding="10" Margin="0,0,0,0">
-            <StackPanel>
-                <TextBlock Text="Log"
-                           FontWeight="SemiBold"
-                           Margin="0,0,0,6"
-                           Foreground="{StaticResource TextPrimary}" />
-            <TextBox x:Name="LogTextBox"
-                     Text="Ready"
-                     AcceptsReturn="True"
-                     IsReadOnly="True"
-                     VerticalScrollBarVisibility="Auto"
-                     BorderBrush="#d0d7de"
-                     BorderThickness="1"
-                     Background="White"
-                     FontFamily="Segoe UI"
-                     FontSize="11" />
-            </StackPanel>
-        </ui:Card>
-    </Grid>
+        <ui:TextBlock Grid.Row="0" Text="Log" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,8" />
+        <TextBox x:Name="LogTextBox"
+                 Grid.Row="1"
+                 Text="Ready"
+                 AcceptsReturn="True"
+                 IsReadOnly="True"
+                 VerticalScrollBarVisibility="Auto"
+                 FontFamily="Consolas"
+                 FontSize="12"
+                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                 BorderThickness="1"
+                 Padding="8" />
+      </Grid>
+    </ui:Card>
+  </Grid>
 </UserControl>

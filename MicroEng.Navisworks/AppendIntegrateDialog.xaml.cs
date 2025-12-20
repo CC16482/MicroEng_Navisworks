@@ -34,6 +34,7 @@ namespace MicroEng.Navisworks
 
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
             _store = new AppendIntegrateTemplateStore(AppDomain.CurrentDomain.BaseDirectory);
             _templates = new ObservableCollection<AppendIntegrateTemplate>(_store.Load());
             _currentTemplate = _templates.FirstOrDefault() ?? AppendIntegrateTemplate.CreateDefault("Default");
@@ -246,11 +247,11 @@ namespace MicroEng.Navisworks
                 Title = "MicroEng",
                 Width = 420,
                 Height = 160,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 WindowStyle = WindowStyle.ToolWindow,
-                ResizeMode = ResizeMode.NoResize,
-                Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#f5f7fb")
+                ResizeMode = ResizeMode.NoResize
             };
+            MicroEngWpfUiTheme.ApplyTo(dialog);
             var panel = new Grid { Margin = new Thickness(12) };
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

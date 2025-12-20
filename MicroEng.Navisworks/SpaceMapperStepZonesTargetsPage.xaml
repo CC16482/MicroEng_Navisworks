@@ -1,0 +1,132 @@
+﻿<Page x:Class="MicroEng.Navisworks.SpaceMapperStepZonesTargetsPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:local="clr-namespace:MicroEng.Navisworks"
+      xmlns:system="clr-namespace:System;assembly=System"
+      mc:Ignorable="d"
+      d:DesignHeight="600"
+      d:DesignWidth="900"
+      Background="Transparent"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      FontSize="12">
+
+  <Page.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+      </ResourceDictionary.MergedDictionaries>
+      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <x:Array x:Key="TargetTypes" Type="{x:Type local:SpaceMapperTargetType}">
+        <local:SpaceMapperTargetType>SelectionTreeLevel</local:SpaceMapperTargetType>
+        <local:SpaceMapperTargetType>SelectionSet</local:SpaceMapperTargetType>
+        <local:SpaceMapperTargetType>SearchSet</local:SpaceMapperTargetType>
+        <local:SpaceMapperTargetType>CurrentSelection</local:SpaceMapperTargetType>
+        <local:SpaceMapperTargetType>VisibleInView</local:SpaceMapperTargetType>
+      </x:Array>
+      <x:Array x:Key="MembershipModes" Type="{x:Type local:SpaceMembershipMode}">
+        <local:SpaceMembershipMode>ContainedOnly</local:SpaceMembershipMode>
+        <local:SpaceMembershipMode>PartialOnly</local:SpaceMembershipMode>
+        <local:SpaceMembershipMode>ContainedAndPartial</local:SpaceMembershipMode>
+      </x:Array>
+    </ResourceDictionary>
+  </Page.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <ui:Card Grid.Row="0"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <StackPanel>
+        <ui:TextBlock Text="Step 2 - Zones and Targets" FontSize="16" FontWeight="SemiBold" />
+        <ui:TextBlock Text="Define how zones are found and how targets are selected."
+                      Margin="0,4,0,0"
+                      FontSize="12"
+                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+      </StackPanel>
+    </ui:Card>
+
+    <ui:Card Grid.Row="1"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <StackPanel>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+          <TextBlock Text="Zone Source:" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <ComboBox x:Name="ZoneSourceComboBox" Width="180" Margin="0,0,8,0" />
+          <TextBlock Text="Set/Search Name:" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <TextBox x:Name="ZoneSetBoxControl" Width="220" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Text="Target Source:" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <ComboBox x:Name="TargetSourceComboBox" Width="220" />
+        </StackPanel>
+      </StackPanel>
+    </ui:Card>
+
+    <ui:Card Grid.Row="2"
+             Padding="10"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,8">
+          <ui:Button x:Name="AddRuleButtonControl" Content="Add Rule" Margin="0,0,6,0" />
+          <ui:Button x:Name="DeleteRuleButtonControl" Content="Delete Rule" />
+        </StackPanel>
+
+        <ui:DataGrid x:Name="TargetRulesGridControl"
+                     Grid.Row="1"
+                     AutoGenerateColumns="False"
+                     CanUserAddRows="False"
+                     CanUserDeleteRows="False"
+                     ItemsSource="{Binding TargetRules}"
+                     HeadersVisibility="Column"
+                     GridLinesVisibility="All"
+                     HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                     VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                     FontSize="12"
+                     RowHeight="28"
+                     ColumnHeaderHeight="30"
+                     EnableRowVirtualization="True"
+                     EnableColumnVirtualization="True"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling"
+                     IsReadOnly="False">
+          <ui:DataGrid.Columns>
+            <DataGridTextColumn Header="Rule Name" Binding="{Binding Name}" Width="140" />
+            <DataGridComboBoxColumn Header="Target Type"
+                                    SelectedItemBinding="{Binding TargetType}"
+                                    Width="140"
+                                    ItemsSource="{StaticResource TargetTypes}" />
+            <DataGridTextColumn Header="Min Level" Binding="{Binding MinTreeLevel}" Width="70" />
+            <DataGridTextColumn Header="Max Level" Binding="{Binding MaxTreeLevel}" Width="70" />
+            <DataGridTextColumn Header="Set/Search Name" Binding="{Binding SetName}" Width="150" />
+            <DataGridTextColumn Header="Category Filter" Binding="{Binding CategoryFilter}" Width="140" />
+            <DataGridComboBoxColumn Header="Membership"
+                                    SelectedItemBinding="{Binding MembershipMode}"
+                                    Width="150"
+                                    ItemsSource="{StaticResource MembershipModes}" />
+            <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70" />
+          </ui:DataGrid.Columns>
+        </ui:DataGrid>
+      </Grid>
+    </ui:Card>
+  </Grid>
+</Page>

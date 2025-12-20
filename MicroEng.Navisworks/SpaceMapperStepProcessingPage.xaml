@@ -1,0 +1,99 @@
+﻿<Page x:Class="MicroEng.Navisworks.SpaceMapperStepProcessingPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:local="clr-namespace:MicroEng.Navisworks"
+      xmlns:system="clr-namespace:System;assembly=System"
+      mc:Ignorable="d"
+      d:DesignHeight="600"
+      d:DesignWidth="900"
+      Background="Transparent"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      FontSize="12">
+
+  <Page.Resources>
+    <ResourceDictionary>
+      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Page.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <ui:Card Grid.Row="0"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <StackPanel>
+        <ui:TextBlock Text="Step 3 - Processing" FontSize="16" FontWeight="SemiBold" />
+        <ui:TextBlock Text="Configure how intersections are evaluated and how offsets are applied."
+                      Margin="0,4,0,0"
+                      FontSize="12"
+                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+      </StackPanel>
+    </ui:Card>
+
+    <ui:Card Grid.Row="1"
+             Padding="10"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Top">
+      <StackPanel>
+        <WrapPanel Margin="0,0,0,10">
+          <CheckBox x:Name="TreatPartialCheckControl" Content="Treat Partial as Contained" Margin="0,0,12,0" />
+          <CheckBox x:Name="TagPartialCheckControl" Content="Tag Partial Separately" Margin="0,0,12,0" />
+          <CheckBox x:Name="EnableMultiZoneCheckControl" Content="Enable Multiple Zones" IsChecked="True" />
+        </WrapPanel>
+
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+          <TextBlock Text="Processing Mode:" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <ComboBox x:Name="ProcessingModeComboBox" Width="160" />
+        </StackPanel>
+
+        <UniformGrid Columns="2" Rows="4" Margin="0,0,0,6">
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="3D Offset:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="Offset3DBoxControl" Width="100" Text="0.0" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Offset Top:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="OffsetTopBoxControl" Width="100" Text="0.0" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Offset Bottom:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="OffsetBottomBoxControl" Width="100" Text="0.0" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Offset Sides:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="OffsetSidesBoxControl" Width="100" Text="0.0" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Units:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="UnitsBoxControl" Width="140" Text="Millimeters" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Offset Mode:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="OffsetModeBoxControl" Width="160" Text="From Zone Geometry" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Max Threads:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="MaxThreadsBoxControl" Width="80" Text="0" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Batch Size:" Width="120" VerticalAlignment="Center" />
+            <TextBox x:Name="BatchSizeBoxControl" Width="80" Text="0" />
+          </StackPanel>
+        </UniformGrid>
+      </StackPanel>
+    </ui:Card>
+  </Grid>
+</Page>

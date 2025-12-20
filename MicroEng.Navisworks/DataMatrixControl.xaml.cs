@@ -353,10 +353,11 @@ namespace MicroEng.Navisworks
                 Title = title,
                 Width = 360,
                 Height = 160,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 WindowStyle = WindowStyle.ToolWindow,
                 ResizeMode = ResizeMode.NoResize
             };
+            MicroEngWpfUiTheme.ApplyTo(window);
 
             var panel = new Grid { Margin = new Thickness(12) };
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -364,10 +365,10 @@ namespace MicroEng.Navisworks
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var label = new TextBlock { Text = caption, Margin = new Thickness(0, 0, 0, 6) };
-            var box = new TextBox();
+            var box = new Wpf.Ui.Controls.TextBox();
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-            var ok = new Button { Content = "OK", Width = 70, Margin = new Thickness(4), IsDefault = true };
-            var cancel = new Button { Content = "Cancel", Width = 70, Margin = new Thickness(4), IsCancel = true };
+            var ok = new Wpf.Ui.Controls.Button { Content = "OK", Width = 70, Margin = new Thickness(4), IsDefault = true };
+            var cancel = new Wpf.Ui.Controls.Button { Content = "Cancel", Width = 70, Margin = new Thickness(4), IsCancel = true };
             ok.Click += (_, __) => window.DialogResult = true;
             cancel.Click += (_, __) => window.DialogResult = false;
             buttons.Children.Add(ok);
@@ -387,21 +388,55 @@ namespace MicroEng.Navisworks
         private class ColumnsDialog : Window
         {
             private readonly List<CheckBox> _boxes = new();
+            private readonly CheckBox _selectAll;
+            private readonly Wpf.Ui.Controls.TextBox _searchBox;
+            private bool _updatingSelectAll;
 
             public IEnumerable<string> VisibleAttributeIds => _boxes.Where(cb => cb.IsChecked == true).Select(cb => cb.Tag as string);
 
             public ColumnsDialog(IEnumerable<DataMatrixAttributeDefinition> attributes, IList<string> currentVisibleOrder)
             {
+                // Ensure WPF-UI resources exist before controls are created (so implicit styles apply).
+                Resources.MergedDictionaries.Add(new ResourceDictionary { Source = MicroEngResourceUris.WpfUiRoot });
+
                 Title = "Columns";
                 Width = 420;
                 Height = 560;
-                WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                WindowStartupLocation = WindowStartupLocation.CenterScreen;
                 WindowStyle = WindowStyle.ToolWindow;
                 ResizeMode = ResizeMode.CanResize;
+                SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
+                SetResourceReference(ForegroundProperty, "TextFillColorPrimaryBrush");
 
                 var ordered = currentVisibleOrder ?? attributes.Select(a => a.Id).ToList();
                 var orderedSet = new HashSet<string>(ordered ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
                 var sorted = attributes.OrderBy(a => a.Category).ThenBy(a => a.PropertyName).ToList();
+
+                _searchBox = new Wpf.Ui.Controls.TextBox
+                {
+                    PlaceholderText = "Search columns...",
+                    Margin = new Thickness(0, 0, 0, 8)
+                };
+                _searchBox.TextChanged += (_, __) => ApplySearchFilter();
+
+                _selectAll = new CheckBox
+                {
+                    Content = "Select all",
+                    IsThreeState = true,
+                    Margin = new Thickness(0, 0, 0, 8)
+                };
+                _selectAll.Click += (_, __) =>
+                {
+                    if (_updatingSelectAll) return;
+                    if (_selectAll.IsChecked == true) SetAll(true);
+                    else if (_selectAll.IsChecked == false) SetAll(false);
+                    else
+                    {
+                        // When indeterminate and user clicks, treat as "select all"
+                        SetAll(true);
+                        _selectAll.IsChecked = true;
+                    }
+                };
 
                 var stack = new StackPanel { Orientation = Orientation.Vertical };
                 foreach (var attr in sorted)
@@ -410,8 +445,11 @@ namespace MicroEng.Navisworks
                     {
                         Content = $"{attr.Category}: {attr.PropertyName}",
                         Tag = attr.Id,
-                        IsChecked = orderedSet.Count > 0 ? orderedSet.Contains(attr.Id) : attr.IsVisibleByDefault
+                        IsChecked = orderedSet.Count > 0 ? orderedSet.Contains(attr.Id) : attr.IsVisibleByDefault,
+                        Margin = new Thickness(0, 2, 0, 2)
                     };
+                    cb.Checked += (_, __) => UpdateSelectAllState();
+                    cb.Unchecked += (_, __) => UpdateSelectAllState();
                     _boxes.Add(cb);
                     stack.Children.Add(cb);
                 }
@@ -423,26 +461,58 @@ namespace MicroEng.Navisworks
                 };
 
                 var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 8, 0, 0) };
-                var selectAll = new Button { Content = "Select All", Width = 90, Margin = new Thickness(4) };
-                var deselectAll = new Button { Content = "Deselect All", Width = 90, Margin = new Thickness(4) };
                 var ok = new Button { Content = "OK", Width = 80, Margin = new Thickness(4), IsDefault = true };
                 var cancel = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(4), IsCancel = true };
+                // Use implicit WPF-UI styling; avoid referencing optional custom resource keys.
 
-                selectAll.Click += (_, __) => SetAll(true);
-                deselectAll.Click += (_, __) => SetAll(false);
                 ok.Click += (_, __) => DialogResult = true;
                 cancel.Click += (_, __) => DialogResult = false;
 
-                buttons.Children.Add(selectAll);
-                buttons.Children.Add(deselectAll);
                 buttons.Children.Add(ok);
                 buttons.Children.Add(cancel);
 
-                var root = new DockPanel { Margin = new Thickness(8) };
+                var top = new DockPanel { LastChildFill = true };
+                DockPanel.SetDock(_searchBox, Dock.Top);
+                top.Children.Add(_searchBox);
+                DockPanel.SetDock(_selectAll, Dock.Top);
+                top.Children.Add(_selectAll);
+                top.Children.Add(scroll);
+
+                // CardControl uses a 3-column header/content template and will offset Content to the right.
+                // For general container layout we use Card (Gallery pattern).
+                var card = new Wpf.Ui.Controls.Card
+                {
+                    Padding = new Thickness(12),
+                    Margin = new Thickness(8),
+                    Content = top
+                };
+
+                var root = new DockPanel { Margin = new Thickness(0) };
                 DockPanel.SetDock(buttons, Dock.Bottom);
                 root.Children.Add(buttons);
-                root.Children.Add(scroll);
+                root.Children.Add(card);
                 Content = root;
+
+                MicroEngWpfUiTheme.ApplyTo(this);
+                UpdateSelectAllState();
+            }
+
+            private void ApplySearchFilter()
+            {
+                var query = (_searchBox?.Text ?? string.Empty).Trim();
+                if (query.Length == 0)
+                {
+                    foreach (var cb in _boxes) cb.Visibility = Visibility.Visible;
+                    return;
+                }
+
+                foreach (var cb in _boxes)
+                {
+                    var text = cb.Content as string ?? string.Empty;
+                    cb.Visibility = text.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+                }
             }
 
             private void SetAll(bool value)
@@ -450,6 +520,29 @@ namespace MicroEng.Navisworks
                 foreach (var cb in _boxes)
                 {
                     cb.IsChecked = value;
+                }
+                UpdateSelectAllState();
+            }
+
+            private void UpdateSelectAllState()
+            {
+                try
+                {
+                    _updatingSelectAll = true;
+                    if (_boxes.Count == 0)
+                    {
+                        _selectAll.IsChecked = false;
+                        return;
+                    }
+
+                    var checkedCount = _boxes.Count(b => b.IsChecked == true);
+                    if (checkedCount == 0) _selectAll.IsChecked = false;
+                    else if (checkedCount == _boxes.Count) _selectAll.IsChecked = true;
+                    else _selectAll.IsChecked = null;
+                }
+                finally
+                {
+                    _updatingSelectAll = false;
                 }
             }
         }

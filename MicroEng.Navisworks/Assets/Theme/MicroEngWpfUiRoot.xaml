@@ -1,0 +1,15 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+  <!--
+    WPF-UI root dictionaries (Gallery pattern).
+    This is merged per-Window/UserControl to avoid theming the whole Navisworks process.
+  -->
+  <ResourceDictionary.MergedDictionaries>
+    <!-- Default to Dark to match the WPF-UI Gallery look; per-root ApplyTo(...) may override. -->
+    <ui:ThemesDictionary Theme="Dark" />
+    <ui:ControlsDictionary />
+    <!-- MicroEng local alias/styles used across views (kept small and safe). -->
+    <ResourceDictionary Source="pack://application:,,,/MicroEng.Navisworks;component/Assets/Theme/MicroEngUiKit.xaml" />
+  </ResourceDictionary.MergedDictionaries>
+</ResourceDictionary>

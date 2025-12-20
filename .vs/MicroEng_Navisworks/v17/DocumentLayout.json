@@ -3,8 +3,8 @@
   "WorkspaceRootPath": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.navisworks\\spacemappercontrol.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
-      "RelativeMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|solutionrelative:microeng.navisworks\\spacemappercontrol.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+      "AbsoluteMoniker": "D:0:0:{419D81E3-7331-4419-9094-D40ED653636D}|MicroEng.DesignHost\\MicroEng.DesignHost.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.designhost\\designwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{419D81E3-7331-4419-9094-D40ED653636D}|MicroEng.DesignHost\\MicroEng.DesignHost.csproj|solutionrelative:microeng.designhost\\designwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.navisworks\\datamatrixcontrol.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
@@ -26,18 +26,26 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 2,
           "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{56df62a4-05a3-4e5b-aa1a-99371ccfb997}"
+            },
+            {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
+            },
             {
               "$type": "Document",
               "DocumentIndex": 0,
-              "Title": "SpaceMapperControl.xaml",
-              "DocumentMoniker": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\SpaceMapperControl.xaml",
-              "RelativeDocumentMoniker": "MicroEng.Navisworks\\SpaceMapperControl.xaml",
-              "ToolTip": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\SpaceMapperControl.xaml",
-              "RelativeToolTip": "MicroEng.Navisworks\\SpaceMapperControl.xaml",
+              "Title": "DesignWindow.xaml",
+              "DocumentMoniker": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.DesignHost\\DesignWindow.xaml",
+              "RelativeDocumentMoniker": "MicroEng.DesignHost\\DesignWindow.xaml",
+              "ToolTip": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.DesignHost\\DesignWindow.xaml",
+              "RelativeToolTip": "MicroEng.DesignHost\\DesignWindow.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2025-12-11T03:38:41.723Z",
+              "WhenOpened": "2025-12-15T09:10:58.838Z",
               "EditorCaption": ""
             },
             {
@@ -48,9 +56,10 @@
               "RelativeDocumentMoniker": "MicroEng.Navisworks\\DataMatrixControl.xaml.cs",
               "ToolTip": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\DataMatrixControl.xaml.cs",
               "RelativeToolTip": "MicroEng.Navisworks\\DataMatrixControl.xaml.cs",
-              "ViewState": "AgIAAIwBAAAAAAAAAAApwJABAAAvAAAAAAAAAA==",
+              "ViewState": "AgIAAA4AAAAAAAAAAAAhwCIAAAAMAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-12-11T03:15:05.824Z"
+              "WhenOpened": "2025-12-11T03:15:05.824Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -74,14 +83,6 @@
               "RelativeToolTip": "MicroEng.Navisworks\\DataScraperWindow.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
               "WhenOpened": "2025-12-11T03:05:23.644Z"
-            },
-            {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{aa2115a1-9712-457b-9047-dbb71ca2cdd2}"
-            },
-            {
-              "$type": "Bookmark",
-              "Name": "ST:0:0:{269a02dc-6af8-11d3-bdc4-00c04f688e50}"
             }
           ]
         }

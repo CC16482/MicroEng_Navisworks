@@ -2,6 +2,7 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\Logos\microeng-logo2.png
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\Logos\microeng-logo3.png
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\Logos\microeng_logotray.png
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.Navisworks.addin
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.exe.config
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.exe
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.pdb

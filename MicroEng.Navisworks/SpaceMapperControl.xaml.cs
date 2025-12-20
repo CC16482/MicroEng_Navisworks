@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using Wpf.Ui.Abstractions;
 
 namespace MicroEng.Navisworks
 {
@@ -20,78 +22,112 @@ namespace MicroEng.Navisworks
         internal ObservableCollection<ZoneSummary> ZoneSummaries { get; } = new();
 
         private readonly SpaceMapperTemplateStore _templateStore = new(AppDomain.CurrentDomain.BaseDirectory);
+        private readonly SpaceMapperStepSetupPage _setupPage;
+        private readonly SpaceMapperStepZonesTargetsPage _zonesPage;
+        private readonly SpaceMapperStepProcessingPage _processingPage;
+        private readonly SpaceMapperStepMappingPage _mappingPage;
+        private readonly SpaceMapperStepResultsPage _resultsPage;
+        private bool _handlersWired;
+        private bool _initialized;
 
         public SpaceMapperControl()
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
             DataContext = this;
-            Loaded += (_, __) => InitializeUi();
+            _setupPage = new SpaceMapperStepSetupPage(this);
+            _zonesPage = new SpaceMapperStepZonesTargetsPage(this);
+            _processingPage = new SpaceMapperStepProcessingPage(this);
+            _mappingPage = new SpaceMapperStepMappingPage(this);
+            _resultsPage = new SpaceMapperStepResultsPage(this);
+
+            SpaceMapperNav.SetPageProviderService(new SpaceMapperStepPageProvider(
+                _setupPage,
+                _zonesPage,
+                _processingPage,
+                _mappingPage,
+                _resultsPage));
+
+            Loaded += OnLoaded;
+        }
+
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            if (_initialized)
+            {
+                return;
+            }
+
+            _initialized = true;
+            InitializeUi();
+            SpaceMapperNav.Navigate(typeof(SpaceMapperStepSetupPage));
         }
 
         private void InitializeUi()
         {
-            ProfileCombo.Items.Clear();
+            _setupPage.ProfileCombo.Items.Clear();
             var profiles = DataScraperCache.AllSessions
                 .Select(s => string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(p => p)
                 .ToList();
-            foreach (var p in profiles) ProfileCombo.Items.Add(p);
-            if (ProfileCombo.Items.Count == 0) ProfileCombo.Items.Add("Default");
-            ProfileCombo.SelectedIndex = 0;
+            foreach (var p in profiles) _setupPage.ProfileCombo.Items.Add(p);
+            if (_setupPage.ProfileCombo.Items.Count == 0) _setupPage.ProfileCombo.Items.Add("Default");
+            _setupPage.ProfileCombo.SelectedIndex = 0;
 
-            ScopeCombo.ItemsSource = Enum.GetValues(typeof(SpaceMapperScope));
-            ScopeCombo.SelectedItem = SpaceMapperScope.EntireModel;
+            _setupPage.ScopeCombo.ItemsSource = Enum.GetValues(typeof(SpaceMapperScope));
+            _setupPage.ScopeCombo.SelectedItem = SpaceMapperScope.EntireModel;
 
-            ZoneSourceCombo.ItemsSource = Enum.GetValues(typeof(ZoneSourceType));
-            ZoneSourceCombo.SelectedItem = ZoneSourceType.DataScraperZones;
+            _zonesPage.ZoneSourceCombo.ItemsSource = Enum.GetValues(typeof(ZoneSourceType));
+            _zonesPage.ZoneSourceCombo.SelectedItem = ZoneSourceType.DataScraperZones;
 
-            TargetSourceCombo.ItemsSource = Enum.GetValues(typeof(TargetSourceType));
-            TargetSourceCombo.SelectedItem = TargetSourceType.EntireModel;
+            _zonesPage.TargetSourceCombo.ItemsSource = Enum.GetValues(typeof(TargetSourceType));
+            _zonesPage.TargetSourceCombo.SelectedItem = TargetSourceType.EntireModel;
 
-            ProcessingModeCombo.ItemsSource = new[] { SpaceMapperProcessingMode.CpuNormal };
-            ProcessingModeCombo.SelectedItem = SpaceMapperProcessingMode.CpuNormal;
-            ProcessingModeCombo.IsEnabled = false;
+            _processingPage.ProcessingModeCombo.ItemsSource = new[] { SpaceMapperProcessingMode.CpuNormal };
+            _processingPage.ProcessingModeCombo.SelectedItem = SpaceMapperProcessingMode.CpuNormal;
+            _processingPage.ProcessingModeCombo.IsEnabled = false;
 
             if (TargetRules.Count == 0)
                 TargetRules.Add(new SpaceMapperTargetRule { Name = "Level 0", TargetType = SpaceMapperTargetType.SelectionTreeLevel, MinTreeLevel = 0, MaxTreeLevel = 0 });
             if (Mappings.Count == 0)
                 Mappings.Add(new SpaceMapperMappingDefinition { Name = "Zone Name", ZoneCategory = "Zone", ZonePropertyName = "Name", TargetPropertyName = "Zone Name" });
 
-            AddHandlers();
+            if (!_handlersWired)
+            {
+                AddHandlers();
+                _handlersWired = true;
+            }
         }
 
         private void AddHandlers()
         {
-            RefreshProfilesButton.Click += (s, e) => InitializeUi();
-            RunScraperButton.Click += (s, e) => OpenScraper();
-            RunButton.Click += (s, e) => RunSpaceMapper();
-            AddRuleButton.Click += (s, e) => TargetRules.Add(new SpaceMapperTargetRule { Name = $"Rule {TargetRules.Count + 1}" });
-            DeleteRuleButton.Click += (s, e) =>
+            _setupPage.RefreshProfilesButton.Click += (s, e) => InitializeUi();
+            _setupPage.RunScraperButton.Click += (s, e) => OpenScraper();
+            _setupPage.RunButton.Click += (s, e) => RunSpaceMapper();
+            _zonesPage.AddRuleButton.Click += (s, e) => TargetRules.Add(new SpaceMapperTargetRule { Name = $"Rule {TargetRules.Count + 1}" });
+            _zonesPage.DeleteRuleButton.Click += (s, e) =>
             {
-                if (TargetRulesGrid.SelectedItem is SpaceMapperTargetRule rule)
+                if (_zonesPage.TargetRulesGrid.SelectedItem is SpaceMapperTargetRule rule)
                     TargetRules.Remove(rule);
             };
-            AddMappingButton.Click += (s, e) => Mappings.Add(new SpaceMapperMappingDefinition { Name = $"Mapping {Mappings.Count + 1}", TargetPropertyName = "Zone Name" });
-            DeleteMappingButton.Click += (s, e) =>
+            _mappingPage.AddMappingButton.Click += (s, e) => Mappings.Add(new SpaceMapperMappingDefinition { Name = $"Mapping {Mappings.Count + 1}", TargetPropertyName = "Zone Name" });
+            _mappingPage.DeleteMappingButton.Click += (s, e) =>
             {
-                if (MappingGrid.SelectedItem is SpaceMapperMappingDefinition map)
+                if (_mappingPage.MappingGrid.SelectedItem is SpaceMapperMappingDefinition map)
                     Mappings.Remove(map);
             };
-            SaveTemplateButton.Click += (s, e) => SaveTemplate();
-            LoadTemplateButton.Click += (s, e) => LoadTemplate();
-            ExportStatsButton.Click += (s, e) => ExportStats();
+            _mappingPage.SaveTemplateButton.Click += (s, e) => SaveTemplate();
+            _mappingPage.LoadTemplateButton.Click += (s, e) => LoadTemplate();
+            _resultsPage.ExportStatsButton.Click += (s, e) => ExportStats();
         }
 
         private void OpenScraper()
         {
-            var profile = ProfileCombo.SelectedItem?.ToString() ?? "Default";
+            var profile = _setupPage.ProfileCombo.SelectedItem?.ToString() ?? "Default";
             try
             {
-                var win = new DataScraperWindow(profile);
-                System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(win);
-                win.Show();
+                MicroEngActions.TryShowDataScraper(profile, out _);
             }
             catch (Exception ex)
             {
@@ -106,11 +142,11 @@ namespace MicroEng.Navisworks
                 var settings = BuildSettings();
                 var request = new SpaceMapperRequest
                 {
-                    ProfileName = ProfileCombo.SelectedItem?.ToString() ?? "Default",
-                    Scope = ScopeCombo.SelectedItem is SpaceMapperScope sc ? sc : SpaceMapperScope.EntireModel,
-                    ZoneSource = ZoneSourceCombo.SelectedItem is ZoneSourceType zs ? zs : ZoneSourceType.DataScraperZones,
-                    ZoneSetName = ZoneSetBox.Text,
-                    TargetSource = TargetSourceCombo.SelectedItem is TargetSourceType ts ? ts : TargetSourceType.EntireModel,
+                    ProfileName = _setupPage.ProfileCombo.SelectedItem?.ToString() ?? "Default",
+                    Scope = _setupPage.ScopeCombo.SelectedItem is SpaceMapperScope sc ? sc : SpaceMapperScope.EntireModel,
+                    ZoneSource = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zs ? zs : ZoneSourceType.DataScraperZones,
+                    ZoneSetName = _zonesPage.ZoneSetBox.Text,
+                    TargetSource = _zonesPage.TargetSourceCombo.SelectedItem is TargetSourceType ts ? ts : TargetSourceType.EntireModel,
                     TargetRules = TargetRules.ToList(),
                     Mappings = Mappings.ToList(),
                     ProcessingSettings = settings
@@ -119,6 +155,7 @@ namespace MicroEng.Navisworks
                 var service = new SpaceMapperService(MicroEngActions.Log);
                 var result = service.Run(request);
                 ShowResults(result);
+                SpaceMapperNav.Navigate(typeof(SpaceMapperStepResultsPage));
             }
             catch (Exception ex)
             {
@@ -130,18 +167,18 @@ namespace MicroEng.Navisworks
         {
             return new SpaceMapperProcessingSettings
             {
-                ProcessingMode = ProcessingModeCombo.SelectedItem is SpaceMapperProcessingMode pm ? pm : SpaceMapperProcessingMode.Auto,
-                TreatPartialAsContained = TreatPartialCheck.IsChecked == true,
-                TagPartialSeparately = TagPartialCheck.IsChecked == true,
-                EnableMultipleZones = EnableMultiZoneCheck.IsChecked == true,
-                Offset3D = ParseDouble(Offset3DBox.Text),
-                OffsetTop = ParseDouble(OffsetTopBox.Text),
-                OffsetBottom = ParseDouble(OffsetBottomBox.Text),
-                OffsetSides = ParseDouble(OffsetSidesBox.Text),
-                Units = UnitsBox.Text,
-                OffsetMode = OffsetModeBox.Text,
-                MaxThreads = ParseInt(MaxThreadsBox.Text),
-                BatchSize = ParseInt(BatchSizeBox.Text)
+                ProcessingMode = _processingPage.ProcessingModeCombo.SelectedItem is SpaceMapperProcessingMode pm ? pm : SpaceMapperProcessingMode.Auto,
+                TreatPartialAsContained = _processingPage.TreatPartialCheck.IsChecked == true,
+                TagPartialSeparately = _processingPage.TagPartialCheck.IsChecked == true,
+                EnableMultipleZones = _processingPage.EnableMultiZoneCheck.IsChecked == true,
+                Offset3D = ParseDouble(_processingPage.Offset3DBox.Text),
+                OffsetTop = ParseDouble(_processingPage.OffsetTopBox.Text),
+                OffsetBottom = ParseDouble(_processingPage.OffsetBottomBox.Text),
+                OffsetSides = ParseDouble(_processingPage.OffsetSidesBox.Text),
+                Units = _processingPage.UnitsBox.Text,
+                OffsetMode = _processingPage.OffsetModeBox.Text,
+                MaxThreads = ParseInt(_processingPage.MaxThreadsBox.Text),
+                BatchSize = ParseInt(_processingPage.BatchSizeBox.Text)
             };
         }
 
@@ -174,7 +211,7 @@ namespace MicroEng.Navisworks
                 sb.AppendLine($"Contained: {result.Stats.ContainedTagged}, Partial: {result.Stats.PartialTagged}, Multi-Zone: {result.Stats.MultiZoneTagged}, Skipped: {result.Stats.Skipped}");
                 sb.AppendLine($"Mode: {result.Stats.ModeUsed}, Time: {result.Stats.Elapsed.TotalSeconds:0.00}s");
             }
-            ResultsSummaryBox.Text = sb.ToString();
+            _resultsPage.ResultsSummaryBox.Text = sb.ToString();
         }
 
         private void SaveTemplate()
@@ -222,18 +259,18 @@ namespace MicroEng.Navisworks
         private void ApplySettings(SpaceMapperProcessingSettings settings)
         {
             if (settings == null) return;
-            ProcessingModeCombo.SelectedItem = settings.ProcessingMode;
-            TreatPartialCheck.IsChecked = settings.TreatPartialAsContained;
-            TagPartialCheck.IsChecked = settings.TagPartialSeparately;
-            EnableMultiZoneCheck.IsChecked = settings.EnableMultipleZones;
-            Offset3DBox.Text = settings.Offset3D.ToString();
-            OffsetTopBox.Text = settings.OffsetTop.ToString();
-            OffsetBottomBox.Text = settings.OffsetBottom.ToString();
-            OffsetSidesBox.Text = settings.OffsetSides.ToString();
-            UnitsBox.Text = settings.Units;
-            OffsetModeBox.Text = settings.OffsetMode;
-            MaxThreadsBox.Text = settings.MaxThreads?.ToString() ?? "0";
-            BatchSizeBox.Text = settings.BatchSize?.ToString() ?? "0";
+            _processingPage.ProcessingModeCombo.SelectedItem = settings.ProcessingMode;
+            _processingPage.TreatPartialCheck.IsChecked = settings.TreatPartialAsContained;
+            _processingPage.TagPartialCheck.IsChecked = settings.TagPartialSeparately;
+            _processingPage.EnableMultiZoneCheck.IsChecked = settings.EnableMultipleZones;
+            _processingPage.Offset3DBox.Text = settings.Offset3D.ToString();
+            _processingPage.OffsetTopBox.Text = settings.OffsetTop.ToString();
+            _processingPage.OffsetBottomBox.Text = settings.OffsetBottom.ToString();
+            _processingPage.OffsetSidesBox.Text = settings.OffsetSides.ToString();
+            _processingPage.UnitsBox.Text = settings.Units;
+            _processingPage.OffsetModeBox.Text = settings.OffsetMode;
+            _processingPage.MaxThreadsBox.Text = settings.MaxThreads?.ToString() ?? "0";
+            _processingPage.BatchSizeBox.Text = settings.BatchSize?.ToString() ?? "0";
         }
 
         private void ExportStats()
@@ -278,10 +315,11 @@ namespace MicroEng.Navisworks
                 Title = title,
                 Width = 360,
                 Height = 160,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 WindowStyle = WindowStyle.ToolWindow,
                 ResizeMode = ResizeMode.NoResize
             };
+            MicroEngWpfUiTheme.ApplyTo(window);
 
             var panel = new Grid { Margin = new Thickness(12) };
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -307,6 +345,22 @@ namespace MicroEng.Navisworks
 
             window.Content = panel;
             return window.ShowDialog() == true ? box.Text : null;
+        }
+
+        private sealed class SpaceMapperStepPageProvider : INavigationViewPageProvider
+        {
+            private readonly Dictionary<Type, object> _pages;
+
+            public SpaceMapperStepPageProvider(params Page[] pages)
+            {
+                _pages = pages.ToDictionary(p => p.GetType(), p => (object)p);
+            }
+
+            public object GetPage(Type pageType)
+            {
+                _pages.TryGetValue(pageType, out var page);
+                return page;
+            }
         }
     }
 }

@@ -26,6 +26,7 @@ namespace MicroEng.Navisworks
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
             try
             {
                 if (!string.IsNullOrWhiteSpace(initialProfile))

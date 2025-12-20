@@ -1,0 +1,217 @@
+﻿<Window x:Class="MicroEng.Navisworks.MicroEngSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:local="clr-namespace:MicroEng.Navisworks"
+        Title="MicroEng Settings"
+        Width="720" Height="520"
+        MinWidth="640" MinHeight="460"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource ApplicationBackgroundBrush}"
+        Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+        FontSize="12">
+
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:Card Grid.Row="0"
+             Padding="12"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Top">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Orientation="Vertical">
+          <ui:TextBlock Text="Settings"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+          <ui:TextBlock Text="Configure theme and appearance for MicroEng tools."
+                        Margin="0,2,0,0"
+                        FontSize="12"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+         <ui:Button Grid.Column="1"
+                    Content="Close"
+                    Padding="12,6"
+                    Appearance="Primary"
+                    Click="Close_Click" />
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="1"
+             Padding="12"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
+      <TabControl Background="Transparent"
+                  Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+        <TabItem Header="Colour Settings">
+          <Grid Margin="8">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <ui:TextBlock Text="Accent"
+                          FontSize="13"
+                          FontWeight="SemiBold"
+                          Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            <ui:TextBlock Grid.Row="1"
+                          Text="Controls (buttons/toggles/checkboxes) use the accent. Apply changes to all open MicroEng windows."
+                          Margin="0,2,0,10"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <Grid Grid.Row="2">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+
+              <StackPanel>
+                <RadioButton x:Name="UseSystemAccentRadio"
+                             Content="Use Windows accent color"
+                             GroupName="AccentMode"
+                             Margin="0,0,0,6"
+                             Checked="AccentModeChanged" />
+                <RadioButton x:Name="UseBlackWhiteAccentRadio"
+                             Content="Black &amp; white accent"
+                             GroupName="AccentMode"
+                             Margin="0,0,0,6"
+                             Checked="AccentModeChanged" />
+                <StackPanel Orientation="Horizontal">
+                  <RadioButton x:Name="UseCustomAccentRadio"
+                               Content="Use custom accent color"
+                               GroupName="AccentMode"
+                               VerticalAlignment="Center"
+                               Checked="AccentModeChanged" />
+                  <Border x:Name="AccentPreview"
+                          Width="22" Height="22"
+                          Margin="10,0,0,0"
+                          CornerRadius="4"
+                          BorderThickness="1"
+                          BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                </StackPanel>
+              </StackPanel>
+
+              <StackPanel Grid.Column="1"
+                          Orientation="Horizontal"
+                          VerticalAlignment="Top">
+                <ui:Button x:Name="PickAccentButton"
+                           Content="Pick..."
+                           Padding="12,6"
+                           Margin="0,0,0,6"
+                           Click="PickAccent_Click" />
+              </StackPanel>
+            </Grid>
+
+            <ui:Card Grid.Row="3"
+                     Margin="0,14,0,0"
+                     Padding="12"
+                     HorizontalAlignment="Stretch"
+                     HorizontalContentAlignment="Stretch">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ui:TextBlock Text="Data Grid"
+                              FontSize="13"
+                              FontWeight="SemiBold"
+                              Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <ui:TextBlock Grid.Row="1"
+                              Grid.ColumnSpan="2"
+                              Text="Grid line colour used in DataGrids (Data Scraper / Data Matrix / Data Mapper). Changes apply immediately to open MicroEng windows."
+                              Margin="0,2,0,10"
+                              Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                <StackPanel Grid.Row="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                  <ui:TextBlock Text="Grid lines:"
+                                VerticalAlignment="Center"
+                                Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                  <Border x:Name="GridLinePreview"
+                          Width="22" Height="22"
+                          Margin="10,0,0,0"
+                          CornerRadius="4"
+                          BorderThickness="1"
+                          BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="2"
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                  <ui:Button x:Name="PickGridLineButton"
+                             Content="Pick..."
+                             Padding="12,6"
+                             Margin="0,0,8,0"
+                             Click="PickGridLine_Click" />
+                  <ui:Button x:Name="ResetGridLineButton"
+                             Content="Reset"
+                             Padding="12,6"
+                             Click="ResetGridLine_Click" />
+                </StackPanel>
+              </Grid>
+            </ui:Card>
+
+            <ui:Card Grid.Row="4"
+                     Margin="0,12,0,0"
+                     Padding="10"
+                     HorizontalAlignment="Stretch"
+                     HorizontalContentAlignment="Stretch">
+              <StackPanel>
+                 <ui:TextBlock Text="Note"
+                               FontTypography="BodyStrong"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                <ui:TextBlock Text="This only affects MicroEng UI. Navisworks is not themed globally."
+                              Margin="0,4,0,0"
+                              Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+              </StackPanel>
+            </ui:Card>
+          </Grid>
+        </TabItem>
+      </TabControl>
+    </ui:Card>
+
+    <ui:Card Grid.Row="2"
+             Padding="12"
+             Margin="0,8,0,0"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <DockPanel>
+        <ui:TextBlock DockPanel.Dock="Left"
+                      Text="Changes apply immediately."
+                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+      </DockPanel>
+    </ui:Card>
+  </Grid>
+</Window>

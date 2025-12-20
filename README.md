@@ -1,5 +1,27 @@
 # MicroEng_Navisworks - Developer Guide
 
+## Human Notes (Start Here)
+- Build: `dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj /p:NavisApiDir="C:\Program Files\Autodesk\Navisworks Manage 2025"` (default deploy goes to `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\` and writes `MicroEng.Navisworks.addin` to the **Plugins root**).
+- Runtime: launch Navisworks and use Add-Ins tab (MicroEng Panel opens the launcher/log; Data Scraper/Mapper/Matrix/Space Mapper are separate windows/panes).
+- WPF-UI is active (4.1.0). Theme is per-root only (no global App.xaml). Defaults: Dark theme, Black/White accent, DataGrid gridlines #C0C0C0.
+- Settings: open via the gear button in the panel. Theme toggle + accent mode (System, Custom, Black/White) + DataGrid gridline color apply live to all open MicroEng windows.
+- Log file: `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\MicroEng.log` (fallback: `%TEMP%\MicroEng.log`).
+- If UI is blank or a window fails to open, check the log for XAML resource errors (missing resource keys or Wpf.Ui.dll not found).
+- Known UI issue to verify: some labels/text still render black in Dark mode; fix by removing local `Foreground` overrides or ensuring `MicroEngWpfUiTheme.ApplyTextResources` updates `TextFillColor*` brushes.
+
+## AI Notes (Context for Codex)
+- Priority #1: WPF-UI is the primary UI system. Do not introduce non-WPF-UI elements as a fallback unless absolutely required for stability; instead, fix/adjust WPF-UI usage to match Gallery patterns when possible.
+- WPF-UI Gallery reference is local: `ReferenceProjects\wpfui-main`. Use patterns from:
+  - `src\Wpf.Ui.Gallery\Views\Pages\BasicInput\CheckBoxPage.xaml`
+  - `src\Wpf.Ui.Gallery\Views\Pages\BasicInput\ComboBoxPage.xaml`
+  - `src\Wpf.Ui.Gallery\Views\Pages\BasicInput\ToggleSwitchPage.xaml`
+  - `src\Wpf.Ui.Gallery\Views\Pages\Collections\TabControlPage.xaml`
+  - `src\Wpf.Ui.Gallery\Views\Pages\DesignGuidance\ColorsPage.xaml`
+- WPF-UI theme bootstrapping is per-root via `MicroEngWpfUiTheme.ApplyTo(root)` (no global App.xaml). `MicroEngWpfUiRoot.xaml` merges WPF-UI dictionaries + `MicroEngUiKit.xaml`.
+- `MicroEngUiKit.xaml` provides shared spacing/typography/card/button styles but should not override WPF-UI implicit styles for `ComboBox`, `CheckBox`, `RadioButton`, etc.
+- `MicroEngWpfUiTheme.cs` handles theme/accents/gridlines and broadcasts changes to registered roots; uses `TextFillColor*` resources to fix dark-mode text.
+- Primary UI files: `MicroEngPanelControl.xaml`, `DataScraperWindow.xaml`, `AppendIntegrateDialog.xaml`, `DataMatrixControl.xaml`, `SpaceMapperControl.xaml`.
+
 ## Overview
 - Navisworks 2025 automation toolkit written in C# targeting .NET Framework 4.8 (`net48`).
 - Main assembly: `MicroEng.Navisworks.dll` with WPF UI (`UseWPF` + `UseWindowsForms` for ElementHost).
@@ -40,7 +62,8 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 # Optional if your plugins folder is different
 # /p:NavisPluginsDir="C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins"
 ```
-- The build copies `MicroEng.Navisworks.dll` (and Logos) to `$(NavisPluginsDir)\MicroEng.Navisworks\`.
+- The build copies `MicroEng.Navisworks.dll` (and dependencies + Logos) to `$(NavisPluginsDir)\MicroEng.Navisworks\`.
+- The `.addin` manifest must be located in the **Plugins root**: `$(NavisPluginsDir)\MicroEng.Navisworks.addin`. Navisworks will not discover add-ins if the `.addin` lives only in the subfolder.
 - `ResolveAssemblyReferenceAdditionalPaths` uses `NavisApiDir`, so point it to the folder that contains `Autodesk.Navisworks.Api.dll` and friends.
 
 ## Running in Navisworks
@@ -55,7 +78,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 4. Reconstruct and Zone Finder are add-in placeholders only; they are not shown on the panel.
 
 ## Tool Behavior (current)
-- **Append Data (Data Mapper button / `MicroEng.AppendData`)**: Tags the current selection. Creates/reuses the `MicroEng` custom tab and writes/updates a `Tag` string set to `ME-AUTO-<timestamp>` for each selected item. Logs counts to the docked log; shows a friendly message if nothing is selected.
+- **Data Mapper (`MicroEng.AppendData`)**: Opens the Data Mapper UI (`AppendIntegrateDialog`). Uses Data Scraper cache for property pickers/type hints; no auto-tagging logic remains.
 - **Data Scraper**: Scans model properties into `DataScraperCache` (profiles, distinct properties, raw entries). Source of truth for Data Matrix/Space Mapper metadata.
 - **Data Matrix** (dock pane `MicroEng.DataMatrix.DockPane`): WPF grid built from the latest ScrapeSession. Supports column chooser (toggle properties on/off), presets per profile, selection sync back to Navisworks, and CSV export (filtered/all).
 - **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata and CPU intersection engine (GPU stubbed for now).

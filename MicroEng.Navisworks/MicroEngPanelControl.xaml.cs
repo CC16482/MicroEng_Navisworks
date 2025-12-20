@@ -2,32 +2,193 @@ using System;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
+using Autodesk.Navisworks.Api.Plugins;
+using NavisApp = Autodesk.Navisworks.Api.Application;
 
 namespace MicroEng.Navisworks
 {
     public partial class MicroEngPanelControl : UserControl
     {
+        private bool _settingThemeToggle;
+        private DispatcherTimer _toolStateTimer;
+
         static MicroEngPanelControl()
         {
             AssemblyResolver.EnsureRegistered();
+            MicroEngActions.Init();
         }
 
         public MicroEngPanelControl()
         {
-            InitializeComponent();
-            MicroEngWpfUiTheme.ApplyTo(this);
-
-            if (!DesignerProperties.GetIsInDesignMode(this))
+            try
             {
-                MicroEngActions.LogMessage += LogToPanel;
+                var diagnosticBypass = string.Equals(
+                    Environment.GetEnvironmentVariable("MICROENG_DIAGNOSTIC_BYPASS"),
+                    "1",
+                    StringComparison.OrdinalIgnoreCase);
+                MicroEngActions.Log("Panel: ctor entered");
+                // Force software rendering to reduce GPU/driver issues in host.
+                System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
+                if (diagnosticBypass)
+                {
+                    MicroEngActions.Log("Panel: diagnostic bypass active, skipping InitializeComponent");
+                    Content = new TextBlock
+                    {
+                        Text = "MicroEng panel placeholder (diagnostic bypass).",
+                        Margin = new Thickness(12)
+                    };
+                }
+                else
+                {
+                    MicroEngActions.Log("Panel: before InitializeComponent");
+                    try
+                    {
+                        InitializeComponent();
+                        MicroEngActions.Log("Panel: after InitializeComponent");
+                    }
+                    catch (Exception initEx)
+                    {
+                        MicroEngActions.Log($"Panel: InitializeComponent failed: {initEx}");
+                        throw;
+                    }
+                    try
+                    {
+                        MicroEngActions.Log("Panel: applying theme");
+                        MicroEngWpfUiTheme.ApplyTo(this);
+                        MicroEngActions.Log("Panel: theme applied");
+                    }
+                    catch (Exception themeEx)
+                    {
+                        MicroEngActions.Log($"Panel: theme apply failed: {themeEx.Message}");
+                    }
+
+                    try
+                    {
+                        InitThemeToggle();
+                    }
+                    catch (Exception toggleEx)
+                    {
+                        MicroEngActions.Log($"Panel: theme toggle init failed: {toggleEx.Message}");
+                    }
+                    if (!DesignerProperties.GetIsInDesignMode(this))
+                    {
+                        MicroEngActions.LogMessage += LogToPanel;
+                        MicroEngActions.Log("Panel: LogMessage handler attached");
+                        MicroEngActions.ToolWindowStateChanged += OnToolWindowStateChanged;
+                    }
+
+                    UpdateToolButtonStates();
+                    StartToolStateTimer();
+                }
+
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"Panel init failed: {ex}");
+                Content = new TextBlock
+                {
+                    Text = "MicroEng panel failed to load. See log for details.",
+                    Margin = new Thickness(12)
+                };
+            }
+        }
+
+        private void InitThemeToggle()
+        {
+            if (ThemeToggle == null)
+            {
+                return;
+            }
+
+            _settingThemeToggle = true;
+            ThemeToggle.IsChecked = MicroEngWpfUiTheme.CurrentTheme == MicroEngThemeMode.Light;
+            _settingThemeToggle = false;
+
+            ThemeToggle.Checked += ThemeToggle_Checked;
+            ThemeToggle.Unchecked += ThemeToggle_Unchecked;
+
+            MicroEngWpfUiTheme.ThemeChanged += OnThemeChanged;
+            Unloaded += (_, __) => MicroEngWpfUiTheme.ThemeChanged -= OnThemeChanged;
+        }
+
+        private void StartToolStateTimer()
+        {
+            if (_toolStateTimer != null)
+            {
+                return;
+            }
+
+            _toolStateTimer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromMilliseconds(750)
+            };
+            _toolStateTimer.Tick += (_, __) => UpdateToolButtonStates();
+            _toolStateTimer.Start();
+
+            Unloaded += (_, __) =>
+            {
+                try
+                {
+                    _toolStateTimer?.Stop();
+                    _toolStateTimer = null;
+                }
+                catch
+                {
+                    // ignore
+                }
+            };
+        }
+
+        private void ThemeToggle_Checked(object sender, RoutedEventArgs e)
+        {
+            if (_settingThemeToggle)
+            {
+                return;
+            }
+
+            MicroEngWpfUiTheme.SetTheme(MicroEngThemeMode.Light);
+        }
+
+        private void ThemeToggle_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (_settingThemeToggle)
+            {
+                return;
+            }
+
+            MicroEngWpfUiTheme.SetTheme(MicroEngThemeMode.Dark);
+        }
+
+        private void OnThemeChanged(MicroEngThemeMode theme)
+        {
+            if (ThemeToggle == null)
+            {
+                return;
+            }
+
+            void UpdateToggle()
+            {
+                _settingThemeToggle = true;
+                ThemeToggle.IsChecked = theme == MicroEngThemeMode.Light;
+                _settingThemeToggle = false;
+            }
+
+            if (Dispatcher.CheckAccess())
+            {
+                UpdateToggle();
+            }
+            else
+            {
+                Dispatcher.BeginInvoke((Action)UpdateToggle, DispatcherPriority.Background);
             }
         }
 
         private void AppendData_Click(object sender, RoutedEventArgs e)
         {
             LogToPanel("Opening Data Mapper...");
-            MicroEngActions.AppendData();
-            LogToPanel("Data Mapper closed.");
+            MicroEngActions.TryShowDataMapper(out _);
+            UpdateToolButtonStates();
         }
 
         private void Reconstruct_Click(object sender, RoutedEventArgs e)
@@ -46,12 +207,12 @@ namespace MicroEng.Navisworks
         {
             try
             {
-                var win = new DataScraperWindow();
-                System.Windows.Forms.Integration.ElementHost.EnableModelessKeyboardInterop(win);
-                win.Show();
+                MicroEngActions.TryShowDataScraper(null, out _);
+                UpdateToolButtonStates();
             }
             catch (Exception ex)
             {
+                MicroEngActions.Log($"[Data Scraper] failed to open: {ex}");
                 LogToPanel($"[Data Scraper] failed to open: {ex.Message}");
                 System.Windows.MessageBox.Show($"Data Scraper failed to open: {ex.Message}", "MicroEng",
                     MessageBoxButton.OK, MessageBoxImage.Error);
@@ -62,10 +223,18 @@ namespace MicroEng.Navisworks
         {
             try
             {
+                if (IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG"))
+                {
+                    UpdateToolButtonStates();
+                    return;
+                }
+
                 MicroEngActions.DataMatrix();
+                UpdateToolButtonStates();
             }
             catch (Exception ex)
             {
+                MicroEngActions.Log($"[Data Matrix] failed to open: {ex}");
                 LogToPanel($"[Data Matrix] failed to open: {ex.Message}");
                 System.Windows.MessageBox.Show($"Data Matrix failed to open: {ex.Message}", "MicroEng",
                     MessageBoxButton.OK, MessageBoxImage.Error);
@@ -76,12 +245,35 @@ namespace MicroEng.Navisworks
         {
             try
             {
+                if (IsDockPaneVisible("MicroEng.SpaceMapper.DockPane.MENG"))
+                {
+                    UpdateToolButtonStates();
+                    return;
+                }
+
                 MicroEngActions.SpaceMapper();
+                UpdateToolButtonStates();
             }
             catch (Exception ex)
             {
+                MicroEngActions.Log($"[Space Mapper] failed to open: {ex}");
                 LogToPanel($"[Space Mapper] failed to open: {ex.Message}");
                 System.Windows.MessageBox.Show($"Space Mapper failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void Settings_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                MicroEngActions.TryShowSettings(out _);
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"[Settings] failed to open: {ex}");
+                LogToPanel($"[Settings] failed to open: {ex.Message}");
+                System.Windows.MessageBox.Show($"Settings failed to open: {ex.Message}", "MicroEng",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -99,11 +291,76 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private static bool IsDockPaneVisible(string pluginId)
+        {
+            try
+            {
+                var record = NavisApp.Plugins.FindPlugin(pluginId);
+                if (record?.IsLoaded != true)
+                {
+                    return false;
+                }
+
+                if (record.LoadedPlugin is DockPanePlugin pane)
+                {
+                    return pane.Visible;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void UpdateToolButtonStates()
+        {
+            void SetButton(Wpf.Ui.Controls.Button button, bool isActive)
+            {
+                if (button == null)
+                {
+                    return;
+                }
+
+                button.Appearance = isActive ? Wpf.Ui.Controls.ControlAppearance.Primary : Wpf.Ui.Controls.ControlAppearance.Secondary;
+            }
+
+            var dataScraperOpen = MicroEngActions.IsDataScraperOpen;
+            var dataMapperOpen = MicroEngActions.IsDataMapperOpen;
+            var dataMatrixOpen = IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG");
+            var spaceMapperOpen = IsDockPaneVisible("MicroEng.SpaceMapper.DockPane.MENG");
+
+            SetButton(DataScraperButton, dataScraperOpen);
+            SetButton(DataMapperButton, dataMapperOpen);
+            SetButton(DataMatrixButton, dataMatrixOpen);
+            SetButton(SpaceMapperButton, spaceMapperOpen);
+        }
+
+        private void OnToolWindowStateChanged()
+        {
+            try
+            {
+                if (!Dispatcher.CheckAccess())
+                {
+                    Dispatcher.BeginInvoke(new Action(OnToolWindowStateChanged));
+                    return;
+                }
+
+                UpdateToolButtonStates();
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         ~MicroEngPanelControl()
         {
             if (!DesignerProperties.GetIsInDesignMode(this))
             {
                 MicroEngActions.LogMessage -= LogToPanel;
+                MicroEngActions.ToolWindowStateChanged -= OnToolWindowStateChanged;
             }
         }
     }

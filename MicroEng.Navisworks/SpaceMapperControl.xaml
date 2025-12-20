@@ -3,16 +3,21 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
              xmlns:local="clr-namespace:MicroEng.Navisworks"
+             xmlns:system="clr-namespace:System;assembly=System"
              mc:Ignorable="d"
              d:DesignHeight="600"
              d:DesignWidth="900"
-             Background="{DynamicResource AppBackgroundBrush}">
+             Background="{DynamicResource ApplicationBackgroundBrush}"
+             Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+             FontSize="12">
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <ResourceDictionary Source="pack://application:,,,/MicroEng.Navisworks;component/Assets/Theme/MicroEngUiKit.xaml" />
+                <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
             </ResourceDictionary.MergedDictionaries>
+            <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
             <x:Array x:Key="TargetTypes" Type="{x:Type local:SpaceMapperTargetType}">
                 <local:SpaceMapperTargetType>SelectionTreeLevel</local:SpaceMapperTargetType>
                 <local:SpaceMapperTargetType>SelectionSet</local:SpaceMapperTargetType>
@@ -40,212 +45,51 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <Grid Margin="{StaticResource PagePadding}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
-        <Border Grid.Row="0" Style="{StaticResource CardBorder}">
-            <StackPanel Orientation="Vertical">
-                <TextBlock Text="Space Mapper" Style="{StaticResource PageTitleText}" />
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="Scraper Profile:" Margin="0,0,6,0" VerticalAlignment="Center" />
-                    <ComboBox x:Name="ProfileCombo" Width="160" Style="{StaticResource InputComboBoxStyle}" Margin="0,0,8,0" />
-                    <Button x:Name="RefreshProfilesButton" Content="Refresh" Style="{StaticResource ToolbarButtonStyle}" />
-
-                    <TextBlock Text="Scope:" Margin="12,0,6,0" VerticalAlignment="Center" />
-                    <ComboBox x:Name="ScopeCombo" Width="140" Style="{StaticResource InputComboBoxStyle}" Margin="0,0,8,0" />
-
-                    <Button x:Name="RunScraperButton" Content="Run Data Scraper..." Style="{StaticResource ToolbarButtonStyle}" />
-                    <Button x:Name="RunButton" Content="Run Space Mapper" Style="{StaticResource PrimaryButtonStyle}" />
-                </StackPanel>
+    <ui:NavigationView x:Name="SpaceMapperNav"
+                       PaneDisplayMode="LeftFluent"
+                       IsBackButtonVisible="Collapsed"
+                       IsPaneToggleVisible="False"
+                       IsPaneOpen="True"
+                       Background="{DynamicResource ApplicationBackgroundBrush}"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+        <ui:NavigationView.PaneHeader>
+            <StackPanel Margin="0,0,0,12">
+                <ui:TextBlock Text="Space Mapper" FontSize="13" FontWeight="SemiBold" />
+                <ui:TextBlock Text="Step-by-step workflow"
+                              FontSize="12"
+                              Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
-        </Border>
-
-        <TabControl Grid.Row="1" Margin="6">
-            <!-- Zones & Targets -->
-            <TabItem Header="Zones &amp; Targets">
-                <Grid Margin="4">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,6">
-                        <TextBlock Text="Zone Source:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <ComboBox x:Name="ZoneSourceCombo" Width="180" Margin="0,0,8,0"/>
-                        <TextBlock Text="Set/Search Name:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBox x:Name="ZoneSetBox" Width="220"/>
-                    </StackPanel>
-
-                    <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,0,0,6">
-                        <TextBlock Text="Target Source:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <ComboBox x:Name="TargetSourceCombo" Width="220" />
-                    </StackPanel>
-
-                    <StackPanel Orientation="Horizontal" Grid.Row="2" Margin="0,0,0,6">
-                        <Button x:Name="AddRuleButton" Content="Add Rule" Style="{StaticResource SecondaryButtonStyle}"/>
-                        <Button x:Name="DeleteRuleButton" Content="Delete Rule" Style="{StaticResource SecondaryButtonStyle}"/>
-                    </StackPanel>
-
-                    <DataGrid x:Name="TargetRulesGrid"
-                              Grid.Row="3"
-                              Style="{StaticResource DataGridStandardStyle}"
-                              AutoGenerateColumns="False"
-                              CanUserAddRows="False"
-                              CanUserDeleteRows="False"
-                              ItemsSource="{Binding TargetRules}"
-                              HeadersVisibility="Column"
-                              IsReadOnly="False">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Rule Name" Binding="{Binding Name}" Width="140"/>
-                            <DataGridComboBoxColumn Header="Target Type" SelectedItemBinding="{Binding TargetType}" Width="140"
-                                                    ItemsSource="{StaticResource TargetTypes}"/>
-                            <DataGridTextColumn Header="Min Level" Binding="{Binding MinTreeLevel}" Width="70"/>
-                            <DataGridTextColumn Header="Max Level" Binding="{Binding MaxTreeLevel}" Width="70"/>
-                            <DataGridTextColumn Header="Set/Search Name" Binding="{Binding SetName}" Width="150"/>
-                            <DataGridTextColumn Header="Category Filter" Binding="{Binding CategoryFilter}" Width="140"/>
-                            <DataGridComboBoxColumn Header="Membership" SelectedItemBinding="{Binding MembershipMode}" Width="150"
-                                                    ItemsSource="{StaticResource MembershipModes}"/>
-                            <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
-            </TabItem>
-
-            <!-- Processing Settings -->
-            <TabItem Header="Processing Settings">
-                <StackPanel Margin="8" Orientation="Vertical">
-                    <WrapPanel Margin="0,0,0,6">
-                        <CheckBox x:Name="TreatPartialCheck" Content="Treat Partial as Contained" Margin="0,0,12,0"/>
-                        <CheckBox x:Name="TagPartialCheck" Content="Tag Partial Separately" Margin="0,0,12,0"/>
-                        <CheckBox x:Name="EnableMultiZoneCheck" Content="Enable Multiple Zones" IsChecked="True"/>
-                    </WrapPanel>
-
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                        <TextBlock Text="Processing Mode:" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <ComboBox x:Name="ProcessingModeCombo" Width="160"/>
-                    </StackPanel>
-
-                    <UniformGrid Columns="2" Rows="4" Margin="0,0,0,6">
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="3D Offset:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="Offset3DBox" Width="100" Text="0.0"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="Offset Top:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="OffsetTopBox" Width="100" Text="0.0"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="Offset Bottom:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="OffsetBottomBox" Width="100" Text="0.0"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="Offset Sides:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="OffsetSidesBox" Width="100" Text="0.0"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="Units:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="UnitsBox" Width="140" Text="Millimeters"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="Offset Mode:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="OffsetModeBox" Width="160" Text="From Zone Geometry"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="Max Threads:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="MaxThreadsBox" Width="80" Text="0"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Margin="0,4">
-                            <TextBlock Text="Batch Size:" Width="120" VerticalAlignment="Center"/>
-                            <TextBox x:Name="BatchSizeBox" Width="80" Text="0"/>
-                        </StackPanel>
-                    </UniformGrid>
+        </ui:NavigationView.PaneHeader>
+        <ui:NavigationView.MenuItems>
+            <ui:NavigationViewItem Content="1. Setup"
+                                   Icon="{ui:SymbolIcon Home24}"
+                                   TargetPageType="{x:Type local:SpaceMapperStepSetupPage}" />
+            <ui:NavigationViewItem Content="2. Zones &amp; Targets"
+                                   Icon="{ui:SymbolIcon Library24}"
+                                   TargetPageType="{x:Type local:SpaceMapperStepZonesTargetsPage}" />
+            <ui:NavigationViewItem Content="3. Processing"
+                                   Icon="{ui:SymbolIcon Settings24}"
+                                   TargetPageType="{x:Type local:SpaceMapperStepProcessingPage}" />
+            <ui:NavigationViewItem Content="4. Attribute Mapping"
+                                   Icon="{ui:SymbolIcon AppFolder24}"
+                                   TargetPageType="{x:Type local:SpaceMapperStepMappingPage}" />
+            <ui:NavigationViewItem Content="5. Results"
+                                   Icon="{ui:SymbolIcon BezierCurveSquare20}"
+                                   TargetPageType="{x:Type local:SpaceMapperStepResultsPage}" />
+        </ui:NavigationView.MenuItems>
+        <ui:NavigationView.Header>
+            <ui:Card Margin="12"
+                     Padding="10"
+                     HorizontalAlignment="Stretch"
+                     HorizontalContentAlignment="Stretch">
+                <StackPanel>
+                    <ui:TextBlock Text="Space Mapper" FontSize="16" FontWeight="SemiBold" />
+                    <ui:TextBlock Text="Follow the steps on the left to configure zones, targets, and mappings."
+                                  Margin="0,4,0,0"
+                                  FontSize="12"
+                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
-            </TabItem>
-
-            <!-- Attribute Mapping -->
-            <TabItem Header="Attribute Mapping">
-                <Grid Margin="4">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,6">
-                        <Button x:Name="AddMappingButton" Content="Add Mapping" Style="{StaticResource SecondaryButtonStyle}"/>
-                        <Button x:Name="DeleteMappingButton" Content="Delete Mapping" Style="{StaticResource SecondaryButtonStyle}"/>
-                        <Button x:Name="SaveTemplateButton" Content="Save Template" Style="{StaticResource SecondaryButtonStyle}"/>
-                        <Button x:Name="LoadTemplateButton" Content="Load Template" Style="{StaticResource SecondaryButtonStyle}"/>
-                    </StackPanel>
-
-                    <DataGrid x:Name="MappingGrid"
-                              Grid.Row="1"
-                              Style="{StaticResource DataGridStandardStyle}"
-                              AutoGenerateColumns="False"
-                              CanUserAddRows="False"
-                              CanUserDeleteRows="False"
-                              ItemsSource="{Binding Mappings}"
-                              HeadersVisibility="Column"
-                              IsReadOnly="False">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="120"/>
-                            <DataGridTextColumn Header="Zone Category" Binding="{Binding ZoneCategory}" Width="140"/>
-                            <DataGridTextColumn Header="Zone Property" Binding="{Binding ZonePropertyName}" Width="140"/>
-                            <DataGridTextColumn Header="Target Category" Binding="{Binding TargetCategory}" Width="140"/>
-                            <DataGridTextColumn Header="Target Property" Binding="{Binding TargetPropertyName}" Width="140"/>
-                            <DataGridComboBoxColumn Header="Write Mode" SelectedItemBinding="{Binding WriteMode}" Width="120"
-                                                    ItemsSource="{StaticResource WriteModes}"/>
-                            <DataGridComboBoxColumn Header="Multi-Zone" SelectedItemBinding="{Binding MultiZoneCombineMode}" Width="120"
-                                                    ItemsSource="{StaticResource CombineModes}"/>
-                            <DataGridTextColumn Header="Append Separator" Binding="{Binding AppendSeparator}" Width="120"/>
-                            <DataGridTextColumn Header="Partial Flag" Binding="{Binding PartialFlagValue}" Width="100"/>
-                            <DataGridCheckBoxColumn Header="Editable" Binding="{Binding IsEditable}" Width="70"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
-            </TabItem>
-
-            <!-- Results / Stats -->
-            <TabItem Header="Results / Stats">
-                <Grid Margin="4">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-
-                    <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,6">
-                        <Button x:Name="ExportStatsButton" Content="Export Stats to CSV" Style="{StaticResource SecondaryButtonStyle}"/>
-                    </StackPanel>
-
-                    <TextBox x:Name="ResultsSummaryBox"
-                             Grid.Row="1"
-                             Margin="0,0,0,6"
-                             Text="Ready"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             VerticalScrollBarVisibility="Auto"/>
-
-                    <DataGrid x:Name="ResultsGrid"
-                              Grid.Row="2"
-                              Style="{StaticResource DataGridStandardStyle}"
-                              AutoGenerateColumns="False"
-                              CanUserAddRows="False"
-                              CanUserDeleteRows="False"
-                              ItemsSource="{Binding ZoneSummaries}"
-                              HeadersVisibility="Column"
-                              IsReadOnly="True">
-                        <DataGrid.Columns>
-                            <DataGridTextColumn Header="Zone" Binding="{Binding ZoneName}" Width="200"/>
-                            <DataGridTextColumn Header="Contained" Binding="{Binding ContainedCount}" Width="100"/>
-                            <DataGridTextColumn Header="Partial" Binding="{Binding PartialCount}" Width="100"/>
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </Grid>
-            </TabItem>
-        </TabControl>
-    </Grid>
+            </ui:Card>
+        </ui:NavigationView.Header>
+    </ui:NavigationView>
 </UserControl>

@@ -19,10 +19,20 @@
   <PropertyGroup>
     <!-- Adjust path if you use Simulate instead of Manage -->
     <NavisApiDir Condition="'$(NavisApiDir)'==''">C:\Program Files\Autodesk\Navisworks Manage 2025</NavisApiDir>
-    <NavisPluginsDir Condition="'$(NavisPluginsDir)'==''">C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins</NavisPluginsDir>
+    <!-- Prefer ProgramData (writable) over Program Files to avoid requiring admin for dev builds -->
+    <NavisPluginsDir Condition="'$(NavisPluginsDir)'==''">$(ProgramData)\Autodesk\Navisworks Manage 2025\Plugins</NavisPluginsDir>
+    <!-- Program Files plugin folder (read-only unless running elevated) -->
+    <NavisProgramFilesPluginsDir Condition="'$(NavisProgramFilesPluginsDir)'==''">$(NavisApiDir)\plugins</NavisProgramFilesPluginsDir>
 
     <!-- Help ResolveAssemblyReference find Navisworks assemblies -->
     <ResolveAssemblyReferenceAdditionalPaths>$(NavisApiDir);$(ResolveAssemblyReferenceAdditionalPaths)</ResolveAssemblyReferenceAdditionalPaths>
+  </PropertyGroup>
+
+  <!-- Deployment toggles (keep deterministic to avoid duplicate-load issues) -->
+  <PropertyGroup>
+    <DeployToProgramData Condition="'$(DeployToProgramData)'==''">true</DeployToProgramData>
+    <DeployToAppBundle Condition="'$(DeployToAppBundle)'==''">false</DeployToAppBundle>
+    <DeployToProgramFiles Condition="'$(DeployToProgramFiles)'==''">false</DeployToProgramFiles>
   </PropertyGroup>
 
   <!-- Navisworks API + WinForms -->
@@ -52,24 +62,68 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <!-- Ensure the Navisworks *.addin manifest is copied to output/deploy.
+         Use Update (not Include) to attach metadata to the default item. -->
+    <None Update="MicroEng.Navisworks.addin">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.1.0" />
+  </ItemGroup>
+
+  <!-- Ensure theme dictionaries are compiled as Page resources -->
+  <ItemGroup>
+    <Page Update="Assets\Theme\MicroEngWpfUiRoot.xaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Page>
   </ItemGroup>
 
   <!-- Mark design-only XAML mocks as None so they don't compile -->
   <!-- After build, copy dll to Navisworks Plugins\<AssemblyName>\ -->
   <!-- Folder name must match dll name for simple side-loading. -->
   <!-- This follows the typical "side-loading" pattern many devs use. :contentReference[oaicite:4]{index=4} -->
-  <Target Name="AfterBuild">
-    <MakeDir Directories="$(NavisPluginsDir)\$(AssemblyName)" />
+  <Target Name="MicroEngDeploy" AfterTargets="Build">
+    <Message Text="MicroEngDeploy: DeployToProgramData=$(DeployToProgramData); DeployToProgramFiles=$(DeployToProgramFiles); DeployToAppBundle=$(DeployToAppBundle)" Importance="high" />
     <ItemGroup>
-      <PluginFiles Include="$(TargetDir)**\*.*" />
+      <PluginFiles Include="$(TargetDir)**\*.*" Exclude="$(TargetDir)**\*.addin" />
+      <!-- .addin must live in the Plugins root for Navisworks to discover it. -->
+      <PluginAddin Include="$(MSBuildProjectDirectory)\MicroEng.Navisworks.addin" />
     </ItemGroup>
-    <Copy SourceFiles="@(PluginFiles)"
-          DestinationFiles="@(PluginFiles->'$(NavisPluginsDir)\$(AssemblyName)\%(RecursiveDir)%(Filename)%(Extension)')"
+
+    <PropertyGroup>
+      <ProgramDataDeployDir>$(NavisPluginsDir)\$(AssemblyName)</ProgramDataDeployDir>
+      <ProgramFilesDeployDir>$(NavisProgramFilesPluginsDir)\$(AssemblyName)</ProgramFilesDeployDir>
+    </PropertyGroup>
+
+    <!-- Preferred deploy: ProgramData (writable) -->
+    <Message Condition="'$(DeployToProgramData)'=='true'" Text="Deploying MicroEng.Navisworks to (ProgramData) $(ProgramDataDeployDir)" Importance="high" />
+    <MakeDir Condition="'$(DeployToProgramData)'=='true'" Directories="$(ProgramDataDeployDir)" />
+    <Copy Condition="'$(DeployToProgramData)'=='true'"
+          SourceFiles="@(PluginFiles)"
+          DestinationFiles="@(PluginFiles->'$(ProgramDataDeployDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy Condition="'$(DeployToProgramData)'=='true'"
+          SourceFiles="@(PluginAddin)"
+          DestinationFolder="$(NavisPluginsDir)"
           SkipUnchangedFiles="true" />
 
+    <!-- Optional deploy: Program Files (requires elevated permissions; errors ignored by default) -->
+    <Message Condition="'$(DeployToProgramFiles)'=='true'" Text="Deploying MicroEng.Navisworks to (Program Files) $(ProgramFilesDeployDir)" Importance="high" />
+    <MakeDir Condition="'$(DeployToProgramFiles)'=='true'" Directories="$(ProgramFilesDeployDir)" />
+    <Copy Condition="'$(DeployToProgramFiles)'=='true'"
+          SourceFiles="@(PluginFiles)"
+          DestinationFiles="@(PluginFiles->'$(ProgramFilesDeployDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+    <Copy Condition="'$(DeployToProgramFiles)'=='true'"
+          SourceFiles="@(PluginAddin)"
+          DestinationFolder="$(NavisProgramFilesPluginsDir)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+
     <!-- Optional AppBundle for side-loading via %AppData% (does not require admin) -->
-    <PropertyGroup>
+    <PropertyGroup Condition="'$(DeployToAppBundle)'=='true'">
       <DevId>MENG</DevId>
       <PluginName>MicroEng.Navisworks</PluginName>
       <BundleDir>$(AppData)\Autodesk\ApplicationPlugins\$(DevId).$(PluginName).bundle</BundleDir>
@@ -78,14 +132,12 @@
       <UpgradeCode>{A4A02E74-8A6F-4C0D-9E3A-41F2E3E9E3EE}</UpgradeCode>
     </PropertyGroup>
 
-    <ItemGroup>
-      <BundleFiles Include="$(TargetDir)*.dll" />
-      <BundleFiles Include="$(TargetDir)Logos\*.png" />
-    </ItemGroup>
-
-    <RemoveDir Directories="$(BundleDir)" Condition="Exists('$(BundleDir)')" />
-    <MakeDir Directories="$(ContentsDir)" />
-    <Copy SourceFiles="@(BundleFiles)" DestinationFolder="$(ContentsDir)\" />
+    <RemoveDir Condition="'$(DeployToAppBundle)'=='true' and Exists('$(BundleDir)')" Directories="$(BundleDir)" />
+    <MakeDir Condition="'$(DeployToAppBundle)'=='true'" Directories="$(ContentsDir)" />
+    <Copy Condition="'$(DeployToAppBundle)'=='true'"
+          SourceFiles="@(PluginFiles)"
+          DestinationFiles="@(PluginFiles->'$(ContentsDir)\\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
     <ItemGroup>
       <PackageLines Include="&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;" />
       <PackageLines Include="&lt;ApplicationPackage" />
@@ -107,8 +159,8 @@
       <PackageLines Include="  &lt;/Components&gt;" />
       <PackageLines Include="&lt;/ApplicationPackage&gt;" />
     </ItemGroup>
-    <WriteLinesToFile File="$(BundleDir)\PackageContents.xml" Overwrite="true" Lines="@(PackageLines)" />
-    <Message Text="Plugin bundle created at $(BundleDir)" Importance="high" />
+    <WriteLinesToFile Condition="'$(DeployToAppBundle)'=='true'" File="$(BundleDir)\PackageContents.xml" Overwrite="true" Lines="@(PackageLines)" />
+    <Message Condition="'$(DeployToAppBundle)'=='true'" Text="Plugin bundle created at $(BundleDir)" Importance="high" />
   </Target>
 
 </Project>

@@ -48,3 +48,4 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepSetupPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepZonesTargetsPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\Debug\net48\MicroEng.Navisworks.addin
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\Debug\net48\WpfAnimatedGif.dll

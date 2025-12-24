@@ -1,0 +1,300 @@
+Below is a concrete, user-facing “Step 3 – Processing” UX upgrade plan, plus the exact changes to implement Preset sliders (using WPF Slider TickPlacement="Both") and the related plumbing so presets actually change CPU behavior and the estimator—without re-running expensive preflight unnecessarily.
+
+I’m writing this assuming your current wiring is as shown in:
+
+SpaceMapperControl.xaml.cs (debounced live preflight + estimate panel + run pipeline) 
+
+SpaceMapperControl.xaml
+
+SpaceMapperStepProcessingPage.xaml(.cs) (Step 3 UI + exposed controls) 
+
+SpaceMapperStepProcessingPage.x…
+
+CPU engine + diagnostics (SpaceMapperEngines.cs, SpaceMapperModels.cs)
+
+Preflight cache (SpaceMapperPreflightService.cs) 
+
+SpaceMapperPreflightService
+
+Run pipeline (SpaceMapperService.cs) 
+
+SpaceMapperService
+
+1) What the user should see in Step 3
+A. “Processing Preset” slider (primary control)
+
+Place this above offsets (still inside Step 3 card), so it’s the first thing they pick.
+
+Slider ticks (left → right):
+
+Auto (Recommended)
+
+Fast (BBox / Minimal sampling)
+
+Normal (Current default)
+
+Accurate (More sampling / stricter classification)
+
+What changes per preset (CPU path):
+
+Fast: broad-phase is your spatial grid; narrow-phase is AABB-only classification (no plane tests).
+
+Good for huge models / quick tagging passes.
+
+Expect more “partials” / false positives.
+
+Normal: your existing “plane test on the 8 AABB corners” narrow-phase. 
+
+SpaceMapperEngines
+
+Accurate: increased sampling (corners + centroid + 6 face centers) against zone planes; more robust partial/contained classification.
+
+Auto: resolves to Fast/Normal/Accurate based on the latest preflight result (zones, targets, candidate pairs, and candidate density). The UI should display “Auto resolved to: Normal” (or Fast/Accurate) once preflight has run.
+
+B. “Advanced Performance” expander (optional but high value)
+
+This is where sliders help a lot without bloating the main page:
+
+CPU utilisation slider (Auto / Low / Medium / High / Max)
+Maps to ProcessingSettings.MaxThreads (you already have it but it’s hidden today)
+
+Index granularity slider (Auto / Coarse / Normal / Fine)
+This controls the grid cell size multiplier used by preflight (and optionally by the run if it rebuilds). Smaller cells = fewer candidates but more index overhead. This is the single most meaningful “speed knob” after presets, because it directly changes CandidatePairs.
+
+You can implement this later, but it fits perfectly with your new preflight/estimate UI.
+
+C. Behavior rule to keep Step 3 responsive
+
+Changing offsets / sources / rules should trigger live preflight (candidate pairs change).
+
+Changing preset only should not re-run preflight; it should instantly recompute the estimate using the cached _lastPreflight because candidate pairs haven’t changed—only cost-per-pair changed. Your current wiring re-runs preflight on most changes; you should treat preset slider specially.
+
+That is a major UX quality improvement with no downside.
+
+2) Implementation details (what to change)
+Step 1 — Add a new enum + setting
+
+In SpaceMapperModels.cs, add a new enum and persist it in SpaceMapperProcessingSettings.
+
+Add enum:
+
+public enum SpaceMapperProcessingPreset
+{
+    Auto = 0,
+    Fast = 1,
+    Normal = 2,
+    Accurate = 3
+}
+
+
+Add to SpaceMapperProcessingSettings:
+
+[DataMember(Order = 12)]
+public SpaceMapperProcessingPreset ProcessingPreset { get; set; } = SpaceMapperProcessingPreset.Auto;
+
+
+This keeps ProcessingMode as your “CPU/GPU/Debug” concept (even though you hard-code CPU normal today) and uses ProcessingPreset for the CPU quality ladder.
+
+Step 2 — Add the slider UI to SpaceMapperStepProcessingPage.xaml
+
+Add a new block after the existing checkbox WrapPanel and before the offsets UniformGrid.
+
+Use the exact slider style you asked for (TickPlacement="Both"), and provide labels underneath.
+
+XAML snippet (insert in Step 3 card):
+
+<StackPanel Margin="0,0,0,10">
+  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+    <TextBlock Text="Processing Preset:" VerticalAlignment="Center" />
+    <Button x:Name="PresetFlyoutButton"
+            Style="{StaticResource HelpFlyoutButtonStyle}">
+      <ui:SymbolIcon Symbol="Info16" />
+    </Button>
+  </StackPanel>
+
+  <ui:Flyout x:Name="PresetFlyout" Placement="Top">
+    <StackPanel x:Name="PresetFlyoutContent" Width="420">
+      <TextBlock Text="Processing Presets" FontWeight="SemiBold" Margin="0,0,0,4"/>
+      <TextBlock TextWrapping="Wrap">
+        Auto chooses Fast/Normal/Accurate based on the preflight candidate density.
+        Fast uses AABB-only classification, Normal uses corner sampling, Accurate uses extra sampling points.
+      </TextBlock>
+    </StackPanel>
+  </ui:Flyout>
+
+  <Slider x:Name="ProcessingPresetSliderControl"
+          Minimum="0"
+          Maximum="3"
+          Value="0"
+          TickPlacement="Both"
+          Ticks="0,1,2,3"
+          IsSnapToTickEnabled="True"
+          SmallChange="1"
+          LargeChange="1"
+          Margin="0,6,0,0"/>
+
+  <Grid Margin="0,4,0,0">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+    <TextBlock Text="Auto" Grid.Column="0" HorizontalAlignment="Left" />
+    <TextBlock Text="Fast" Grid.Column="1" HorizontalAlignment="Center" />
+    <TextBlock Text="Normal" Grid.Column="2" HorizontalAlignment="Center" />
+    <TextBlock Text="Accurate" Grid.Column="3" HorizontalAlignment="Right" />
+  </Grid>
+
+  <TextBlock x:Name="ProcessingPresetDescriptionTextControl"
+             Margin="0,6,0,0"
+             TextWrapping="Wrap"
+             Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+             Text="Auto: recommended. Run preflight to resolve." />
+
+  <TextBlock x:Name="ProcessingPresetResolvedTextControl"
+             Margin="0,2,0,0"
+             TextWrapping="Wrap"
+             Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+             Text="" />
+</StackPanel>
+
+
+This matches your existing Step 3 structure and styling approach (cards + help flyouts + WPF-UI theme resources).
+
+Step 3 — Expose these controls in SpaceMapperStepProcessingPage.xaml.cs
+
+Add:
+
+internal Slider ProcessingPresetSlider => ProcessingPresetSliderControl;
+internal TextBlock ProcessingPresetDescriptionText => ProcessingPresetDescriptionTextControl;
+internal TextBlock ProcessingPresetResolvedText => ProcessingPresetResolvedTextControl;
+
+
+Keep the pattern consistent with how you expose offsets and estimate controls today.
+
+Step 4 — Wire the slider behavior in SpaceMapperControl.xaml.cs
+
+You already wire a lot of controls to TriggerLivePreflight() 
+
+SpaceMapperControl.xaml
+
+. Add a handler for the slider, but do not trigger preflight every time.
+
+Recommended logic:
+
+On slider change:
+
+Update the preset description text immediately.
+
+If _lastPreflight != null, update estimate UI using _lastPreflight (no preflight).
+
+If _lastPreflight == null and Live Estimate is enabled, run preflight (because Auto resolution and estimates need candidate counts).
+
+You’ll add something like:
+
+_processingPage.ProcessingPresetSlider.ValueChanged += (s, e) => OnPresetChanged();
+
+
+Then implement:
+
+private void OnPresetChanged()
+{
+    var preset = ReadPresetFromSlider();
+    UpdatePresetText(preset, _lastPreflight);
+
+    // Do NOT rerun preflight for preset changes; candidate pairs don't change.
+    if (_processingPage.LiveEstimateToggle.IsChecked == true)
+    {
+        if (_lastPreflight != null)
+        {
+            UpdateEstimateUi(BuildRequest(), _lastPreflight);
+        }
+        else
+        {
+            // No preflight yet; we need it to resolve Auto + estimate.
+            TriggerLivePreflight();
+        }
+    }
+}
+
+
+Also call OnPresetChanged() once during initialization of Step 3 (e.g., at end of InitializeUi() or after constructing _processingPage) so the description text is never blank.
+
+Step 5 — Update BuildSettings to include preset
+
+Your BuildSettings() currently hard-codes CPU normal and reads the checkbox/text inputs.
+Add:
+
+ProcessingPreset = ReadPresetFromSlider()
+
+
+Where:
+
+private SpaceMapperProcessingPreset ReadPresetFromSlider()
+{
+    var idx = (int)Math.Round(_processingPage.ProcessingPresetSlider.Value);
+    return idx switch
+    {
+        0 => SpaceMapperProcessingPreset.Auto,
+        1 => SpaceMapperProcessingPreset.Fast,
+        2 => SpaceMapperProcessingPreset.Normal,
+        3 => SpaceMapperProcessingPreset.Accurate,
+        _ => SpaceMapperProcessingPreset.Normal
+    };
+}
+
+Step 6 — Make the engine actually respect presets
+
+Right now your CPU engine always does the same narrow-phase logic (corners vs planes).
+
+Upgrade it so narrow-phase uses the preset:
+
+Resolve effectivePreset = ResolvePreset(settings.ProcessingPreset, preflightCache?.LastResult, zones.Count, targets.Count)
+
+For each candidate:
+
+Fast: AABB-only classification (contained vs partial based on AABB containment)
+
+Normal: current corner sampling vs planes
+
+Accurate: corners + centroid + face centers vs planes
+
+Also push effectivePreset into diagnostics so your results summary can say:
+
+“Preset used: Normal”
+
+“Auto resolved: Fast”
+
+That matches your “Step 3 shows performance data and estimates improve after runs” direction.
+
+Step 7 — Update estimator calibration key to include preset
+
+Today calibration key is only based on ProcessingMode .
+But now Fast/Normal/Accurate represent different per-pair costs. So update:
+
+Calibration key should be: "{ProcessingMode}/{EffectivePreset}"
+
+For Auto, use the resolved effective preset.
+
+This prevents Auto/Fast runs from polluting the calibration for Accurate, and vice versa.
+
+3) Suggested preset resolution logic (Auto)
+
+Keep it simple and stable. A good v1 heuristic based on preflight:
+
+If CandidatePairs >= 20,000,000 OR Targets >= 250,000 → Fast
+
+Else if CandidatePairs <= 2,000,000 AND Zones <= 5,000 → Accurate
+
+Else → Normal
+
+This is intentionally conservative: Accurate only when the job is small enough to justify it.
+
+You can later enrich this using:
+
+Scene triangle stats (if you implement it)
+
+Average candidates/zone
+
+Primitive counts from Data Scraper’s cached RawEntries for Geometry/Primitives if present (optional)

@@ -11,6 +11,8 @@
       d:DesignWidth="900"
       Background="Transparent"
       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
       FontSize="12">
 
   <Page.Resources>
@@ -19,23 +21,42 @@
         <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
       </ResourceDictionary.MergedDictionaries>
       <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
-      <x:Array x:Key="TargetTypes" Type="{x:Type local:SpaceMapperTargetType}">
-        <local:SpaceMapperTargetType>SelectionTreeLevel</local:SpaceMapperTargetType>
-        <local:SpaceMapperTargetType>SelectionSet</local:SpaceMapperTargetType>
-        <local:SpaceMapperTargetType>SearchSet</local:SpaceMapperTargetType>
-        <local:SpaceMapperTargetType>CurrentSelection</local:SpaceMapperTargetType>
-        <local:SpaceMapperTargetType>VisibleInView</local:SpaceMapperTargetType>
+      <x:Array x:Key="TargetDefinitions" Type="{x:Type local:SpaceMapperTargetDefinition}">
+        <local:SpaceMapperTargetDefinition>EntireModel</local:SpaceMapperTargetDefinition>
+        <local:SpaceMapperTargetDefinition>CurrentSelection</local:SpaceMapperTargetDefinition>
+        <local:SpaceMapperTargetDefinition>SelectionSet</local:SpaceMapperTargetDefinition>
+        <local:SpaceMapperTargetDefinition>SearchSet</local:SpaceMapperTargetDefinition>
+        <local:SpaceMapperTargetDefinition>SelectionTreeLevel</local:SpaceMapperTargetDefinition>
       </x:Array>
       <x:Array x:Key="MembershipModes" Type="{x:Type local:SpaceMembershipMode}">
         <local:SpaceMembershipMode>ContainedOnly</local:SpaceMembershipMode>
         <local:SpaceMembershipMode>PartialOnly</local:SpaceMembershipMode>
         <local:SpaceMembershipMode>ContainedAndPartial</local:SpaceMembershipMode>
       </x:Array>
+      <Style x:Key="HelpToggleButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="4,0,0,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
     </ResourceDictionary>
   </Page.Resources>
 
   <Grid Margin="12">
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
@@ -65,13 +86,21 @@
           <TextBlock Text="Zone Source:" VerticalAlignment="Center" Margin="0,0,6,0" />
           <ComboBox x:Name="ZoneSourceComboBox" Width="180" Margin="0,0,8,0" />
           <TextBlock Text="Set/Search Name:" VerticalAlignment="Center" Margin="0,0,6,0" />
-          <TextBox x:Name="ZoneSetBoxControl" Width="220" />
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="220" />
+              <ColumnDefinition Width="200" />
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="ZoneSetBoxControl" Grid.Column="0" Width="220" />
+            <ComboBox x:Name="ZoneSetComboBox"
+                      Grid.Column="1"
+                      Width="200"
+                      Margin="6,0,0,0"
+                      ToolTip="Selection/Search Sets"
+                      DisplayMemberPath="DisplayName" />
+          </Grid>
         </StackPanel>
 
-        <StackPanel Orientation="Horizontal">
-          <TextBlock Text="Target Source:" VerticalAlignment="Center" Margin="0,0,6,0" />
-          <ComboBox x:Name="TargetSourceComboBox" Width="220" />
-        </StackPanel>
       </StackPanel>
     </ui:Card>
 
@@ -79,54 +108,267 @@
              Padding="10"
              HorizontalAlignment="Stretch"
              HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Stretch">
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+             VerticalContentAlignment="Stretch"
+             VerticalAlignment="Top">
+      <StackPanel>
+        <ui:TextBlock Text="Target Rules" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6" />
 
-        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,8">
-          <ui:Button x:Name="AddRuleButtonControl" Content="Add Rule" Margin="0,0,6,0" />
-          <ui:Button x:Name="DeleteRuleButtonControl" Content="Delete Rule" />
-        </StackPanel>
+        <Grid Margin="0,0,0,8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="24" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
 
-        <ui:DataGrid x:Name="TargetRulesGridControl"
-                     Grid.Row="1"
-                     AutoGenerateColumns="False"
-                     CanUserAddRows="False"
-                     CanUserDeleteRows="False"
-                     ItemsSource="{Binding TargetRules}"
-                     HeadersVisibility="Column"
-                     GridLinesVisibility="All"
-                     HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                     VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                     FontSize="12"
-                     RowHeight="28"
-                     ColumnHeaderHeight="30"
-                     EnableRowVirtualization="True"
-                     EnableColumnVirtualization="True"
-                     VirtualizingPanel.IsVirtualizing="True"
-                     VirtualizingPanel.VirtualizationMode="Recycling"
-                     IsReadOnly="False">
-          <ui:DataGrid.Columns>
-            <DataGridTextColumn Header="Rule Name" Binding="{Binding Name}" Width="140" />
-            <DataGridComboBoxColumn Header="Target Type"
-                                    SelectedItemBinding="{Binding TargetType}"
-                                    Width="140"
-                                    ItemsSource="{StaticResource TargetTypes}" />
-            <DataGridTextColumn Header="Min Level" Binding="{Binding MinTreeLevel}" Width="70" />
-            <DataGridTextColumn Header="Max Level" Binding="{Binding MaxTreeLevel}" Width="70" />
-            <DataGridTextColumn Header="Set/Search Name" Binding="{Binding SetName}" Width="150" />
-            <DataGridTextColumn Header="Category Filter" Binding="{Binding CategoryFilter}" Width="140" />
-            <DataGridComboBoxColumn Header="Membership"
-                                    SelectedItemBinding="{Binding MembershipMode}"
-                                    Width="150"
-                                    ItemsSource="{StaticResource MembershipModes}" />
-            <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70" />
-          </ui:DataGrid.Columns>
-        </ui:DataGrid>
-      </Grid>
+          <Grid Grid.Row="0" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Rule Name:" VerticalAlignment="Center" />
+              <Button x:Name="RuleNameHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleNameHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Friendly name for the rule; shown in the rule table." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="RuleNameBoxControl" Grid.Column="1" MinWidth="180" />
+          </Grid>
+
+          <Grid Grid.Row="0" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Target Definition:" VerticalAlignment="Center" />
+              <Button x:Name="RuleTargetDefinitionHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleTargetDefinitionHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="How targets are selected (entire model, current selection, selection set, search set, or selection tree level)." />
+              </ui:Flyout>
+            </StackPanel>
+            <ComboBox x:Name="RuleTargetDefinitionComboBoxControl" Grid.Column="1" MinWidth="200" />
+          </Grid>
+
+          <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Min Level:" VerticalAlignment="Center" />
+              <Button x:Name="RuleMinLevelHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleMinLevelHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Lowest selection tree level to include (0 is the top level)." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="RuleMinLevelBoxControl" Grid.Column="1" MinWidth="120" />
+          </Grid>
+
+          <Grid Grid.Row="1" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Max Level:" VerticalAlignment="Center" />
+              <Button x:Name="RuleMaxLevelHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleMaxLevelHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Highest selection tree level to include (0 means only the top level)." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="RuleMaxLevelBoxControl" Grid.Column="1" MinWidth="120" />
+          </Grid>
+
+          <TextBlock x:Name="RuleMinMaxHintTextControl"
+                     Grid.Row="2"
+                     Grid.Column="0"
+                     Grid.ColumnSpan="3"
+                     Margin="24,0,0,8"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     Text="Min/Max levels are only used for Selection Tree Level rules."
+                     Visibility="Collapsed" />
+
+          <Grid Grid.Row="3" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Set/Search Name:" VerticalAlignment="Center" />
+              <Button x:Name="RuleSetNameHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleSetNameHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Selection/Search set name used when Target Definition is SelectionSet or SearchSet." />
+              </ui:Flyout>
+            </StackPanel>
+            <Grid Grid.Column="1">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="220" />
+                <ColumnDefinition Width="200" />
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="RuleSetNameBoxControl" Grid.Column="0" MinWidth="220" />
+              <ComboBox x:Name="RuleSetComboBoxControl"
+                        Grid.Column="1"
+                        Width="200"
+                        Margin="6,0,0,0"
+                        ToolTip="Selection/Search Sets"
+                        DisplayMemberPath="DisplayName" />
+            </Grid>
+          </Grid>
+
+          <Grid Grid.Row="3" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Category Filter:" VerticalAlignment="Center" />
+              <Button x:Name="RuleCategoryFilterHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleCategoryFilterHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Optional property tab/category filter (for example: Element, Item, Revit Data)." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="RuleCategoryFilterBoxControl" Grid.Column="1" MinWidth="220" />
+          </Grid>
+
+          <TextBlock x:Name="RuleSetNameHintTextControl"
+                     Grid.Row="4"
+                     Grid.Column="0"
+                     Grid.ColumnSpan="3"
+                     Margin="24,0,0,8"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     Text="Set/Search Name is only used for Selection/Search set rules."
+                     Visibility="Collapsed" />
+
+          <Grid Grid.Row="5" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Membership:" VerticalAlignment="Center" />
+              <Button x:Name="RuleMembershipHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleMembershipHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Defines how a target is considered inside a zone (contained, partial, or both)." />
+              </ui:Flyout>
+            </StackPanel>
+            <ComboBox x:Name="RuleMembershipComboBoxControl" Grid.Column="1" MinWidth="200" />
+          </Grid>
+
+          <Grid Grid.Row="5" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Enabled:" VerticalAlignment="Center" />
+              <Button x:Name="RuleEnabledHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="RuleEnabledHelpFlyout"
+                         Placement="Top">
+                <TextBlock Width="220"
+                           TextWrapping="Wrap"
+                           Text="Turn this rule on or off for the next run." />
+              </ui:Flyout>
+            </StackPanel>
+            <CheckBox x:Name="RuleEnabledCheckBoxControl" Grid.Column="1" VerticalAlignment="Center" />
+          </Grid>
+        </Grid>
+
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+
+          <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,8">
+            <ui:Button x:Name="AddRuleButtonControl" Content="Add Rule" Margin="0,0,6,0" />
+            <ui:Button x:Name="DeleteRuleButtonControl" Content="Delete Rule" />
+          </StackPanel>
+
+          <ui:DataGrid x:Name="TargetRulesGridControl"
+                       Grid.Row="1"
+                       AutoGenerateColumns="False"
+                       CanUserAddRows="False"
+                       CanUserDeleteRows="False"
+                       ItemsSource="{Binding TargetRules}"
+                       HeadersVisibility="Column"
+                       GridLinesVisibility="All"
+                       HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                       VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                       FontSize="12"
+                       RowHeight="28"
+                       ColumnHeaderHeight="30"
+                       EnableRowVirtualization="True"
+                       EnableColumnVirtualization="True"
+                       VirtualizingPanel.IsVirtualizing="True"
+                       VirtualizingPanel.VirtualizationMode="Recycling"
+                       IsReadOnly="False">
+            <ui:DataGrid.Columns>
+              <DataGridTextColumn Header="Rule Name" Binding="{Binding Name}" Width="140" />
+              <DataGridComboBoxColumn Header="Target Definition"
+                                      SelectedItemBinding="{Binding TargetDefinition}"
+                                      Width="140"
+                                      ItemsSource="{StaticResource TargetDefinitions}" />
+              <DataGridTextColumn Header="Min Level" Binding="{Binding MinLevel}" Width="70" />
+              <DataGridTextColumn Header="Max Level" Binding="{Binding MaxLevel}" Width="70" />
+              <DataGridTextColumn Header="Set/Search Name" Binding="{Binding SetSearchName}" Width="150" />
+              <DataGridTextColumn Header="Category Filter" Binding="{Binding CategoryFilter}" Width="140" />
+              <DataGridComboBoxColumn Header="Membership"
+                                      SelectedItemBinding="{Binding MembershipMode}"
+                                      Width="150"
+                                      ItemsSource="{StaticResource MembershipModes}" />
+              <DataGridCheckBoxColumn Header="Enabled" Binding="{Binding Enabled}" Width="70" />
+            </ui:DataGrid.Columns>
+          </ui:DataGrid>
+        </Grid>
+      </StackPanel>
     </ui:Card>
   </Grid>
 </Page>

@@ -13,13 +13,21 @@ namespace MicroEng.Navisworks
         Debug
     }
 
-    public enum SpaceMapperTargetType
+    public enum SpaceMapperTargetDefinition
     {
-        SelectionTreeLevel,
-        SelectionSet,
-        SearchSet,
-        CurrentSelection,
-        VisibleInView
+        EntireModel = 0,
+        CurrentSelection = 1,
+        SelectionSet = 2,
+        SearchSet = 3,
+        SelectionTreeLevel = 4
+    }
+
+    public enum SpaceMapperPerformancePreset
+    {
+        Fast = 0,
+        Normal = 1,
+        Accurate = 2,
+        Auto = 3
     }
 
     public enum SpaceMembershipMode
@@ -61,16 +69,6 @@ namespace MicroEng.Navisworks
         ZoneSearchSet
     }
 
-    public enum TargetSourceType
-    {
-        EntireModel,
-        Visible,
-        Hidden,
-        SelectionSet,
-        SearchSet,
-        ViewpointVisible
-    }
-
     [DataContract]
     internal class SpaceMapperProcessingSettings
     {
@@ -109,25 +107,43 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 11)]
         public int? BatchSize { get; set; }
+
+        [DataMember(Order = 12)]
+        public int IndexGranularity { get; set; } = 0;
+
+        [DataMember(Order = 13)]
+        public SpaceMapperPerformancePreset PerformancePreset { get; set; } = SpaceMapperPerformancePreset.Auto;
+
+        [DataMember(Order = 14)]
+        public string ZoneBehaviorCategory { get; set; } = "ME_SpaceInfo";
+
+        [DataMember(Order = 15)]
+        public string ZoneBehaviorPropertyName { get; set; } = "Zone Behaviour";
+
+        [DataMember(Order = 16)]
+        public string ZoneBehaviorContainedValue { get; set; } = "Contained";
+
+        [DataMember(Order = 17)]
+        public string ZoneBehaviorPartialValue { get; set; } = "Partial";
     }
 
     [DataContract]
-    internal class SpaceMapperTargetRule
+    public class SpaceMapperTargetRule
     {
         [DataMember(Order = 0)]
         public string Name { get; set; } = "Rule";
 
         [DataMember(Order = 1)]
-        public SpaceMapperTargetType TargetType { get; set; } = SpaceMapperTargetType.SelectionTreeLevel;
+        public SpaceMapperTargetDefinition TargetDefinition { get; set; } = SpaceMapperTargetDefinition.EntireModel;
 
         [DataMember(Order = 2)]
-        public int? MinTreeLevel { get; set; } = 0;
+        public int? MinLevel { get; set; }
 
         [DataMember(Order = 3)]
-        public int? MaxTreeLevel { get; set; } = 0;
+        public int? MaxLevel { get; set; }
 
         [DataMember(Order = 4)]
-        public string SetName { get; set; }
+        public string SetSearchName { get; set; }
 
         [DataMember(Order = 5)]
         public string CategoryFilter { get; set; }
@@ -140,7 +156,7 @@ namespace MicroEng.Navisworks
     }
 
     [DataContract]
-    internal class SpaceMapperMappingDefinition
+    public class SpaceMapperMappingDefinition
     {
         [DataMember(Order = 0)]
         public string Name { get; set; } = "Mapping";
@@ -178,6 +194,7 @@ namespace MicroEng.Navisworks
         public string ZoneId { get; set; }
         public string DisplayName { get; set; }
         public Autodesk.Navisworks.Api.ModelItem ModelItem { get; set; }
+        public Autodesk.Navisworks.Api.BoundingBox3D RawBoundingBox { get; set; }
         public Autodesk.Navisworks.Api.BoundingBox3D BoundingBox { get; set; }
         public List<Autodesk.Navisworks.Api.Vector3D> Vertices { get; set; } = new();
         public List<PlaneEquation> Planes { get; set; } = new();
@@ -190,6 +207,13 @@ namespace MicroEng.Navisworks
         public Autodesk.Navisworks.Api.ModelItem ModelItem { get; set; }
         public Autodesk.Navisworks.Api.BoundingBox3D BoundingBox { get; set; }
         public List<Autodesk.Navisworks.Api.Vector3D> Vertices { get; set; } = new();
+    }
+
+    internal class SpaceMapperResolvedItem
+    {
+        public string ItemKey { get; set; }
+        public string DisplayName { get; set; }
+        public Autodesk.Navisworks.Api.ModelItem ModelItem { get; set; }
     }
 
     internal class ZoneTargetIntersection
@@ -216,6 +240,18 @@ namespace MicroEng.Navisworks
         public int Percentage => TotalPairs <= 0 ? 0 : (int)(ProcessedPairs * 100.0 / TotalPairs);
     }
 
+    internal sealed class SpaceMapperEngineDiagnostics
+    {
+        public bool UsedPreflightIndex { get; set; }
+        public SpaceMapperPerformancePreset PresetUsed { get; set; } = SpaceMapperPerformancePreset.Normal;
+        public long CandidatePairs { get; set; }
+        public double AvgCandidatesPerZone { get; set; }
+        public int MaxCandidatesPerZone { get; set; }
+        public TimeSpan BuildIndexTime { get; set; }
+        public TimeSpan CandidateQueryTime { get; set; }
+        public TimeSpan NarrowPhaseTime { get; set; }
+    }
+
     internal class SpaceMapperRunStats
     {
         public int ZonesProcessed { get; set; }
@@ -226,10 +262,22 @@ namespace MicroEng.Navisworks
         public int Skipped { get; set; }
         public string ModeUsed { get; set; }
         public TimeSpan Elapsed { get; set; }
+        public SpaceMapperPerformancePreset PresetUsed { get; set; } = SpaceMapperPerformancePreset.Normal;
+        public long CandidatePairs { get; set; }
+        public double AvgCandidatesPerZone { get; set; }
+        public int MaxCandidatesPerZone { get; set; }
+        public long WritesPerformed { get; set; }
+        public bool UsedPreflightIndex { get; set; }
+        public TimeSpan ResolveTime { get; set; }
+        public TimeSpan BuildGeometryTime { get; set; }
+        public TimeSpan BuildIndexTime { get; set; }
+        public TimeSpan CandidateQueryTime { get; set; }
+        public TimeSpan NarrowPhaseTime { get; set; }
+        public TimeSpan WriteBackTime { get; set; }
         public List<ZoneSummary> ZoneSummaries { get; set; } = new();
     }
 
-    internal class ZoneSummary
+    public class ZoneSummary
     {
         public string ZoneId { get; set; }
         public string ZoneName { get; set; }
@@ -251,5 +299,14 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 3)]
         public SpaceMapperProcessingSettings ProcessingSettings { get; set; } = new();
+
+        [DataMember(Order = 4)]
+        public string PreferredScraperProfileName { get; set; } = "Default";
+
+        [DataMember(Order = 5)]
+        public ZoneSourceType ZoneSource { get; set; } = ZoneSourceType.DataScraperZones;
+
+        [DataMember(Order = 6)]
+        public string ZoneSetName { get; set; }
     }
 }

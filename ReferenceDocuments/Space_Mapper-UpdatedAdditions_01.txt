@@ -1,0 +1,296 @@
+Below is a practical, “ship‑ready” set of UI/option upgrades for Space Mapper (Presets + sliders) plus a targeted fix list for issues I can already see in your current code.
+
+I’m giving you:
+
+What to add to the UI (user experience spec)
+
+Code changes (models, XAML, wiring, engine behavior)
+
+A Codex prompt to implement it cleanly
+
+Issues/missing functionality that should be fixed now (with exact locations)
+
+1) What to add to the UI (user-facing)
+A. Performance Preset control (recommended UX)
+
+Instead of putting “Auto” as a tick on a linear slider (it isn’t truly a “more accurate” step), use:
+
+Auto (Recommended) toggle
+
+A 3‑tick slider for Fast / Normal / Accurate
+(enabled only when Auto is OFF)
+
+This keeps the UI intuitive and still uses the exact slider style you want:
+<Slider TickPlacement="Both" … />
+
+Preset meanings (what the user sees)
+
+Fast
+
+Candidate pruning (spatial grid) + 1 point test (centroid)
+
+Fastest; fewer false positives than bbox-only; may miss some partials.
+
+Normal
+
+Spatial grid + bbox corners (your current behavior)
+
+Balanced; good default.
+
+Accurate
+
+Spatial grid + denser sampling (e.g., 3×3×3 sample grid = 27 points)
+
+Best accuracy without full mesh intersection.
+
+Auto
+
+Uses your preflight density (CandidatePairs, AvgCandidatesPerZone, counts) to choose Fast/Normal/Accurate and updates live as options change.
+
+UI enhancements
+
+Add a preset description text block under the slider.
+
+If Auto is ON, show:
+
+Auto resolved: Normal (based on 9.8M candidate pairs)
+
+Add a tiny “info” tooltip or flyout next to the preset title (optional).
+
+B. Optional extra sliders (if you want “next level” tuning)
+
+These are optional, but they complement your new estimator:
+
+CPU Utilisation slider (Low / Medium / High / Max)
+Maps to MaxThreads without needing users to type numbers.
+
+Sampling override (Low / Medium / High) inside “Advanced” expander
+For power users that want to override what the preset chooses.
+
+Spatial Grid cell size (Auto / Fine / Medium / Coarse)
+Controls build/query tradeoffs; not needed for most users if Auto cell size works.
+
+Given where you’re at, I would implement Preset + Auto + description + resolved preset label first, then add the others later.
+
+2) Problems / missing pieces to fix now (important)
+
+These are not stylistic—these affect correctness or make presets impossible.
+
+Fix list
+
+CpuIntersectionEngine ignores the mode passed in
+Your constructor sets Mode = CpuNormal no matter what argument was passed. 
+
+SpaceMapperEngines
+
+EngineFactory ignores requested mode
+SpaceMapperEngineFactory.Create() always returns CpuNormal. 
+
+SpaceMapperEngines
+
+SpaceMapperService overrides the mode every run
+request.ProcessingSettings.ProcessingMode = CpuNormal; forces CPU Normal even if the UI changes it. This must be removed to allow presets/modes. 
+
+SpaceMapperPreflightService
+
+EnableMultipleZones doesn’t do anything functional yet
+You never reduce results to a single zone when it’s OFF. Right now multi-zone can still happen (setting is effectively ignored).
+
+Offsets mismatch: preflight inflates zone bounds, engine does not
+Preflight applies offsets (inflate) when counting candidates.
+CPU engine uses zone.BoundingBox directly for candidate query without inflating, so your candidate counts (and even results) can diverge if offsets are used. 
+
+SpaceMapperEngines
+
+Preflight cache reuse bug (critical)
+When signature matches, you reuse _cache.Grid but still rebuild targetBounds/targetKeys, then you store the new arrays with the old grid. That can desync grid indices vs arrays and produce incorrect results.
+
+MaxThreads and BatchSize UI exists but BuildSettings ignores them
+BuildSettings() always sets MaxThreads = null, BatchSize = null, so your tuning boxes have no effect.
+
+3) Code additions to implement presets + slider UX
+3.1 Add a new enum + setting
+
+Add to SpaceMapperModels.cs:
+
+public enum SpaceMapperPerformancePreset
+{
+    Fast = 0,
+    Normal = 1,
+    Accurate = 2,
+    Auto = 3
+}
+
+
+Then extend SpaceMapperProcessingSettings:
+
+[DataMember(Order = 12)]
+public SpaceMapperPerformancePreset PerformancePreset { get; set; } = SpaceMapperPerformancePreset.Auto;
+
+
+(Existing orders 0–11 are already in use; adding Order=12 is safe.) 
+
+SpaceMapperModels
+
+3.2 Add the slider + Auto toggle to SpaceMapperStepProcessingPage.xaml
+
+You’ll add this in the “Processing” step where the other processing settings live.
+
+XAML snippet (uses TickPlacement="Both")
+<!-- Performance Preset -->
+<ui:Card Margin="0,0,0,12">
+  <StackPanel>
+    <DockPanel LastChildFill="False" Margin="0,0,0,6">
+      <TextBlock Text="Performance Preset" FontWeight="SemiBold" />
+      <CheckBox x:Name="AutoPresetToggleControl"
+                Content="Auto (Recommended)"
+                Margin="12,0,0,0"
+                IsChecked="True"
+                VerticalAlignment="Center" />
+    </DockPanel>
+
+    <Slider x:Name="PresetSliderControl"
+            Minimum="0"
+            Maximum="2"
+            TickFrequency="1"
+            IsSnapToTickEnabled="True"
+            TickPlacement="Both"
+            Value="1"
+            IsEnabled="False" />
+
+    <UniformGrid Columns="3" Margin="0,4,0,0">
+      <TextBlock Text="Fast" HorizontalAlignment="Center" />
+      <TextBlock Text="Normal" HorizontalAlignment="Center" />
+      <TextBlock Text="Accurate" HorizontalAlignment="Center" />
+    </UniformGrid>
+
+    <TextBlock x:Name="PresetDescriptionTextControl"
+               Margin="0,6,0,0"
+               TextWrapping="Wrap"
+               Opacity="0.85" />
+
+    <TextBlock x:Name="PresetResolvedTextControl"
+               Margin="0,2,0,0"
+               TextWrapping="Wrap"
+               Opacity="0.75" />
+  </StackPanel>
+</ui:Card>
+
+Expose the new controls in SpaceMapperStepProcessingPage.xaml.cs
+
+Add:
+
+internal Slider PresetSlider => PresetSliderControl;
+internal CheckBox AutoPresetToggle => AutoPresetToggleControl;
+internal TextBlock PresetDescriptionText => PresetDescriptionTextControl;
+internal TextBlock PresetResolvedText => PresetResolvedTextControl;
+
+
+Follow your existing pattern in that file. 
+
+SpaceMapperControl.xaml
+
+3.3 Wire it in SpaceMapperControl.xaml.cs
+Add handlers
+
+In AddHandlers():
+
+_processingPage.AutoPresetToggle.Checked += (s, e) =>
+{
+    _processingPage.PresetSlider.IsEnabled = false;
+    UpdatePresetUi();
+    TriggerLivePreflight();
+};
+
+_processingPage.AutoPresetToggle.Unchecked += (s, e) =>
+{
+    _processingPage.PresetSlider.IsEnabled = true;
+    UpdatePresetUi();
+    TriggerLivePreflight();
+};
+
+_processingPage.PresetSlider.ValueChanged += (s, e) =>
+{
+    if (_processingPage.AutoPresetToggle.IsChecked == true) return;
+    UpdatePresetUi();
+    TriggerLivePreflight();
+};
+
+Update BuildSettings to actually use preset + MaxThreads/BatchSize
+
+Change BuildSettings() (currently hard-coded / ignoring these) to:
+
+MaxThreads = ParseInt(_processingPage.MaxThreadsBox.Text),
+BatchSize  = ParseInt(_processingPage.BatchSizeBox.Text),
+PerformancePreset = GetSelectedPreset(),
+
+
+Right now it sets these to null, so users can’t tune anything.
+
+Add:
+
+private SpaceMapperPerformancePreset GetSelectedPreset()
+{
+    if (_processingPage.AutoPresetToggle.IsChecked == true)
+        return SpaceMapperPerformancePreset.Auto;
+
+    var v = (int)Math.Round(_processingPage.PresetSlider.Value);
+    return v switch
+    {
+        0 => SpaceMapperPerformancePreset.Fast,
+        1 => SpaceMapperPerformancePreset.Normal,
+        2 => SpaceMapperPerformancePreset.Accurate,
+        _ => SpaceMapperPerformancePreset.Normal
+    };
+}
+
+Add a UI updater for preset description/resolution
+
+Add:
+
+private void UpdatePresetUi()
+{
+    var selected = GetSelectedPreset();
+
+    _processingPage.PresetDescriptionText.Text = selected switch
+    {
+        SpaceMapperPerformancePreset.Fast     => "Fast: spatial grid + centroid test. Best for quick tagging.",
+        SpaceMapperPerformancePreset.Normal   => "Normal: spatial grid + bbox corner sampling. Balanced default.",
+        SpaceMapperPerformancePreset.Accurate => "Accurate: spatial grid + dense sampling. Slowest, best quality.",
+        SpaceMapperPerformancePreset.Auto     => "Auto: chooses Fast/Normal/Accurate using preflight density and model size.",
+        _ => string.Empty
+    };
+
+    if (selected == SpaceMapperPerformancePreset.Auto && _lastPreflight != null)
+    {
+        var resolved = SpaceMapperPresetLogic.Resolve(selected, _lastPreflight, BuildSettings());
+        _processingPage.PresetResolvedText.Text = $"Auto resolved: {resolved} (pairs: {_lastPreflight.CandidatePairs:N0})";
+    }
+    else
+    {
+        _processingPage.PresetResolvedText.Text = string.Empty;
+    }
+}
+
+
+Then call UpdatePresetUi() once when processing page loads / InitializeUi finishes.
+
+4) Engine-side: make the presets actually do something (CPU)
+
+Right now your CPU “classification” is effectively “bbox corners inside zone planes” for everyone. 
+
+SpaceMapperEngines
+
+To implement presets without going into full mesh intersection, use sample density:
+
+Fast = centroid only
+
+Normal = 8 corners
+
+Accurate = 3×3×3 grid (27 points) or corners + face centers
+
+This is a meaningful quality gradient and still CPU-friendly.
+
+You’ll update CpuIntersectionEngine.ClassifyIntersection(...) to branch based on settings.PerformancePreset resolved through Auto.
+
+Also: apply offset inflation to zoneBounds used for candidate query so it matches preflight.

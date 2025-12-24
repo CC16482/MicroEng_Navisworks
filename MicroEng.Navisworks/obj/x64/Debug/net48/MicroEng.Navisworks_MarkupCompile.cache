@@ -11,8 +11,8 @@ false
 TRACE;DEBUG;NETFRAMEWORK;NET48;NET30_OR_GREATER;NET35_OR_GREATER;NET40_OR_GREATER;NET45_OR_GREATER;NET451_OR_GREATER;NET452_OR_GREATER;NET46_OR_GREATER;NET461_OR_GREATER;NET462_OR_GREATER;NET47_OR_GREATER;NET471_OR_GREATER;NET472_OR_GREATER;NET48_OR_GREATER
 
 13-1676598365
-4-1087118868
-32344493654
+8-1123912485
+42617126988
 30286522382
 AppendIntegrateDialog.xaml;Assets\Theme\MicroEngUiKit.xaml;Assets\Theme\MicroEngWpfUiRoot.xaml;DataMatrixControl.xaml;DataScraperWindow.xaml;MicroEngPanelControl.xaml;MicroEngSettingsWindow.xaml;SpaceMapperControl.xaml;SpaceMapperStepMappingPage.xaml;SpaceMapperStepProcessingPage.xaml;SpaceMapperStepResultsPage.xaml;SpaceMapperStepSetupPage.xaml;SpaceMapperStepZonesTargetsPage.xaml;
 

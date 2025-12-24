@@ -18,12 +18,12 @@
                 <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
             </ResourceDictionary.MergedDictionaries>
             <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
-            <x:Array x:Key="TargetTypes" Type="{x:Type local:SpaceMapperTargetType}">
-                <local:SpaceMapperTargetType>SelectionTreeLevel</local:SpaceMapperTargetType>
-                <local:SpaceMapperTargetType>SelectionSet</local:SpaceMapperTargetType>
-                <local:SpaceMapperTargetType>SearchSet</local:SpaceMapperTargetType>
-                <local:SpaceMapperTargetType>CurrentSelection</local:SpaceMapperTargetType>
-                <local:SpaceMapperTargetType>VisibleInView</local:SpaceMapperTargetType>
+            <x:Array x:Key="TargetDefinitions" Type="{x:Type local:SpaceMapperTargetDefinition}">
+                <local:SpaceMapperTargetDefinition>EntireModel</local:SpaceMapperTargetDefinition>
+                <local:SpaceMapperTargetDefinition>CurrentSelection</local:SpaceMapperTargetDefinition>
+                <local:SpaceMapperTargetDefinition>SelectionSet</local:SpaceMapperTargetDefinition>
+                <local:SpaceMapperTargetDefinition>SearchSet</local:SpaceMapperTargetDefinition>
+                <local:SpaceMapperTargetDefinition>SelectionTreeLevel</local:SpaceMapperTargetDefinition>
             </x:Array>
             <x:Array x:Key="MembershipModes" Type="{x:Type local:SpaceMembershipMode}">
                 <local:SpaceMembershipMode>ContainedOnly</local:SpaceMembershipMode>
@@ -50,15 +50,26 @@
                        IsBackButtonVisible="Collapsed"
                        IsPaneToggleVisible="False"
                        IsPaneOpen="True"
+                       ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                        Background="{DynamicResource ApplicationBackgroundBrush}"
                        Foreground="{DynamicResource TextFillColorPrimaryBrush}">
         <ui:NavigationView.PaneHeader>
-            <StackPanel Margin="0,0,0,12">
-                <ui:TextBlock Text="Space Mapper" FontSize="13" FontWeight="SemiBold" />
-                <ui:TextBlock Text="Step-by-step workflow"
-                              FontSize="12"
-                              Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
+            <Grid HorizontalAlignment="Stretch"
+                  VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                </Grid.RowDefinitions>
+                <ui:TextBlock Grid.Row="1"
+                              Text="Workflow"
+                              FontSize="13"
+                              FontWeight="SemiBold"
+                              TextAlignment="Center"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center" />
+            </Grid>
         </ui:NavigationView.PaneHeader>
         <ui:NavigationView.MenuItems>
             <ui:NavigationViewItem Content="1. Setup"
@@ -78,18 +89,46 @@
                                    TargetPageType="{x:Type local:SpaceMapperStepResultsPage}" />
         </ui:NavigationView.MenuItems>
         <ui:NavigationView.Header>
-            <ui:Card Margin="12"
-                     Padding="10"
-                     HorizontalAlignment="Stretch"
-                     HorizontalContentAlignment="Stretch">
-                <StackPanel>
-                    <ui:TextBlock Text="Space Mapper" FontSize="16" FontWeight="SemiBold" />
-                    <ui:TextBlock Text="Follow the steps on the left to configure zones, targets, and mappings."
-                                  Margin="0,4,0,0"
-                                  FontSize="12"
-                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                </StackPanel>
-            </ui:Card>
+            <StackPanel>
+                <ui:Card Margin="12"
+                         Padding="10"
+                         HorizontalAlignment="Stretch"
+                         HorizontalContentAlignment="Stretch">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <ui:TextBlock Text="Space Mapper" FontSize="16" FontWeight="SemiBold" />
+                            <ui:TextBlock Text="Follow the steps on the left to configure zones, targets, and mappings."
+                                          Margin="0,4,0,0"
+                                          FontSize="12"
+                                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1"
+                                    Margin="12,0,0,0"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Top">
+                            <ui:Button x:Name="RunSpaceMapperButtonControl"
+                                       Margin="0,0,8,0"
+                                       ToolTip="Run Space Mapper">
+                                <TextBlock Text="Run Space Mapper" />
+                            </ui:Button>
+                            <ui:Button x:Name="RefreshSetsButtonControl"
+                                       ToolTip="Refresh selection and search set lists">
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="ArrowSync20" Margin="0,0,6,0" />
+                                    <TextBlock Text="Refresh Sets" />
+                                </StackPanel>
+                            </ui:Button>
+                        </StackPanel>
+                    </Grid>
+                </ui:Card>
+                <Border Height="1"
+                        Margin="12,0,12,0"
+                        Background="#FFFFFFFF" />
+            </StackPanel>
         </ui:NavigationView.Header>
     </ui:NavigationView>
 </UserControl>

@@ -11,7 +11,9 @@
       d:DesignWidth="900"
       Background="Transparent"
       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-      FontSize="12">
+      FontSize="12"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
   <Page.Resources>
     <ResourceDictionary>

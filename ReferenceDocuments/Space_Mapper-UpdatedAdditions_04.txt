@@ -1,0 +1,302 @@
+Below is a Step 1 – Setup redesign that fixes the “Space Mapper profile == Data Scraper profile” coupling and makes the page feel like a proper wizard start: pick a Space Mapper profile, optionally pick a metadata context (scraped data) for assistance, then proceed.
+
+I’ll give you:
+
+The recommended Step 1 user flow + layout
+
+Concrete UI elements to add (and what they do)
+
+Example XAML + code-behind patterns
+
+A Codex prompt that covers the refactor cleanly
+
+Specific “wrong/missing” things in your current code that must be corrected as part of this
+
+1) Step 1 user flow and layout
+What Step 1 should accomplish
+
+When the user opens Space Mapper, Step 1 should answer:
+
+Which Space Mapper profile am I configuring? (saved / reusable)
+
+Which scraped metadata context should assist the workflow? (optional helper)
+
+Am I ready to move on to Zones/Targets? (validation)
+
+That’s it.
+
+Recommended Step 1 layout (top → bottom)
+Card A — Space Mapper Profile
+
+Profile: dropdown of Space Mapper profiles (your SpaceMapperTemplates)
+
+Buttons:
+
+New
+
+Save
+
+Save As
+
+Delete
+
+Optional:
+
+“Notes / Description” textbox
+
+“Last saved” / “Modified” label
+
+“Open profile folder” link
+
+This is the core “workspace” identity. It must not be tied to Data Scraper profiles.
+
+Card B — Metadata Assistant (Data Scraper)
+
+This card is optional but very useful.
+
+Metadata source: dropdown of Data Scraper profiles / latest sessions
+
+Status line:
+
+“Last scrape: Entire Model • 4,764 items • 1,730 properties • 14:22”
+
+Buttons:
+
+Open Data Scraper… (launch the scraper window)
+
+Refresh (reload list of sessions)
+
+(Optional) Run Scrape (if you later want to run scraper directly from Space Mapper)
+
+Important behavior:
+
+Selecting a scraper profile/session should set DataScraperCache.LastSession so the rest of your wizard can use cached catalog for dropdowns, property pickers, suggestions, etc.
+
+This is the helper layer. It should not define the Space Mapper profile.
+
+Card C — Readiness / Next
+
+This is a “progress” card that reduces user confusion.
+
+Show a simple checklist:
+
+Zones configured (Step 2) ✓/✗
+
+Targets configured (Step 2) ✓/✗
+
+Processing configured (Step 3) ✓/✗
+
+Mappings configured (Step 4) ✓/✗
+
+Preflight available (optional) ✓/✗
+
+Buttons:
+
+Go to Step 2 (Zones/Targets) (primary)
+
+Validate (secondary) shows missing items
+
+This helps users understand what they need to do next without reading docs.
+
+2) What is wrong/missing in your current code (must fix)
+
+These are directly related to Step 1:
+
+A) Step 1 “Profile” dropdown is currently Data Scraper profiles
+
+In SpaceMapperControl.InitializeUi() you populate _setupPage.ProfileCombo from DataScraperCache.AllSessions. That is exactly the coupling you want to remove.
+
+B) Your run pipeline assumes request.ProfileName is a Data Scraper profile
+
+In SpaceMapperService.Run(...), it looks up a Data Scraper session using request.ProfileName and errors if not found.
+Same coupling exists in SpaceMapperPreflightService (calls SpaceMapperService.GetSession(request.ProfileName)).
+
+So: Step 1 UI changes require a model change:
+
+SpaceMapper profile name must be separate from
+
+Data Scraper profile/session name
+
+C) Your SpaceMapperScope is currently unused
+
+You set it in the UI, but the service doesn’t use request.Scope at all. That makes the Setup page misleading.
+Either remove it from Step 1 entirely (recommended), or implement it properly later.
+
+3) Model changes needed for the refactor
+A) Update request model: split names
+
+In SpaceMapperService.cs, change:
+
+public string ProfileName { get; set; }
+
+
+To:
+
+public string TemplateName { get; set; }          // Space Mapper profile name
+public string ScraperProfileName { get; set; }    // Data Scraper profile used for cache assistance + zone sources
+
+
+Then update Run() and Preflight to call GetSession(request.ScraperProfileName) instead of request.ProfileName.
+
+B) Store scraper profile preference in the Space Mapper template (optional but recommended)
+
+Your SpaceMapperTemplate already exists (this is effectively your Space Mapper “profile”). Add:
+
+[DataMember(Order = 4)]
+public string PreferredScraperProfileName { get; set; } = "Default";
+
+
+This makes each Space Mapper profile remember which metadata context it prefers.
+
+C) (Strongly recommended) Store zone/target sources in the template too
+
+Right now your template stores TargetRules/Mappings/ProcessingSettings only. That means profiles don’t fully reproduce a setup. Add fields:
+
+ZoneSourceType + ZoneSetName
+
+TargetSourceType + TargetSetName
+
+So when you load a Space Mapper profile, the wizard fully restores configuration.
+
+This dramatically improves usability.
+
+4) Example Step 1 XAML (WPF-UI style)
+
+Below is a compact XAML scaffold you can adapt in SpaceMapperStepSetupPage.xaml.
+
+<StackPanel>
+
+  <!-- Header already exists -->
+
+  <!-- Card A: Space Mapper Profile -->
+  <ui:Card Margin="0,0,0,12">
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <TextBlock Text="Space Mapper Profile"
+                 FontWeight="SemiBold"
+                 Margin="0,0,0,8"
+                 Grid.ColumnSpan="3"/>
+
+      <TextBlock Text="Profile:" VerticalAlignment="Center" Margin="0,0,8,0" Grid.Row="1"/>
+      <ComboBox x:Name="TemplateCombo"
+                Grid.Row="1" Grid.Column="1"
+                MinWidth="240"/>
+
+      <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.Column="2" Margin="12,0,0,0">
+        <ui:Button x:Name="NewTemplateButton" Content="New" Margin="0,0,6,0"/>
+        <ui:Button x:Name="SaveTemplateButton" Content="Save" Margin="0,0,6,0"/>
+        <ui:Button x:Name="SaveAsTemplateButton" Content="Save As" Margin="0,0,6,0"/>
+        <ui:Button x:Name="DeleteTemplateButton" Content="Delete"/>
+      </StackPanel>
+    </Grid>
+  </ui:Card>
+
+  <!-- Card B: Metadata Assistant -->
+  <ui:Card Margin="0,0,0,12">
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="Auto"/>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto"/>
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+      </Grid.RowDefinitions>
+
+      <TextBlock Text="Metadata Assistant (Data Scraper)"
+                 FontWeight="SemiBold"
+                 Margin="0,0,0,8"
+                 Grid.ColumnSpan="3"/>
+
+      <TextBlock Text="Use scraped metadata to power dropdowns and suggestions across Space Mapper."
+                 Opacity="0.85"
+                 Margin="0,0,0,10"
+                 Grid.Row="1" Grid.ColumnSpan="3"
+                 TextWrapping="Wrap"/>
+
+      <TextBlock Text="Scraper profile:" Grid.Row="2" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <ComboBox x:Name="ScraperProfileCombo"
+                Grid.Row="2" Grid.Column="1"
+                MinWidth="240"/>
+
+      <StackPanel Orientation="Horizontal" Grid.Row="2" Grid.Column="2" Margin="12,0,0,0">
+        <ui:Button x:Name="RefreshScraperButton" Content="Refresh" Margin="0,0,6,0"/>
+        <ui:Button x:Name="OpenScraperButton" Content="Open Data Scraper..."/>
+      </StackPanel>
+
+      <TextBlock x:Name="ScraperSummaryText"
+                 Grid.Row="3" Grid.ColumnSpan="3"
+                 Margin="0,8,0,0"
+                 Opacity="0.8"
+                 TextWrapping="Wrap"/>
+    </Grid>
+  </ui:Card>
+
+  <!-- Card C: Readiness / Next -->
+  <ui:Card>
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+
+      <StackPanel>
+        <TextBlock Text="Readiness"
+                   FontWeight="SemiBold"
+                   Margin="0,0,0,8"/>
+        <TextBlock x:Name="ReadinessText"
+                   TextWrapping="Wrap"
+                   Opacity="0.85"/>
+      </StackPanel>
+
+      <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+        <ui:Button x:Name="ValidateButton" Content="Validate" Margin="0,0,8,0"/>
+        <ui:Button x:Name="GoToZonesButton" Content="Go to Step 2" />
+      </StackPanel>
+    </Grid>
+  </ui:Card>
+
+</StackPanel>
+
+
+This removes “scope” from Setup (because it isn’t doing anything today) and replaces it with what users actually need.
+
+5) Setup page wiring (key behaviors)
+Populate Space Mapper profiles from your template store
+
+You already have _templateStore = new SpaceMapperTemplateStore(...) in SpaceMapperControl.xaml.cs.
+
+Fill TemplateCombo from _templateStore.Load()
+
+Selecting a template loads TargetRules/Mappings/ProcessingSettings and zone/target sources if you add them to the template.
+
+Populate Data Scraper sessions separately
+
+Fill ScraperProfileCombo from DataScraperCache.AllSessions (latest session per unique profile name).
+
+On selection:
+
+set DataScraperCache.LastSession
+
+update ScraperSummaryText
+
+When saving a Space Mapper profile
+
+Save:
+
+Space Mapper template name
+
+current wizard settings
+
+preferred scraper profile name (optional)

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Diagnostics;
 using Autodesk.Navisworks.Api;
+using MicroEng.Navisworks.SpaceMapper.Estimation;
 using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
 using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
 
@@ -11,11 +12,11 @@ namespace MicroEng.Navisworks
 {
     internal class SpaceMapperRequest
     {
-        public string ProfileName { get; set; }
+        public string TemplateName { get; set; }
+        public string ScraperProfileName { get; set; }
         public SpaceMapperScope Scope { get; set; } = SpaceMapperScope.EntireModel;
         public ZoneSourceType ZoneSource { get; set; } = ZoneSourceType.DataScraperZones;
         public string ZoneSetName { get; set; }
-        public TargetSourceType TargetSource { get; set; } = TargetSourceType.EntireModel;
         public List<SpaceMapperTargetRule> TargetRules { get; set; } = new();
         public List<SpaceMapperMappingDefinition> Mappings { get; set; } = new();
         public SpaceMapperProcessingSettings ProcessingSettings { get; set; } = new();
@@ -37,10 +38,11 @@ namespace MicroEng.Navisworks
             _log = log;
         }
 
-        public SpaceMapperRunResult Run(SpaceMapperRequest request, CancellationToken token = default)
+        public SpaceMapperRunResult Run(SpaceMapperRequest request, SpaceMapperPreflightCache preflightCache = null, CancellationToken token = default)
         {
             var sw = Stopwatch.StartNew();
             var result = new SpaceMapperRunResult();
+            var stats = new SpaceMapperRunStats();
             var doc = Application.ActiveDocument;
             if (doc == null)
             {
@@ -48,20 +50,25 @@ namespace MicroEng.Navisworks
                 return result;
             }
 
-            request.ProcessingSettings.ProcessingMode = SpaceMapperProcessingMode.CpuNormal;
-
-            var session = GetSession(request.ProfileName);
-            if (session == null)
+            var session = GetSession(request.ScraperProfileName);
+            var requiresSession = request.ZoneSource == ZoneSourceType.DataScraperZones;
+            if (requiresSession && session == null)
             {
-                result.Message = $"No Data Scraper sessions found for profile '{request.ProfileName}'.";
+                result.Message = $"No Data Scraper sessions found for profile '{request.ScraperProfileName ?? "Default"}'.";
                 return result;
             }
 
-            DataScraperCache.LastSession = session;
+            if (session != null)
+            {
+                DataScraperCache.LastSession = session;
+            }
 
+            var resolveSw = Stopwatch.StartNew();
             var zoneModels = ResolveZones(session, request.ZoneSource, request.ZoneSetName, doc).ToList();
             var targetsByRule = new Dictionary<string, List<SpaceMapperTargetRule>>(StringComparer.OrdinalIgnoreCase);
-            var targetGeometries = ResolveTargets(doc, request.TargetSource, request.TargetRules, targetsByRule).ToList();
+            var targetModels = ResolveTargets(doc, request.TargetRules, targetsByRule).ToList();
+            resolveSw.Stop();
+            stats.ResolveTime = resolveSw.Elapsed;
 
             if (!zoneModels.Any())
             {
@@ -69,48 +76,123 @@ namespace MicroEng.Navisworks
                 return result;
             }
 
-            if (!targetGeometries.Any())
+            if (!targetModels.Any())
             {
                 result.Message = "No targets found for the selected rules.";
                 return result;
             }
 
+            var buildSw = Stopwatch.StartNew();
             var zones = zoneModels
                 .Select(z => GeometryExtractor.ExtractZoneGeometry(z.ModelItem, z.ItemKey, z.DisplayName, request.ProcessingSettings))
                 .Where(z => z?.BoundingBox != null && z.Vertices.Any())
                 .ToList();
 
-            var targets = targetGeometries
-                .Select(t => GeometryExtractor.ExtractTargetGeometry(t.ModelItem, t.ItemKey, t.DisplayName))
-                .Where(t => t?.BoundingBox != null && t.Vertices.Any())
-                .ToList();
+            var cacheToUse = TryGetReusablePreflightCache(request, preflightCache, targetModels);
+            List<TargetGeometry> targetsForEngine;
+            if (cacheToUse != null)
+            {
+                targetsForEngine = targetModels;
+            }
+            else
+            {
+                targetsForEngine = targetModels
+                    .Select(t =>
+                    {
+                        var bbox = t.ModelItem?.BoundingBox();
+                        if (bbox == null) return null;
+                        return new TargetGeometry
+                        {
+                            ItemKey = t.ItemKey,
+                            DisplayName = t.DisplayName,
+                            ModelItem = t.ModelItem,
+                            BoundingBox = bbox
+                        };
+                    })
+                    .Where(t => t != null)
+                    .ToList();
+            }
+            buildSw.Stop();
+            stats.BuildGeometryTime = buildSw.Elapsed;
+
+            if (!zones.Any())
+            {
+                result.Message = "No zones found.";
+                return result;
+            }
+
+            if (cacheToUse == null && !targetsForEngine.Any())
+            {
+                result.Message = "No targets with bounding boxes found.";
+                return result;
+            }
 
             var engine = SpaceMapperEngineFactory.Create(request.ProcessingSettings.ProcessingMode);
-            var intersections = engine.ComputeIntersections(zones, targets, request.ProcessingSettings, null, token) ?? new List<ZoneTargetIntersection>();
+            var diagnostics = new SpaceMapperEngineDiagnostics();
+            var intersections = engine.ComputeIntersections(zones, targetsForEngine, request.ProcessingSettings, cacheToUse, diagnostics, null, token)
+                ?? new List<ZoneTargetIntersection>();
             result.Intersections = intersections.ToList();
 
-            var stats = new SpaceMapperRunStats { ZonesProcessed = zones.Count, TargetsProcessed = targets.Count, ModeUsed = engine.Mode.ToString() };
+            stats.ZonesProcessed = zones.Count;
+            stats.TargetsProcessed = cacheToUse?.TargetKeys?.Length ?? targetsForEngine.Count;
+            stats.ModeUsed = engine.Mode.ToString();
+            stats.PresetUsed = diagnostics.PresetUsed;
+            stats.CandidatePairs = diagnostics.CandidatePairs;
+            stats.AvgCandidatesPerZone = diagnostics.AvgCandidatesPerZone;
+            stats.MaxCandidatesPerZone = diagnostics.MaxCandidatesPerZone;
+            stats.UsedPreflightIndex = diagnostics.UsedPreflightIndex;
+            stats.BuildIndexTime = diagnostics.BuildIndexTime;
+            stats.CandidateQueryTime = diagnostics.CandidateQueryTime;
+            stats.NarrowPhaseTime = diagnostics.NarrowPhaseTime;
+
             var zoneLookup = zones.ToDictionary(z => z.ZoneId, z => z);
-            var targetLookup = targets.ToDictionary(t => t.ItemKey, t => t);
+            var targetLookup = targetModels.ToDictionary(t => t.ItemKey, t => t);
 
             var ruleMembership = BuildRuleMembership(targetsByRule);
             var zoneValueLookup = new ZoneValueLookup(session);
 
+            var writeSw = Stopwatch.StartNew();
             foreach (var group in intersections.GroupBy(i => i.TargetItemKey, StringComparer.OrdinalIgnoreCase))
             {
                 if (!targetLookup.TryGetValue(group.Key, out var tgt)) continue;
                 var rulesForTarget = ruleMembership.TryGetValue(group.Key, out var list) ? list : new List<SpaceMapperTargetRule>();
                 if (!rulesForTarget.Any()) continue;
 
-                var relevant = FilterByMembership(group, rulesForTarget, request.ProcessingSettings);
-                if (!relevant.Any())
+                var relevant = FilterByMembership(group, rulesForTarget, request.ProcessingSettings).ToList();
+                if (relevant.Count == 0)
                 {
                     stats.Skipped++;
                     continue;
                 }
 
-                var isMultiZone = relevant.Count() > 1;
+                if (!request.ProcessingSettings.EnableMultipleZones)
+                {
+                    var best = SelectBestIntersection(relevant);
+                    relevant = best != null ? new List<ZoneTargetIntersection> { best } : new List<ZoneTargetIntersection>();
+                }
+
+                var isMultiZone = relevant.Count > 1;
                 if (isMultiZone) stats.MultiZoneTagged++;
+
+                if (request.ProcessingSettings.TagPartialSeparately)
+                {
+                    var behaviorCategory = request.ProcessingSettings.ZoneBehaviorCategory;
+                    var behaviorProperty = request.ProcessingSettings.ZoneBehaviorPropertyName;
+                    var containedValue = request.ProcessingSettings.ZoneBehaviorContainedValue;
+                    var partialValue = request.ProcessingSettings.ZoneBehaviorPartialValue;
+
+                    if (!string.IsNullOrWhiteSpace(behaviorCategory)
+                        && !string.IsNullOrWhiteSpace(behaviorProperty))
+                    {
+                        var hasPartial = relevant.Any(r => r.IsPartial);
+                        var behaviorValue = hasPartial ? partialValue : containedValue;
+                        if (!string.IsNullOrWhiteSpace(behaviorValue))
+                        {
+                            PropertyWriter.WriteProperty(tgt.ModelItem, behaviorCategory, behaviorProperty, behaviorValue, WriteMode.Overwrite, string.Empty);
+                            stats.WritesPerformed++;
+                        }
+                    }
+                }
 
                 foreach (var mapping in request.Mappings)
                 {
@@ -119,12 +201,6 @@ namespace MicroEng.Navisworks
                     {
                         if (!zoneLookup.TryGetValue(inter.ZoneId, out var zone)) continue;
                         var val = zoneValueLookup.GetValue(inter.ZoneId, mapping.ZoneCategory, mapping.ZonePropertyName);
-                        if (inter.IsPartial && request.ProcessingSettings.TagPartialSeparately && !string.IsNullOrWhiteSpace(mapping.PartialFlagValue))
-                        {
-                            val = string.IsNullOrWhiteSpace(val)
-                                ? mapping.PartialFlagValue
-                                : $"{val}{mapping.AppendSeparator}{mapping.PartialFlagValue}";
-                        }
                         if (!string.IsNullOrWhiteSpace(val))
                         {
                             values.Add(val);
@@ -134,6 +210,7 @@ namespace MicroEng.Navisworks
                     var combined = CombineValues(values, mapping.MultiZoneCombineMode, mapping.AppendSeparator);
                     if (string.IsNullOrWhiteSpace(combined)) continue;
                     PropertyWriter.WriteProperty(tgt.ModelItem, mapping.TargetCategory, mapping.TargetPropertyName, combined, mapping.WriteMode, mapping.AppendSeparator);
+                    stats.WritesPerformed++;
                 }
 
                 foreach (var inter in relevant)
@@ -148,17 +225,51 @@ namespace MicroEng.Navisworks
                             summary = new ZoneSummary { ZoneId = z.ZoneId, ZoneName = z.DisplayName };
                             stats.ZoneSummaries.Add(summary);
                         }
-                        if (inter.IsContained) summary.ContainedCount++; else summary.PartialCount++;
+                        if (inter.IsContained) summary.ContainedCount++;
+                        if (inter.IsPartial) summary.PartialCount++;
                     }
                 }
             }
+            writeSw.Stop();
+            stats.WriteBackTime = writeSw.Elapsed;
 
             result.Stats = stats;
             sw.Stop();
             result.Stats.Elapsed = sw.Elapsed;
             result.Message = $"Space Mapper: {stats.ZonesProcessed} zones, {stats.TargetsProcessed} targets, {stats.ContainedTagged} contained, {stats.PartialTagged} partial. Mode={stats.ModeUsed}.";
             _log?.Invoke(result.Message);
+            _log?.Invoke($"SpaceMapper Timings: resolve {stats.ResolveTime.TotalMilliseconds:0}ms, build {stats.BuildGeometryTime.TotalMilliseconds:0}ms, index {stats.BuildIndexTime.TotalMilliseconds:0}ms, candidates {stats.CandidateQueryTime.TotalMilliseconds:0}ms, narrow {stats.NarrowPhaseTime.TotalMilliseconds:0}ms, write {stats.WriteBackTime.TotalMilliseconds:0}ms");
             return result;
+        }
+
+        private static SpaceMapperPreflightCache TryGetReusablePreflightCache(SpaceMapperRequest request, SpaceMapperPreflightCache cache, IReadOnlyList<TargetGeometry> targets)
+        {
+            if (request == null || cache == null || cache.Grid == null || cache.TargetBounds == null || cache.TargetKeys == null)
+            {
+                return null;
+            }
+
+            var signature = SpaceMapperPreflightService.BuildSignature(request);
+            if (!string.Equals(signature, cache.Signature, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            if (cache.TargetKeys.Length != targets.Count)
+            {
+                return null;
+            }
+
+            var keySet = new HashSet<string>(cache.TargetKeys, StringComparer.OrdinalIgnoreCase);
+            foreach (var target in targets)
+            {
+                if (!keySet.Contains(target.ItemKey))
+                {
+                    return null;
+                }
+            }
+
+            return cache;
         }
 
         private static Dictionary<string, List<SpaceMapperTargetRule>> BuildRuleMembership(Dictionary<string, List<SpaceMapperTargetRule>> targetsByRule)
@@ -205,6 +316,28 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private static ZoneTargetIntersection SelectBestIntersection(IReadOnlyList<ZoneTargetIntersection> intersections)
+        {
+            if (intersections == null || intersections.Count == 0)
+            {
+                return null;
+            }
+
+            var bestContained = intersections
+                .Where(i => i.IsContained)
+                .OrderByDescending(i => i.OverlapVolume)
+                .FirstOrDefault();
+
+            if (bestContained != null)
+            {
+                return bestContained;
+            }
+
+            return intersections
+                .OrderByDescending(i => i.OverlapVolume)
+                .First();
+        }
+
         private static string CombineValues(List<string> values, MultiZoneCombineMode mode, string sep)
         {
             if (values == null || values.Count == 0) return string.Empty;
@@ -231,7 +364,7 @@ namespace MicroEng.Navisworks
             return double.TryParse(value, out var d) ? d : (double?)null;
         }
 
-        private static ScrapeSession GetSession(string profile)
+        internal static ScrapeSession GetSession(string profile)
         {
             var name = string.IsNullOrWhiteSpace(profile) ? "Default" : profile;
             return DataScraperCache.AllSessions
@@ -252,7 +385,7 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private static IEnumerable<ResolvedItem> ResolveZones(ScrapeSession session, ZoneSourceType source, string setName, Document doc)
+        internal static IEnumerable<SpaceMapperResolvedItem> ResolveZones(ScrapeSession session, ZoneSourceType source, string setName, Document doc)
         {
             switch (source)
             {
@@ -260,7 +393,7 @@ namespace MicroEng.Navisworks
                 case ZoneSourceType.ZoneSearchSet:
                     // Placeholder: fall back to selection for now
                     foreach (ModelItem item in doc.CurrentSelection?.SelectedItems ?? new ModelItemCollection())
-                        yield return new ResolvedItem { ItemKey = GetItemKey(item), ModelItem = item, DisplayName = item.DisplayName };
+                        yield return new SpaceMapperResolvedItem { ItemKey = GetItemKey(item), ModelItem = item, DisplayName = item.DisplayName };
                     break;
                 case ZoneSourceType.DataScraperZones:
                 default:
@@ -276,7 +409,7 @@ namespace MicroEng.Navisworks
                         if (!Guid.TryParse(key, out var guid)) continue;
                         var item = FindByGuid(doc, guid);
                         if (item == null) continue;
-                        yield return new ResolvedItem
+                        yield return new SpaceMapperResolvedItem
                         {
                             ItemKey = key,
                             ModelItem = item,
@@ -294,7 +427,7 @@ namespace MicroEng.Navisworks
             return val.Contains("zone") || val.Contains("room") || val.Contains("space");
         }
 
-        private static IEnumerable<TargetGeometry> ResolveTargets(Document doc, TargetSourceType targetSource,
+        internal static IEnumerable<TargetGeometry> ResolveTargets(Document doc,
             IEnumerable<SpaceMapperTargetRule> rules,
             Dictionary<string, List<SpaceMapperTargetRule>> targetsByRule)
         {
@@ -302,7 +435,7 @@ namespace MicroEng.Navisworks
 
             foreach (var rule in rules.Where(r => r.Enabled))
             {
-                var items = ResolveTargetsForRule(doc, targetSource, rule);
+                var items = ResolveTargetsForRule(doc, rule);
                 foreach (var item in items)
                 {
                     var key = GetItemKey(item);
@@ -326,61 +459,153 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private static IEnumerable<ModelItem> ResolveTargetsForRule(Document doc, TargetSourceType targetSource, SpaceMapperTargetRule rule)
+        private static IEnumerable<ModelItem> ResolveTargetsForRule(Document doc, SpaceMapperTargetRule rule)
         {
-            switch (rule.TargetType)
+            IEnumerable<ModelItem> items = Enumerable.Empty<ModelItem>();
+
+            switch (rule.TargetDefinition)
             {
-                case SpaceMapperTargetType.CurrentSelection:
-                    return doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
-                case SpaceMapperTargetType.SelectionTreeLevel:
-                    return TraverseWithDepth(doc.Models.RootItems, rule.MinTreeLevel ?? 0, rule.MaxTreeLevel ?? int.MaxValue)
-                        .Where(mi => CategoryMatches(mi, rule.CategoryFilter));
-                case SpaceMapperTargetType.VisibleInView:
-                    // Fallback to current selection for visible items
-                    return doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
-                case SpaceMapperTargetType.SelectionSet:
-                case SpaceMapperTargetType.SearchSet:
-                    // Selection/search set resolution placeholder: fall back to current selection
-                    return doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
+                case SpaceMapperTargetDefinition.CurrentSelection:
+                    items = doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
+                    break;
+                case SpaceMapperTargetDefinition.SelectionTreeLevel:
+                    items = TraverseWithDepth(doc.Models.RootItems, rule.MinLevel ?? 0, rule.MaxLevel ?? int.MaxValue);
+                    break;
+                case SpaceMapperTargetDefinition.SelectionSet:
+                    items = ResolveSelectionSet(rule.SetSearchName);
+                    break;
+                case SpaceMapperTargetDefinition.SearchSet:
+                    items = ResolveSearchSet(rule.SetSearchName);
+                    break;
+                case SpaceMapperTargetDefinition.EntireModel:
                 default:
-                    return ResolveByTargetSource(doc, targetSource);
+                    items = TraverseAll(doc.Models.RootItems);
+                    break;
             }
+
+            if (!string.IsNullOrWhiteSpace(rule.CategoryFilter))
+            {
+                items = items.Where(mi => CategoryMatches(mi, rule.CategoryFilter));
+            }
+
+            return items;
         }
 
-        private static IEnumerable<ModelItem> ResolveByTargetSource(Document doc, TargetSourceType targetSource)
+        private static IEnumerable<ModelItem> ResolveSelectionSet(string setName)
         {
-            switch (targetSource)
-            {
-                case TargetSourceType.SelectionSet:
-                    return doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
-                case TargetSourceType.SearchSet:
-                    // Placeholder: search set resolution not implemented, fallback to current selection
-                    return doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
-                case TargetSourceType.ViewpointVisible:
-                case TargetSourceType.Visible:
-                    return TraverseAll(doc.Models.RootItems).Where(mi => !IsHidden(mi));
-                case TargetSourceType.Hidden:
-                    return TraverseAll(doc.Models.RootItems).Where(IsHidden);
-                case TargetSourceType.EntireModel:
-                default:
-                    return TraverseAll(doc.Models.RootItems);
-            }
+            return ResolveSelectionSetInternal(setName);
         }
 
-        private static bool IsHidden(ModelItem item)
+        private static IEnumerable<ModelItem> ResolveSearchSet(string setName)
         {
+            return ResolveSelectionSetInternal(setName);
+        }
+
+        private static IEnumerable<ModelItem> ResolveSelectionSetInternal(string setName)
+        {
+            if (string.IsNullOrWhiteSpace(setName))
+            {
+                return Enumerable.Empty<ModelItem>();
+            }
+
             try
             {
-                var prop = item.GetType().GetProperty("IsHidden");
-                if (prop != null && prop.PropertyType == typeof(bool))
+                var doc = Application.ActiveDocument;
+                var root = doc?.SelectionSets?.RootItem;
+                var selectionSet = FindSelectionSetByName(root, setName);
+                if (selectionSet != null)
                 {
-                    return (bool)prop.GetValue(item);
+                    var items = selectionSet.GetSelectedItems(doc);
+                    return items?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
                 }
             }
             catch
             {
+                // ignore managed API selection set failures
             }
-            return false;
+
+            try
+            {
+                var state = ComBridge.State;
+                var sets = state.SelectionSetsEx();
+                var selectionSet = FindSelectionSetByName(sets, setName);
+                if (selectionSet == null)
+                {
+                    return Enumerable.Empty<ModelItem>();
+                }
+
+                var items = ComBridge.ToModelItemCollection(selectionSet.selection);
+                return items?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
+            }
+            catch
+            {
+                return Enumerable.Empty<ModelItem>();
+            }
+        }
+
+        private static SelectionSet FindSelectionSetByName(FolderItem folder, string name)
+        {
+            if (folder == null || string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            var children = folder.Children;
+            if (children == null)
+            {
+                return null;
+            }
+
+            foreach (SavedItem item in children)
+            {
+                if (item is SelectionSet set)
+                {
+                    if (string.Equals(set.DisplayName, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return set;
+                    }
+                }
+                else if (item is FolderItem subFolder)
+                {
+                    var found = FindSelectionSetByName(subFolder, name);
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        private static ComApi.InwOpSelectionSet FindSelectionSetByName(ComApi.InwSelectionSetExColl collection, string name)
+        {
+            if (collection == null || string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            for (int i = 1; i <= collection.Count; i++)
+            {
+                var item = collection[i];
+                if (item is ComApi.InwOpSelectionSet set)
+                {
+                    if (string.Equals(set.name, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return set;
+                    }
+                }
+                else if (item is ComApi.InwSelectionSetFolder folder)
+                {
+                    var found = FindSelectionSetByName(folder.SelectionSets(), name);
+                    if (found != null)
+                    {
+                        return found;
+                    }
+                }
+            }
+
+            return null;
         }
 
         private static IEnumerable<ModelItem> TraverseAll(IEnumerable<ModelItem> items)
@@ -451,12 +676,7 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private class ResolvedItem
-        {
-            public string ItemKey { get; set; }
-            public string DisplayName { get; set; }
-            public ModelItem ModelItem { get; set; }
-        }
+        // Resolved item model moved to SpaceMapperModels.cs
     }
 
     internal class ZoneValueLookup
@@ -522,7 +742,11 @@ namespace MicroEng.Navisworks
     {
         public static void WriteProperty(ModelItem item, string categoryName, string propertyName, string value, WriteMode mode, string appendSeparator)
         {
-            if (item == null || string.IsNullOrWhiteSpace(categoryName) || string.IsNullOrWhiteSpace(propertyName)) return;
+            if (item == null) return;
+
+            categoryName = string.IsNullOrWhiteSpace(categoryName) ? null : categoryName.Trim();
+            propertyName = string.IsNullOrWhiteSpace(propertyName) ? null : propertyName.Trim();
+            if (string.IsNullOrWhiteSpace(categoryName) || string.IsNullOrWhiteSpace(propertyName)) return;
 
             var existing = ReadProperty(item, categoryName, propertyName);
             if (mode == WriteMode.OnlyIfBlank && !string.IsNullOrWhiteSpace(existing))
@@ -544,22 +768,55 @@ namespace MicroEng.Navisworks
                 var path = ComBridge.ToInwOaPath(item);
                 var propertyNode = (ComApi.InwGUIPropertyNode2)state.GetGUIPropertyNode(path, true);
 
-                var propertyVector = (ComApi.InwOaPropertyVec)state.ObjectFactory(
-                    ComApi.nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
+                ComApi.InwOaPropertyVec propertyVector = null;
+                try
+                {
+                    var getMethod = propertyNode.GetType().GetMethod("GetUserDefined");
+                    propertyVector = getMethod?.Invoke(propertyNode, new object[] { 0, categoryName }) as ComApi.InwOaPropertyVec;
+                }
+                catch
+                {
+                    // ignore read failures
+                }
 
-                var newProp = (ComApi.InwOaProperty)state.ObjectFactory(
-                    ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
-                newProp.name = propertyName;
-                newProp.UserName = propertyName;
-                newProp.value = finalValue;
+                if (propertyVector == null)
+                {
+                    propertyVector = (ComApi.InwOaPropertyVec)state.ObjectFactory(
+                        ComApi.nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
+                }
 
-                propertyVector.Properties().Add(newProp);
+                var existingProp = FindProperty(propertyVector, propertyName);
+                if (existingProp == null)
+                {
+                    existingProp = (ComApi.InwOaProperty)state.ObjectFactory(
+                        ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
+                    existingProp.name = propertyName;
+                    existingProp.UserName = propertyName;
+                    propertyVector.Properties().Add(existingProp);
+                }
+
+                existingProp.value = finalValue;
                 propertyNode.SetUserDefined(0, categoryName, categoryName, propertyVector);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.WriteLine($"[SpaceMapper] Failed to write {categoryName}.{propertyName} on {item.DisplayName}: {ex.Message}");
             }
+        }
+
+        private static ComApi.InwOaProperty FindProperty(ComApi.InwOaPropertyVec vec, string propertyName)
+        {
+            foreach (ComApi.InwOaProperty prop in vec.Properties())
+            {
+                if (prop == null) continue;
+                if (string.Equals(prop.name, propertyName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(prop.UserName, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return prop;
+                }
+            }
+
+            return null;
         }
 
         private static string ReadProperty(ModelItem item, string categoryName, string propertyName)

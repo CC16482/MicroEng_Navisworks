@@ -4,10 +4,12 @@
 - Build: `dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj /p:NavisApiDir="C:\Program Files\Autodesk\Navisworks Manage 2025"` (default deploy goes to `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\` and writes `MicroEng.Navisworks.addin` to the **Plugins root**).
 - Runtime: launch Navisworks and use Add-Ins tab (MicroEng Panel opens the launcher/log; Data Scraper/Mapper/Matrix/Space Mapper are separate windows/panes).
 - WPF-UI is active (4.1.0). Theme is per-root only (no global App.xaml). Defaults: Dark theme, Black/White accent, DataGrid gridlines #C0C0C0.
+- WPF-UI is the primary UI system. If something looks off, fix WPF-UI usage/styles first instead of falling back to non-WPF-UI controls.
 - Settings: open via the gear button in the panel. Theme toggle + accent mode (System, Custom, Black/White) + DataGrid gridline color apply live to all open MicroEng windows.
 - Log file: `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\MicroEng.log` (fallback: `%TEMP%\MicroEng.log`).
 - If UI is blank or a window fails to open, check the log for XAML resource errors (missing resource keys or Wpf.Ui.dll not found).
 - Known UI issue to verify: some labels/text still render black in Dark mode; fix by removing local `Foreground` overrides or ensuring `MicroEngWpfUiTheme.ApplyTextResources` updates `TextFillColor*` brushes.
+- If the plugin does not load: verify `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks.addin` points to `.\MicroEng.Navisworks\MicroEng.Navisworks.dll`, and that DLL actually exists in `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\`. Do not mix ProgramData and Program Files plugin roots.
 
 ## AI Notes (Context for Codex)
 - Priority #1: WPF-UI is the primary UI system. Do not introduce non-WPF-UI elements as a fallback unless absolutely required for stability; instead, fix/adjust WPF-UI usage to match Gallery patterns when possible.

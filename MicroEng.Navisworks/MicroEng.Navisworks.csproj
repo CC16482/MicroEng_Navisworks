@@ -62,6 +62,17 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <Resource Include="..\ReferenceImages\SpaceMapper\*.gif">
+      <Link>ReferenceImages\SpaceMapper\%(Filename)%(Extension)</Link>
+    </Resource>
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\ReferenceMedia\SpaceMapper\*.mp4">
+      <Link>ReferenceMedia\SpaceMapper\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <!-- Ensure the Navisworks *.addin manifest is copied to output/deploy.
          Use Update (not Include) to attach metadata to the default item. -->
     <None Update="MicroEng.Navisworks.addin">

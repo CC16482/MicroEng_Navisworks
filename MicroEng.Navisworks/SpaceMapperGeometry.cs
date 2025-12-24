@@ -20,12 +20,14 @@ namespace MicroEng.Navisworks
                 Cache[key] = cached;
             }
 
-            var bbox = ApplyOffsets(cached.BoundingBox, settings);
+            var rawBox = cached.BoundingBox;
+            var bbox = ApplyOffsets(rawBox, settings);
             return new ZoneGeometry
             {
                 ZoneId = zoneId,
                 DisplayName = displayName,
                 ModelItem = item,
+                RawBoundingBox = rawBox,
                 BoundingBox = bbox,
                 Vertices = cached.Vertices,
                 Planes = cached.Planes

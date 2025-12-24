@@ -11,6 +11,8 @@
       d:DesignWidth="900"
       Background="Transparent"
       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
       FontSize="12">
 
   <Page.Resources>
@@ -27,6 +29,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
@@ -37,7 +40,7 @@
              HorizontalContentAlignment="Stretch">
       <StackPanel>
         <ui:TextBlock Text="Step 1 - Setup" FontSize="16" FontWeight="SemiBold" />
-        <ui:TextBlock Text="Choose a Data Scraper profile and scope before running Space Mapper."
+        <ui:TextBlock Text="Choose a Space Mapper profile, optionally select a metadata assistant, then validate readiness."
                       Margin="0,4,0,0"
                       FontSize="12"
                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
@@ -50,20 +53,39 @@
              HorizontalAlignment="Stretch"
              HorizontalContentAlignment="Stretch">
       <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <StackPanel Orientation="Horizontal" Grid.Row="0">
-          <TextBlock Text="Profile:" VerticalAlignment="Center" Margin="0,0,6,0" />
-          <ComboBox x:Name="ProfileComboBox" Width="180" Margin="0,0,8,0" />
-          <ui:Button x:Name="RefreshProfilesButtonControl" Content="Refresh" />
-        </StackPanel>
+        <ui:TextBlock Grid.Row="0"
+                      Grid.ColumnSpan="3"
+                      Text="Space Mapper Profile"
+                      FontSize="13"
+                      FontWeight="SemiBold"
+                      Margin="0,0,0,6" />
 
-        <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,8,0,0">
-          <TextBlock Text="Scope:" VerticalAlignment="Center" Margin="0,0,6,0" />
-          <ComboBox x:Name="ScopeComboBox" Width="160" />
+        <TextBlock Grid.Row="1"
+                   Text="Profile:"
+                   VerticalAlignment="Center"
+                   Margin="0,0,8,0" />
+        <ComboBox x:Name="TemplateComboBox"
+                  Grid.Row="1"
+                  Grid.Column="1"
+                  MinWidth="240" />
+        <StackPanel Grid.Row="1"
+                    Grid.Column="2"
+                    Orientation="Horizontal"
+                    Margin="12,0,0,0">
+          <ui:Button x:Name="NewTemplateButtonControl" Content="New" Margin="0,0,6,0" />
+          <ui:Button x:Name="SaveTemplateButtonControl" Content="Save" Margin="0,0,6,0" />
+          <ui:Button x:Name="SaveAsTemplateButtonControl" Content="Save As" Margin="0,0,6,0" />
+          <ui:Button x:Name="DeleteTemplateButtonControl" Content="Delete" />
         </StackPanel>
       </Grid>
     </ui:Card>
@@ -74,21 +96,77 @@
              HorizontalContentAlignment="Stretch">
       <Grid>
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TextBlock Grid.Row="0"
+                      Grid.ColumnSpan="3"
+                      Text="Metadata Assistant (Data Scraper)"
+                      FontSize="13"
+                      FontWeight="SemiBold"
+                      Margin="0,0,0,6" />
+
+        <TextBlock Grid.Row="1"
+                   Grid.ColumnSpan="3"
+                   Text="Use scraped metadata to power dropdowns and suggestions across Space Mapper."
+                   Opacity="0.85"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,8" />
+
+        <TextBlock Grid.Row="2"
+                   Text="Scraper profile:"
+                   VerticalAlignment="Center"
+                   Margin="0,0,8,0" />
+        <ComboBox x:Name="ScraperProfileComboBox"
+                  Grid.Row="2"
+                  Grid.Column="1"
+                  MinWidth="240" />
+        <StackPanel Grid.Row="2"
+                    Grid.Column="2"
+                    Orientation="Horizontal"
+                    Margin="12,0,0,0">
+          <ui:Button x:Name="RefreshScraperButtonControl" Content="Refresh" Margin="0,0,6,0" />
+          <ui:Button x:Name="OpenScraperButtonControl" Content="Open Data Scraper..." />
+        </StackPanel>
+
+        <TextBlock x:Name="ScraperSummaryTextControl"
+                   Grid.Row="3"
+                   Grid.ColumnSpan="3"
+                   Margin="0,8,0,0"
+                   Opacity="0.8"
+                   TextWrapping="Wrap" />
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="3"
+             Padding="10"
+             Margin="0,8,0,0"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <Grid>
+        <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
         <StackPanel>
-          <ui:TextBlock Text="Actions" FontSize="13" FontWeight="SemiBold" />
-          <ui:TextBlock Text="Run the Data Scraper if you need a fresh profile, then run Space Mapper."
-                        Margin="0,4,0,0"
-                        FontSize="12"
-                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          <ui:TextBlock Text="Readiness" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6" />
+          <TextBlock x:Name="ReadinessTextControl"
+                     TextWrapping="Wrap"
+                     Opacity="0.85" />
         </StackPanel>
 
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-          <ui:Button x:Name="RunScraperButtonControl" Content="Run Data Scraper..." Margin="0,0,8,0" />
-          <ui:Button x:Name="RunButtonControl" Content="Run Space Mapper" Appearance="Primary" />
+          <ui:Button x:Name="ValidateButtonControl" Content="Validate" Margin="0,0,8,0" />
+          <ui:Button x:Name="GoToZonesButtonControl" Content="Go to Step 2" />
         </StackPanel>
       </Grid>
     </ui:Card>

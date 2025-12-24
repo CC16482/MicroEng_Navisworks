@@ -2,6 +2,10 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\Logos\microeng-logo2.png
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\Logos\microeng-logo3.png
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\Logos\microeng_logotray.png
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\ReferenceMedia\SpaceMapper\Zone_3D_Offset_720p.mp4
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\ReferenceMedia\SpaceMapper\Zone_Bottom_720p.mp4
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\ReferenceMedia\SpaceMapper\Zone_Sides_720p.mp4
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\ReferenceMedia\SpaceMapper\Zone_Top_720p.mp4
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\MicroEng.Navisworks.addin
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\MicroEng.Navisworks.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\x64\Debug\net48\MicroEng.Navisworks.pdb

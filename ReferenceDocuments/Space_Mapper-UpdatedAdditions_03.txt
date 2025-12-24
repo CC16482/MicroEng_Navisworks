@@ -1,0 +1,231 @@
+Great—this “Index Granularity” slider is the perfect next lever because it directly changes candidate pairs, which dominates runtime. You already have a spatial hash grid with ComputeAutoCellSize() (extent / 128 with min 1000mm) in both preflight and CPU engine , so adding a multiplier is a clean extension.
+
+Below is:
+
+The UX design (what the user sees)
+
+The exact model changes
+
+The preflight + engine changes (so estimates and runs align)
+
+A Codex prompt to implement it
+
+One important correctness fix you should include while doing this (preflight cache reuse bug)
+
+1) UX: “Index Granularity” slider (Auto / Coarse / Normal / Fine / Ultra)
+Where it lives
+
+Add this under your existing “Estimate & Preflight” card in Step 3 (Processing page). This is where users already see candidate pairs and estimate, so the effect is obvious.
+
+What it means
+
+Explain it in one sentence:
+
+“Controls spatial grid cell size. Smaller cells reduce candidate pairs but increase index build cost.”
+
+Slider ticks
+
+Use a 5-tick slider with labels under it:
+
+Auto (uses your current extent/128 logic)
+
+Coarse (bigger cells; fastest build; more candidate pairs)
+
+Normal (same as Auto baseline but fixed)
+
+Fine (smaller cells; fewer candidates; slightly longer build)
+
+Ultra (smallest; fewest candidates; longest build; use for dense models)
+
+Recommended multipliers
+
+Let autoCellSize = ComputeAutoCellSize(worldBounds).
+
+Auto: multiplier = null (meaning “use auto as-is”)
+
+Coarse: 2.0
+
+Normal: 1.0
+
+Fine: 0.5
+
+Ultra: 0.25
+
+You can tune later, but these values are intuitive and work well.
+
+Behavior
+
+Changing the granularity slider must re-run preflight (it changes candidate pairs).
+
+It should also invalidate reuse of cached grid if it changes cell size.
+
+Display feedback
+
+In the estimate panel, add:
+
+Cell size: Auto(12.5m) → Fine(6.25m) or similar
+
+Show:
+
+Build time
+
+Candidate pairs
+
+“Best setting” hint (optional)
+
+e.g., “Fine reduced candidates by 38% vs Auto”
+
+2) Model changes
+
+Add a new setting to SpaceMapperProcessingSettings in SpaceMapperModels.cs:
+
+[DataMember(Order = 12)]
+public int IndexGranularity { get; set; } = 0; // 0=Auto, 1=Coarse, 2=Normal, 3=Fine, 4=Ultra
+
+
+(Your current highest Order is 11 (BatchSize). 
+
+SpaceMapperModels
+
+
+So Order=12 is safe.)
+
+This is intentionally an int so it binds nicely to a slider tick value.
+
+3) Preflight changes (the important part)
+3.1 Compute cell size using the new slider setting
+
+In SpaceMapperPreflightService.cs, currently:
+
+computes cellSize = ComputeAutoCellSize(worldBounds) 
+
+SpaceMapperPreflightService
+
+Change to:
+
+cellSize = ComputeAutoCellSize(worldBounds)
+
+apply multiplier based on request.ProcessingSettings.IndexGranularity
+
+Pseudo:
+
+if Auto: use as-is
+
+else multiply by factor from table above
+
+3.2 Include this new option in signature
+
+Right now BuildSignature() includes offsets + rules etc. 
+
+SpaceMapperPreflightService
+
+
+Add IndexGranularity to the signature string so changing it forces rebuild.
+
+3.3 Fix the preflight cache reuse bug now
+
+Your current preflight cache reuse logic:
+
+if signature matches: reuse _cache.Grid but you still rebuild targetBounds/targetKeys and then store them with the grid 
+
+SpaceMapperPreflightService
+
+That can desync the grid indices vs the arrays. When you add IndexGranularity, this gets even more likely to bite.
+
+Correct behavior should be either:
+
+If signature matches: return cached result immediately (no rebuild arrays), OR
+
+If signature matches: reuse grid and reuse targetBounds/targetKeys too, OR
+
+Always rebuild grid whenever you rebuild targetBounds.
+
+I recommend: fast path return cached result if signature matches and _cache.LastResult != null. It keeps things simple and correct.
+
+4) Engine alignment (so preflight and run match)
+
+In CpuIntersectionEngine, when it builds a grid itself (no preflight cache), it uses ComputeAutoCellSize(worldBounds) 
+
+SpaceMapperEngines
+
+Make it apply the same IndexGranularity multiplier, using the exact same helper function as preflight (single source of truth). That way:
+
+cell size in preflight == cell size in run (when not reusing cache)
+
+results and candidate counts are consistent
+
+Also: if preflight cache is reused, the engine already uses preflightCache.Grid 
+
+SpaceMapperEngines
+
+, so it will automatically match.
+
+5) UI changes in Step 3 (Processing page)
+XAML snippet (WPF Slider with TickPlacement="Both")
+
+Add to SpaceMapperStepProcessingPage.xaml near estimate:
+
+<StackPanel Margin="0,8,0,0">
+  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+    <TextBlock Text="Index Granularity" FontWeight="SemiBold" />
+    <Button x:Name="IndexGranularityFlyoutButton" Margin="8,0,0,0">
+      <ui:SymbolIcon Symbol="Info16"/>
+    </Button>
+  </StackPanel>
+
+  <Slider x:Name="IndexGranularitySliderControl"
+          Minimum="0"
+          Maximum="4"
+          Value="0"
+          TickPlacement="Both"
+          Ticks="0,1,2,3,4"
+          IsSnapToTickEnabled="True"
+          SmallChange="1"
+          LargeChange="1"
+          Margin="0,6,0,0"/>
+
+  <Grid Margin="0,4,0,0">
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="*" />
+      <ColumnDefinition Width="*" />
+    </Grid.ColumnDefinitions>
+    <TextBlock Text="Auto" Grid.Column="0" HorizontalAlignment="Left"/>
+    <TextBlock Text="Coarse" Grid.Column="1" HorizontalAlignment="Center"/>
+    <TextBlock Text="Normal" Grid.Column="2" HorizontalAlignment="Center"/>
+    <TextBlock Text="Fine" Grid.Column="3" HorizontalAlignment="Center"/>
+    <TextBlock Text="Ultra" Grid.Column="4" HorizontalAlignment="Right"/>
+  </Grid>
+
+  <TextBlock x:Name="IndexGranularityHintTextControl"
+             Margin="0,6,0,0"
+             Opacity="0.85"
+             TextWrapping="Wrap"
+             Text="Auto uses a balanced cell size. Fine/Ultra can reduce candidate pairs on dense models."/>
+</StackPanel>
+
+
+Expose the slider + hint text in SpaceMapperStepProcessingPage.xaml.cs, like your other internal properties 
+
+SpaceMapperStepProcessingPage.x…
+
+.
+
+Wire it in SpaceMapperControl.xaml.cs
+
+Add:
+
+ValueChanged handler that triggers live preflight (because candidate pairs change)
+
+Also update the hint text (optional) to show the actual computed cell size from last preflight result: CellSizeUsed
+
+You already trigger preflight on lots of UI events. 
+
+SpaceMapperControl.xaml
+
+
+This should behave similarly to offsets.
+
+Also: update BuildSettings() to set IndexGranularity rather than ignoring new input (your BuildSettings currently ignores MaxThreads/BatchSize too; you’ll likely want to fix that at the same time).

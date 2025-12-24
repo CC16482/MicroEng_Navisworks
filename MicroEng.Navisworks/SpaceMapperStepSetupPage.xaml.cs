@@ -1,4 +1,4 @@
-﻿using System.Windows.Controls;
+using System.Windows.Controls;
 
 namespace MicroEng.Navisworks
 {
@@ -11,10 +11,17 @@ namespace MicroEng.Navisworks
             DataContext = host;
         }
 
-        internal ComboBox ProfileCombo => ProfileComboBox;
-        internal Wpf.Ui.Controls.Button RefreshProfilesButton => RefreshProfilesButtonControl;
-        internal ComboBox ScopeCombo => ScopeComboBox;
-        internal Wpf.Ui.Controls.Button RunScraperButton => RunScraperButtonControl;
-        internal Wpf.Ui.Controls.Button RunButton => RunButtonControl;
+        internal ComboBox TemplateCombo => TemplateComboBox;
+        internal Wpf.Ui.Controls.Button NewTemplateButton => NewTemplateButtonControl;
+        internal Wpf.Ui.Controls.Button SaveTemplateButton => SaveTemplateButtonControl;
+        internal Wpf.Ui.Controls.Button SaveAsTemplateButton => SaveAsTemplateButtonControl;
+        internal Wpf.Ui.Controls.Button DeleteTemplateButton => DeleteTemplateButtonControl;
+        internal ComboBox ScraperProfileCombo => ScraperProfileComboBox;
+        internal Wpf.Ui.Controls.Button RefreshScraperButton => RefreshScraperButtonControl;
+        internal Wpf.Ui.Controls.Button OpenScraperButton => OpenScraperButtonControl;
+        internal TextBlock ScraperSummaryText => ScraperSummaryTextControl;
+        internal TextBlock ReadinessText => ReadinessTextControl;
+        internal Wpf.Ui.Controls.Button ValidateButton => ValidateButtonControl;
+        internal Wpf.Ui.Controls.Button GoToZonesButton => GoToZonesButtonControl;
     }
 }

@@ -11,6 +11,8 @@
       d:DesignWidth="900"
       Background="Transparent"
       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
       FontSize="12">
 
   <Page.Resources>
@@ -31,11 +33,30 @@
         <local:MultiZoneCombineMode>Max</local:MultiZoneCombineMode>
         <local:MultiZoneCombineMode>Average</local:MultiZoneCombineMode>
       </x:Array>
+      <Style x:Key="HelpToggleButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="4,0,0,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
     </ResourceDictionary>
   </Page.Resources>
 
   <Grid Margin="12">
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
@@ -58,58 +79,256 @@
              Padding="10"
              HorizontalAlignment="Stretch"
              HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Stretch">
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+             VerticalContentAlignment="Stretch"
+             VerticalAlignment="Top">
+      <StackPanel>
+        <ui:TextBlock Text="Mapping Builder" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,6" />
 
-        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,8">
-          <ui:Button x:Name="AddMappingButtonControl" Content="Add Mapping" Margin="0,0,6,0" />
-          <ui:Button x:Name="DeleteMappingButtonControl" Content="Delete Mapping" Margin="0,0,6,0" />
-          <ui:Button x:Name="SaveTemplateButtonControl" Content="Save Template" Margin="0,0,6,0" />
-          <ui:Button x:Name="LoadTemplateButtonControl" Content="Load Template" />
-        </StackPanel>
+        <Grid Margin="0,0,0,8">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="24" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
 
-        <ui:DataGrid x:Name="MappingGridControl"
-                     Grid.Row="1"
-                     AutoGenerateColumns="False"
-                     CanUserAddRows="False"
-                     CanUserDeleteRows="False"
-                     ItemsSource="{Binding Mappings}"
-                     HeadersVisibility="Column"
-                     GridLinesVisibility="All"
-                     HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                     VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                     FontSize="12"
-                     RowHeight="28"
-                     ColumnHeaderHeight="30"
-                     EnableRowVirtualization="True"
-                     EnableColumnVirtualization="True"
-                     VirtualizingPanel.IsVirtualizing="True"
-                     VirtualizingPanel.VirtualizationMode="Recycling"
-                     IsReadOnly="False">
-          <ui:DataGrid.Columns>
-            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="120" />
-            <DataGridTextColumn Header="Zone Category" Binding="{Binding ZoneCategory}" Width="140" />
-            <DataGridTextColumn Header="Zone Property" Binding="{Binding ZonePropertyName}" Width="140" />
-            <DataGridTextColumn Header="Target Category" Binding="{Binding TargetCategory}" Width="140" />
-            <DataGridTextColumn Header="Target Property" Binding="{Binding TargetPropertyName}" Width="140" />
-            <DataGridComboBoxColumn Header="Write Mode"
-                                    SelectedItemBinding="{Binding WriteMode}"
-                                    Width="120"
-                                    ItemsSource="{StaticResource WriteModes}" />
-            <DataGridComboBoxColumn Header="Multi-Zone"
-                                    SelectedItemBinding="{Binding MultiZoneCombineMode}"
-                                    Width="120"
-                                    ItemsSource="{StaticResource CombineModes}" />
-            <DataGridTextColumn Header="Append Separator" Binding="{Binding AppendSeparator}" Width="120" />
-            <DataGridTextColumn Header="Partial Flag" Binding="{Binding PartialFlagValue}" Width="100" />
-            <DataGridCheckBoxColumn Header="Editable" Binding="{Binding IsEditable}" Width="70" />
-          </ui:DataGrid.Columns>
-        </ui:DataGrid>
-      </Grid>
+          <Grid Grid.Row="0" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Mapping Name:" VerticalAlignment="Center" />
+              <Button x:Name="MappingNameHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="MappingNameHelpFlyout" Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Friendly name shown in the mapping list." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="MappingNameBoxControl" Grid.Column="1" MinWidth="180" Text="Zone Name" />
+          </Grid>
+
+          <Grid Grid.Row="0" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Zone Category:" VerticalAlignment="Center" />
+              <Button x:Name="ZoneCategoryHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="ZoneCategoryHelpFlyout" Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Property category on the zone (e.g. Zone, Element, Revit Data)." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="ZoneCategoryBoxControl" Grid.Column="1" MinWidth="200" Text="Zone" />
+          </Grid>
+
+          <Grid Grid.Row="1" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Zone Property:" VerticalAlignment="Center" />
+              <Button x:Name="ZonePropertyHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="ZonePropertyHelpFlyout" Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Property name to read from the zone (e.g. Name)." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="ZonePropertyBoxControl" Grid.Column="1" MinWidth="180" Text="Name" />
+          </Grid>
+
+          <Grid Grid.Row="1" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Target Category:" VerticalAlignment="Center" />
+              <Button x:Name="TargetCategoryHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="TargetCategoryHelpFlyout" Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Property category on the target element (default ME_SpaceInfo)." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="TargetCategoryBoxControl" Grid.Column="1" MinWidth="200" Text="ME_SpaceInfo" />
+          </Grid>
+
+          <Grid Grid.Row="2" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Target Property:" VerticalAlignment="Center" />
+              <Button x:Name="TargetPropertyHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="TargetPropertyHelpFlyout" Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Property name to write on the target element." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="TargetPropertyBoxControl" Grid.Column="1" MinWidth="180" Text="Zone Name" />
+          </Grid>
+
+          <Grid Grid.Row="2" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Write Mode:" VerticalAlignment="Center" />
+              <Button x:Name="WriteModeHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="WriteModeHelpFlyout" Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Overwrite, only if blank, or append to existing values." />
+              </ui:Flyout>
+            </StackPanel>
+            <ComboBox x:Name="WriteModeComboBoxControl"
+                      Grid.Column="1"
+                      MinWidth="180"
+                      SelectedIndex="0"
+                      ItemsSource="{StaticResource WriteModes}" />
+          </Grid>
+
+          <Grid Grid.Row="3" Grid.Column="0" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Multi-Zone:" VerticalAlignment="Center" />
+              <Button x:Name="MultiZoneHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="MultiZoneHelpFlyout" Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="How multiple zone values are combined when a target matches more than one zone." />
+              </ui:Flyout>
+            </StackPanel>
+            <ComboBox x:Name="MultiZoneComboBoxControl"
+                      Grid.Column="1"
+                      MinWidth="180"
+                      SelectedIndex="0"
+                      ItemsSource="{StaticResource CombineModes}" />
+          </Grid>
+
+          <Grid Grid.Row="3" Grid.Column="2" Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Append Separator:" VerticalAlignment="Center" />
+              <Button x:Name="AppendSeparatorHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="AppendSeparatorHelpFlyout" Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Separator used when appending or combining multiple values." />
+              </ui:Flyout>
+            </StackPanel>
+            <TextBox x:Name="AppendSeparatorBoxControl" Grid.Column="1" MinWidth="180" Text=", " />
+          </Grid>
+
+          <Grid Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+              <TextBlock Text="Editable:" VerticalAlignment="Center" />
+              <Button x:Name="EditableHelpToggle" Style="{StaticResource HelpToggleButtonStyle}">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="EditableHelpFlyout" Placement="Top">
+                <TextBlock Width="220"
+                           TextWrapping="Wrap"
+                           Text="Allow this mapping to be edited in the grid." />
+              </ui:Flyout>
+            </StackPanel>
+            <CheckBox x:Name="EditableCheckBoxControl" Grid.Column="1" VerticalAlignment="Center" IsChecked="True" />
+          </Grid>
+        </Grid>
+
+        <Grid>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+
+          <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,8">
+            <ui:Button x:Name="AddMappingButtonControl" Content="Add Mapping" Margin="0,0,6,0" />
+            <ui:Button x:Name="DeleteMappingButtonControl" Content="Delete Mapping" Margin="0,0,6,0" />
+            <ui:Button x:Name="SaveTemplateButtonControl" Content="Save Template" Margin="0,0,6,0" />
+            <ui:Button x:Name="LoadTemplateButtonControl" Content="Load Template" />
+          </StackPanel>
+
+          <ui:DataGrid x:Name="MappingGridControl"
+                       Grid.Row="1"
+                       AutoGenerateColumns="False"
+                       CanUserAddRows="False"
+                       CanUserDeleteRows="False"
+                       ItemsSource="{Binding Mappings}"
+                       HeadersVisibility="Column"
+                       GridLinesVisibility="All"
+                       HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                       VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                       FontSize="12"
+                       RowHeight="28"
+                       ColumnHeaderHeight="30"
+                       EnableRowVirtualization="True"
+                       EnableColumnVirtualization="True"
+                       VirtualizingPanel.IsVirtualizing="True"
+                       VirtualizingPanel.VirtualizationMode="Recycling"
+                       IsReadOnly="False">
+            <ui:DataGrid.Columns>
+              <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="120" />
+              <DataGridTextColumn Header="Zone Category" Binding="{Binding ZoneCategory}" Width="140" />
+              <DataGridTextColumn Header="Zone Property" Binding="{Binding ZonePropertyName}" Width="140" />
+              <DataGridTextColumn Header="Target Category" Binding="{Binding TargetCategory}" Width="140" />
+              <DataGridTextColumn Header="Target Property" Binding="{Binding TargetPropertyName}" Width="140" />
+              <DataGridComboBoxColumn Header="Write Mode"
+                                      SelectedItemBinding="{Binding WriteMode}"
+                                      Width="120"
+                                      ItemsSource="{StaticResource WriteModes}" />
+              <DataGridComboBoxColumn Header="Multi-Zone"
+                                      SelectedItemBinding="{Binding MultiZoneCombineMode}"
+                                      Width="120"
+                                      ItemsSource="{StaticResource CombineModes}" />
+              <DataGridTextColumn Header="Append Separator" Binding="{Binding AppendSeparator}" Width="120" />
+              <DataGridCheckBoxColumn Header="Editable" Binding="{Binding IsEditable}" Width="70" />
+            </ui:DataGrid.Columns>
+          </ui:DataGrid>
+        </Grid>
+      </StackPanel>
     </ui:Card>
   </Grid>
 </Page>

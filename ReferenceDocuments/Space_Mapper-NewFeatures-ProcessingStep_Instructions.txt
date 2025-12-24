@@ -1,0 +1,584 @@
+Below is a complete “next level” plan + starter implementation for Space Mapper that adds:
+
+Preflight (bbox-only) estimation step with high accuracy candidate-pair counts
+
+Live, auto-updating prediction as the user changes options (debounced + cancellable)
+
+Real performance upgrades by reusing the preflight spatial index for the actual CPU run
+
+Calibration (estimates get better after each run)
+
+Stage timing + diagnostics so you can see where time is going
+
+I’m giving you:
+
+What we are building (feature spec)
+
+The core code (preflight, spatial index, estimator, calibration, debounce)
+
+Exactly what to tell Codex to implement/wire into your current codebase
+
+1) Feature spec: “Space Mapper – Preflight & Live Runtime Estimate”
+New UI block in Space Mapper: “Estimate & Performance”
+
+Add a card/section (e.g., top-right or near the Run button) showing:
+
+Estimated runtime: ~ 02:15 (±30%)
+
+Zones / Targets: Zones: 1,240 Targets: 185,000
+
+Candidate pairs (bbox overlap): 9.8M
+
+Avg candidates per zone: 7,900
+
+Estimated writes: ~ 420k (optional; see below)
+
+Confidence: Low / Medium / High
+
+Preflight status: Idle / Running / Cancelled / Complete
+
+Controls:
+
+[Run Preflight] button (manual)
+
+[x] Live estimate toggle (auto re-run preflight on option changes)
+
+[x] Reuse preflight index for Run (should be ON by default)
+
+Optional advanced:
+
+“Spatial Index Cell Size: Auto / 1m / 2m / 5m …”
+
+“Level bucketing” (Phase 2; optional)
+
+Behaviour: “As you change options, prediction updates”
+
+Whenever the user changes:
+
+scope (entire model / current view / selection / set)
+
+zone offsets (3D/top/bottom/sides)
+
+selection set/search set
+
+enable multiple zones / partial rules
+
+mapping count (number of properties to write)
+
+“sampling intensity” (if you expose it)
+
+The UI should:
+
+Cancel any running preflight
+
+Wait ~300–700ms debounce
+
+Run a new preflight async
+
+Update estimate immediately
+
+Performance upgrade: reuse preflight for actual CPU run
+
+Preflight builds a target spatial index (spatial hash grid over target bounding boxes).
+The actual run should use it to avoid Zones × Targets loops.
+
+This is the biggest CPU win.
+
+Calibration: estimates improve after each run
+
+After each actual Space Mapper run:
+
+Capture:
+
+elapsed seconds
+
+candidate pairs count (from preflight)
+
+mapping count
+
+zones count / targets count
+
+Update calibration constants (rolling average) so future estimates improve.
+
+2) Implementation approach (important constraints for Navisworks)
+
+To stay stable in Navisworks:
+
+All Navisworks API / COM access must happen on the UI thread
+(resolving ModelItems, reading BoundingBox, reading properties)
+
+The heavy preflight math (spatial index build, overlap counting) should happen off-thread on pure data.
+
+So preflight is two-phase:
+
+UI thread: resolve zone/target ModelItems and extract AABB bounds into simple structs
+
+Background thread: build spatial index + compute candidate counts
+
+UI thread: update UI with results
+
+3) Core code (drop-in friendly, net48-safe)
+
+Below are the core building blocks. You can paste these into your solution as new files. They don’t depend on Navisworks types except where noted (conversion helper).
+
+3.1 Aabb.cs (pure math struct)
+using System;
+
+namespace MicroEng.Navisworks.SpaceMapper.Geometry
+{
+    /// <summary>Axis-aligned bounding box (AABB) in model/world coordinates.</summary>
+    public readonly struct Aabb
+    {
+        public readonly double MinX, MinY, MinZ;
+        public readonly double MaxX, MaxY, MaxZ;
+
+        public Aabb(double minX, double minY, double minZ, double maxX, double maxY, double maxZ)
+        {
+            // normalize in case inputs are flipped
+            MinX = Math.Min(minX, maxX);
+            MinY = Math.Min(minY, maxY);
+            MinZ = Math.Min(minZ, maxZ);
+            MaxX = Math.Max(minX, maxX);
+            MaxY = Math.Max(minY, maxY);
+            MaxZ = Math.Max(minZ, maxZ);
+        }
+
+        public double SizeX => MaxX - MinX;
+        public double SizeY => MaxY - MinY;
+        public double SizeZ => MaxZ - MinZ;
+
+        public bool Intersects(in Aabb other)
+        {
+            return !(other.MinX > MaxX || other.MaxX < MinX
+                  || other.MinY > MaxY || other.MaxY < MinY
+                  || other.MinZ > MaxZ || other.MaxZ < MinZ);
+        }
+
+        public Aabb Inflate(double uniform)
+            => Inflate(uniform, uniform, uniform);
+
+        public Aabb Inflate(double dx, double dy, double dz)
+            => new Aabb(MinX - dx, MinY - dy, MinZ - dz, MaxX + dx, MaxY + dy, MaxZ + dz);
+
+        public Aabb OffsetZ(double bottom, double top)
+            => new Aabb(MinX, MinY, MinZ - bottom, MaxX, MaxY, MaxZ + top);
+    }
+}
+
+3.2 SpatialHashGrid.cs (fast target index)
+
+Key ideas:
+
+Targets are inserted into grid cells by AABB overlap.
+
+Zone query returns candidates without allocations using a visited-stamp array.
+
+using System;
+using System.Collections.Generic;
+
+namespace MicroEng.Navisworks.SpaceMapper.Geometry
+{
+    internal readonly struct CellKey : IEquatable<CellKey>
+    {
+        public readonly int X, Y, Z;
+        public CellKey(int x, int y, int z) { X = x; Y = y; Z = z; }
+
+        public bool Equals(CellKey other) => X == other.X && Y == other.Y && Z == other.Z;
+        public override bool Equals(object obj) => obj is CellKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                // simple hash, good enough for grid keys
+                int h = 17;
+                h = (h * 31) + X;
+                h = (h * 31) + Y;
+                h = (h * 31) + Z;
+                return h;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Uniform-grid spatial hash for AABB candidates. Designed for fast "zone AABB → candidate target indices" queries.
+    /// </summary>
+    public sealed class SpatialHashGrid
+    {
+        private readonly double _cellSize;
+        private readonly double _invCellSize;
+        private readonly Aabb _worldBounds;
+        private readonly Dictionary<CellKey, List<int>> _cells = new Dictionary<CellKey, List<int>>(1024);
+
+        public Aabb[] TargetBounds { get; }
+
+        public SpatialHashGrid(Aabb worldBounds, double cellSize, Aabb[] targetBounds)
+        {
+            _worldBounds = worldBounds;
+            _cellSize = Math.Max(1e-6, cellSize);
+            _invCellSize = 1.0 / _cellSize;
+            TargetBounds = targetBounds ?? throw new ArgumentNullException(nameof(targetBounds));
+
+            Build();
+        }
+
+        public double CellSize => _cellSize;
+
+        private void Build()
+        {
+            for (int i = 0; i < TargetBounds.Length; i++)
+            {
+                Add(i, TargetBounds[i]);
+            }
+        }
+
+        private int ToCell(double v, double origin) => (int)Math.Floor((v - origin) * _invCellSize);
+
+        private void Add(int index, in Aabb bounds)
+        {
+            int minX = ToCell(bounds.MinX, _worldBounds.MinX);
+            int minY = ToCell(bounds.MinY, _worldBounds.MinY);
+            int minZ = ToCell(bounds.MinZ, _worldBounds.MinZ);
+            int maxX = ToCell(bounds.MaxX, _worldBounds.MinX);
+            int maxY = ToCell(bounds.MaxY, _worldBounds.MinY);
+            int maxZ = ToCell(bounds.MaxZ, _worldBounds.MinZ);
+
+            for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+            for (int z = minZ; z <= maxZ; z++)
+            {
+                var key = new CellKey(x, y, z);
+                if (!_cells.TryGetValue(key, out var list))
+                {
+                    list = new List<int>(16);
+                    _cells[key] = list;
+                }
+                list.Add(index);
+            }
+        }
+
+        /// <summary>
+        /// Counts unique candidate targets overlapping the query AABB (AABB check included).
+        /// visited[] is an int stamp array: visited[i] == stamp means "already seen".
+        /// </summary>
+        public int CountCandidates(in Aabb query, int[] visited, ref int stamp)
+        {
+            if (visited == null) throw new ArgumentNullException(nameof(visited));
+            if (visited.Length < TargetBounds.Length) throw new ArgumentException("visited[] must be >= target count");
+
+            stamp++;
+            if (stamp == int.MaxValue)
+            {
+                Array.Clear(visited, 0, visited.Length);
+                stamp = 1;
+            }
+
+            int minX = ToCell(query.MinX, _worldBounds.MinX);
+            int minY = ToCell(query.MinY, _worldBounds.MinY);
+            int minZ = ToCell(query.MinZ, _worldBounds.MinZ);
+            int maxX = ToCell(query.MaxX, _worldBounds.MinX);
+            int maxY = ToCell(query.MaxY, _worldBounds.MinY);
+            int maxZ = ToCell(query.MaxZ, _worldBounds.MinZ);
+
+            int count = 0;
+
+            for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+            for (int z = minZ; z <= maxZ; z++)
+            {
+                if (!_cells.TryGetValue(new CellKey(x, y, z), out var list))
+                    continue;
+
+                for (int k = 0; k < list.Count; k++)
+                {
+                    int idx = list[k];
+                    if (visited[idx] == stamp) continue;
+                    visited[idx] = stamp;
+
+                    if (query.Intersects(TargetBounds[idx]))
+                        count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>
+        /// Visits unique candidate indices overlapping query AABB (AABB check included).
+        /// </summary>
+        public void VisitCandidates(in Aabb query, int[] visited, ref int stamp, Action<int> onCandidate)
+        {
+            if (onCandidate == null) throw new ArgumentNullException(nameof(onCandidate));
+            if (visited == null) throw new ArgumentNullException(nameof(visited));
+            if (visited.Length < TargetBounds.Length) throw new ArgumentException("visited[] must be >= target count");
+
+            stamp++;
+            if (stamp == int.MaxValue)
+            {
+                Array.Clear(visited, 0, visited.Length);
+                stamp = 1;
+            }
+
+            int minX = ToCell(query.MinX, _worldBounds.MinX);
+            int minY = ToCell(query.MinY, _worldBounds.MinY);
+            int minZ = ToCell(query.MinZ, _worldBounds.MinZ);
+            int maxX = ToCell(query.MaxX, _worldBounds.MinX);
+            int maxY = ToCell(query.MaxY, _worldBounds.MinY);
+            int maxZ = ToCell(query.MaxZ, _worldBounds.MinZ);
+
+            for (int x = minX; x <= maxX; x++)
+            for (int y = minY; y <= maxY; y++)
+            for (int z = minZ; z <= maxZ; z++)
+            {
+                if (!_cells.TryGetValue(new CellKey(x, y, z), out var list))
+                    continue;
+
+                for (int k = 0; k < list.Count; k++)
+                {
+                    int idx = list[k];
+                    if (visited[idx] == stamp) continue;
+                    visited[idx] = stamp;
+
+                    if (query.Intersects(TargetBounds[idx]))
+                        onCandidate(idx);
+                }
+            }
+        }
+    }
+}
+
+3.3 PreflightModels.cs (results + estimate)
+using System;
+
+namespace MicroEng.Navisworks.SpaceMapper.Estimation
+{
+    public sealed class SpaceMapperPreflightResult
+    {
+        public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
+
+        public int ZoneCount { get; set; }
+        public int TargetCount { get; set; }
+
+        public long CandidatePairs { get; set; }
+        public int MaxCandidatesPerZone { get; set; }
+        public double AvgCandidatesPerZone { get; set; }
+
+        public double CellSizeUsed { get; set; }
+
+        public TimeSpan BuildIndexTime { get; set; }
+        public TimeSpan QueryTime { get; set; }
+
+        // Used to decide if cache can be reused (hash of scope/sets/options)
+        public string Signature { get; set; }
+    }
+
+    public sealed class SpaceMapperRuntimeEstimate
+    {
+        public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
+
+        public TimeSpan EstimatedTotal { get; set; }
+        public TimeSpan EstimatedCompute { get; set; }
+        public TimeSpan EstimatedWrite { get; set; }
+
+        public double Confidence01 { get; set; } // 0..1
+        public string ConfidenceLabel { get; set; } // "Low/Medium/High"
+
+        public string Notes { get; set; } // e.g. "Based on 3 calibrated runs"
+    }
+}
+
+3.4 CalibrationStore.cs (rolling calibration)
+using System;
+using System.Collections.Generic;
+
+namespace MicroEng.Navisworks.SpaceMapper.Estimation
+{
+    public sealed class SpaceMapperCalibrationEntry
+    {
+        public int Samples { get; set; }
+
+        // seconds per candidate pair (broad+narrow combined baseline)
+        public double SecondsPerCandidatePair { get; set; } = 0.00000008; // default heuristic
+
+        // seconds per property write (rough)
+        public double SecondsPerWrite { get; set; } = 0.00002;
+
+        // baseline fixed overhead seconds per run
+        public double FixedSeconds { get; set; } = 1.0;
+    }
+
+    public sealed class SpaceMapperCalibrationStore
+    {
+        private readonly Dictionary<string, SpaceMapperCalibrationEntry> _entries = new Dictionary<string, SpaceMapperCalibrationEntry>();
+
+        public SpaceMapperCalibrationEntry GetOrCreate(string key)
+        {
+            if (!_entries.TryGetValue(key, out var e))
+            {
+                e = new SpaceMapperCalibrationEntry();
+                _entries[key] = e;
+            }
+            return e;
+        }
+
+        public void Update(string key, double elapsedSeconds, long candidatePairs, long writes)
+        {
+            var e = GetOrCreate(key);
+            e.Samples++;
+
+            // extremely defensive
+            candidatePairs = Math.Max(1, candidatePairs);
+            writes = Math.Max(1, writes);
+
+            // crude breakdown:
+            // total ≈ fixed + pairs*kPairs + writes*kWrites
+            // We update kPairs using the portion not explained by fixed and writes.
+            // If you don’t trust write estimate yet, set writes=0 when calling Update.
+            double fixedS = e.FixedSeconds;
+            double writePart = writes * e.SecondsPerWrite;
+            double remaining = Math.Max(0.0, elapsedSeconds - fixedS - writePart);
+            double kPairsNew = remaining / candidatePairs;
+
+            // rolling blend; heavier weight early
+            double alpha = e.Samples < 5 ? 0.35 : 0.15;
+            e.SecondsPerCandidatePair = (1 - alpha) * e.SecondsPerCandidatePair + alpha * kPairsNew;
+        }
+    }
+}
+
+3.5 RuntimeEstimator.cs (turn preflight stats into a prediction)
+using System;
+
+namespace MicroEng.Navisworks.SpaceMapper.Estimation
+{
+    public static class SpaceMapperRuntimeEstimator
+    {
+        public static SpaceMapperRuntimeEstimate Estimate(
+            SpaceMapperPreflightResult preflight,
+            SpaceMapperCalibrationEntry calibration,
+            int mappingColumnsCount,
+            double expectedAssignmentRate = 0.10)
+        {
+            if (preflight == null) throw new ArgumentNullException(nameof(preflight));
+            if (calibration == null) throw new ArgumentNullException(nameof(calibration));
+
+            // CandidatePairs drives compute time.
+            double computeSeconds = calibration.FixedSeconds + (preflight.CandidatePairs * calibration.SecondsPerCandidatePair);
+
+            // Writes are hard to predict; use an assignment rate heuristic (calibrate later).
+            // approx assignments = candidatePairs * assignmentRate / avgCandidatesPerZone? too uncertain
+            // use: assignments ≈ targets * assignmentRate
+            double estimatedAssignments = Math.Max(1, preflight.TargetCount * expectedAssignmentRate);
+            double writes = estimatedAssignments * Math.Max(1, mappingColumnsCount);
+            double writeSeconds = writes * calibration.SecondsPerWrite;
+
+            double totalSeconds = computeSeconds + writeSeconds;
+
+            // confidence based on calibration samples and preflight availability
+            double conf = Math.Min(1.0, 0.2 + 0.15 * calibration.Samples);
+            var label = conf < 0.45 ? "Low" : (conf < 0.75 ? "Medium" : "High");
+
+            return new SpaceMapperRuntimeEstimate
+            {
+                EstimatedCompute = TimeSpan.FromSeconds(computeSeconds),
+                EstimatedWrite = TimeSpan.FromSeconds(writeSeconds),
+                EstimatedTotal = TimeSpan.FromSeconds(totalSeconds),
+                Confidence01 = conf,
+                ConfidenceLabel = label,
+                Notes = calibration.Samples < 2 ? "Using default heuristics + preflight candidate pairs" : $"Calibrated from {calibration.Samples} run(s)"
+            };
+        }
+    }
+}
+
+3.6 AsyncDebouncer.cs (live updates without thrashing)
+using System;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace MicroEng.Navisworks.SpaceMapper.Util
+{
+    public sealed class AsyncDebouncer
+    {
+        private readonly TimeSpan _delay;
+        private CancellationTokenSource _cts = new CancellationTokenSource();
+
+        public AsyncDebouncer(TimeSpan delay) { _delay = delay; }
+
+        public void Debounce(Func<CancellationToken, Task> action)
+        {
+            _cts.Cancel();
+            _cts.Dispose();
+            _cts = new CancellationTokenSource();
+            var token = _cts.Token;
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(_delay, token).ConfigureAwait(false);
+                    if (!token.IsCancellationRequested)
+                        await action(token).ConfigureAwait(false);
+                }
+                catch (TaskCanceledException) { }
+            }, token);
+        }
+
+        public void Cancel()
+        {
+            _cts.Cancel();
+        }
+    }
+}
+
+4) How to wire preflight into Space Mapper (high-level)
+
+You likely already have code that resolves:
+
+zones list (ModelItems)
+
+targets list (ModelItems)
+
+Preflight uses that same resolution, but only extracts bounding boxes.
+
+Preflight build steps
+
+On UI thread:
+
+Resolve zones + targets
+
+Extract bounding boxes → Aabb[] zones, Aabb[] targets
+
+Compute global world bounds (min/min/min max/max/max)
+
+Choose cellSize (Auto)
+
+Background:
+
+Build SpatialHashGrid(worldBounds, cellSize, targets)
+
+For each zone:
+
+apply offsets → zoneAabbInflated
+
+grid.CountCandidates(zoneAabbInflated, visited, ref stamp)
+
+Collect CandidatePairs, Avg, Max
+
+UI thread:
+
+Update the Estimate card
+
+Cache the SpatialHashGrid (to reuse in Run)
+
+Use the cached index to accelerate Run
+
+Instead of:
+
+for each zone: for each target: test
+
+Do:
+
+for each zone: grid.VisitCandidates(zoneInflatedBounds, ...) { narrow-phase test }
+
+This is the “take it to next level” speed boost.

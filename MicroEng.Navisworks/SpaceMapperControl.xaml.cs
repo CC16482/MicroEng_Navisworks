@@ -1,12 +1,24 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
+using Autodesk.Navisworks.Api;
+using MicroEng.Navisworks.SpaceMapper.Estimation;
+using MicroEng.Navisworks.SpaceMapper.Util;
 using Wpf.Ui.Abstractions;
+using WpfNavigationView = Wpf.Ui.Controls.NavigationView;
+using WpfNavigatingCancelEventArgs = Wpf.Ui.Controls.NavigatingCancelEventArgs;
+using NavisApp = Autodesk.Navisworks.Api.Application;
+using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
+using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
 
 namespace MicroEng.Navisworks
 {
@@ -17,18 +29,28 @@ namespace MicroEng.Navisworks
             AssemblyResolver.EnsureRegistered();
         }
 
-        internal ObservableCollection<SpaceMapperTargetRule> TargetRules { get; } = new();
-        internal ObservableCollection<SpaceMapperMappingDefinition> Mappings { get; } = new();
-        internal ObservableCollection<ZoneSummary> ZoneSummaries { get; } = new();
+        public ObservableCollection<SpaceMapperTargetRule> TargetRules { get; } = new();
+        public ObservableCollection<SpaceMapperMappingDefinition> Mappings { get; } = new();
+        public ObservableCollection<ZoneSummary> ZoneSummaries { get; } = new();
 
         private readonly SpaceMapperTemplateStore _templateStore = new(AppDomain.CurrentDomain.BaseDirectory);
+        private List<SpaceMapperTemplate> _templates = new();
+        private readonly SpaceMapperPreflightService _preflightService = new();
+        private readonly SpaceMapperCalibrationStore _calibrationStore = new();
+        private readonly AsyncDebouncer _preflightDebouncer = new(TimeSpan.FromMilliseconds(500));
+        private CancellationTokenSource _preflightCts;
+        private SpaceMapperPreflightResult _lastPreflight;
+        private SpaceMapperRuntimeEstimate _lastEstimate;
         private readonly SpaceMapperStepSetupPage _setupPage;
         private readonly SpaceMapperStepZonesTargetsPage _zonesPage;
         private readonly SpaceMapperStepProcessingPage _processingPage;
         private readonly SpaceMapperStepMappingPage _mappingPage;
         private readonly SpaceMapperStepResultsPage _resultsPage;
+        private Stopwatch _processingNavStopwatch;
         private bool _handlersWired;
         private bool _initialized;
+        private bool _applyingTemplate;
+        private bool _updatingSetLists;
 
         public SpaceMapperControl()
         {
@@ -48,6 +70,8 @@ namespace MicroEng.Navisworks
                 _mappingPage,
                 _resultsPage));
 
+            _processingPage.Loaded += OnProcessingPageLoaded;
+            SpaceMapperNav.Navigating += OnSpaceMapperNavNavigating;
             Loaded += OnLoaded;
         }
 
@@ -63,68 +87,1293 @@ namespace MicroEng.Navisworks
             SpaceMapperNav.Navigate(typeof(SpaceMapperStepSetupPage));
         }
 
+        private void OnSpaceMapperNavNavigating(WpfNavigationView sender, WpfNavigatingCancelEventArgs args)
+        {
+            RefreshSelectionSetLists();
+            if (!ReferenceEquals(args.Page, _processingPage))
+            {
+                return;
+            }
+
+            _processingNavStopwatch = Stopwatch.StartNew();
+            MicroEngActions.Log("SpaceMapper: navigating to Processing page...");
+        }
+
+        private void OnProcessingPageLoaded(object sender, RoutedEventArgs e)
+        {
+            if (_processingNavStopwatch == null || !_processingNavStopwatch.IsRunning)
+            {
+                return;
+            }
+
+            _processingNavStopwatch.Stop();
+            MicroEngActions.Log($"SpaceMapper: Processing page loaded in {_processingNavStopwatch.ElapsedMilliseconds}ms");
+            _processingNavStopwatch = null;
+        }
+
         private void InitializeUi()
         {
-            _setupPage.ProfileCombo.Items.Clear();
+            _applyingTemplate = true;
+            try
+            {
+                _zonesPage.ZoneSourceCombo.ItemsSource = Enum.GetValues(typeof(ZoneSourceType));
+                _zonesPage.RuleTargetDefinitionCombo.ItemsSource = Enum.GetValues(typeof(SpaceMapperTargetDefinition));
+                _zonesPage.RuleTargetDefinitionCombo.SelectedItem = SpaceMapperTargetDefinition.EntireModel;
+                _zonesPage.RuleMembershipCombo.ItemsSource = Enum.GetValues(typeof(SpaceMembershipMode));
+                _zonesPage.RuleMembershipCombo.SelectedItem = SpaceMembershipMode.ContainedAndPartial;
+                _zonesPage.RuleEnabledCheckBox.IsChecked = true;
+                UpdateRuleDefinitionInputs(clearText: true, focusSetName: false);
+
+                RefreshTemplateList();
+                RefreshScraperProfiles();
+
+                if (!_handlersWired)
+                {
+                    AddHandlers();
+                    _handlersWired = true;
+                }
+
+                LoadSelectedTemplate();
+                RefreshSelectionSetLists();
+            }
+            finally
+            {
+                _applyingTemplate = false;
+            }
+
+            UpdateReadinessText();
+        }
+
+        private void AddHandlers()
+        {
+            RefreshSetsButtonControl.Click += (s, e) => RefreshSelectionSetLists();
+            RunSpaceMapperButtonControl.Click += (s, e) => RunSpaceMapper();
+            _setupPage.NewTemplateButton.Click += (s, e) => NewTemplate();
+            _setupPage.SaveTemplateButton.Click += (s, e) => SaveCurrentTemplate();
+            _setupPage.SaveAsTemplateButton.Click += (s, e) => SaveTemplateAs();
+            _setupPage.DeleteTemplateButton.Click += (s, e) => DeleteTemplate();
+            _setupPage.TemplateCombo.SelectionChanged += (s, e) => OnTemplateSelectionChanged();
+            _setupPage.RefreshScraperButton.Click += (s, e) => RefreshScraperProfiles();
+            _setupPage.OpenScraperButton.Click += (s, e) => OpenScraper();
+            _setupPage.ScraperProfileCombo.SelectionChanged += (s, e) => OnScraperProfileChanged();
+            _setupPage.ValidateButton.Click += (s, e) => ValidateReadiness();
+            _setupPage.GoToZonesButton.Click += (s, e) => SpaceMapperNav.Navigate(typeof(SpaceMapperStepZonesTargetsPage));
+            _zonesPage.AddRuleButton.Click += (s, e) => AddTargetRule();
+            _zonesPage.DeleteRuleButton.Click += (s, e) => DeleteSelectedRule();
+            _mappingPage.AddMappingButton.Click += (s, e) => AddMapping();
+            _mappingPage.DeleteMappingButton.Click += (s, e) => DeleteSelectedMapping();
+            _mappingPage.SaveTemplateButton.Click += (s, e) => SaveTemplate();
+            _mappingPage.LoadTemplateButton.Click += (s, e) => LoadTemplate();
+            _resultsPage.ExportStatsButton.Click += (s, e) => ExportStats();
+
+            _processingPage.RunPreflightButton.Click += async (s, e) => await RunPreflightAsync(isLive: false, CancellationToken.None);
+            _processingPage.LiveEstimateToggle.Checked += (s, e) => TriggerLivePreflight();
+            _processingPage.LiveEstimateToggle.Unchecked += (s, e) => ResetPreflightUi("Idle");
+            _processingPage.AutoPresetToggle.Checked += (s, e) =>
+            {
+                _processingPage.PresetSlider.IsEnabled = false;
+                OnPresetChanged();
+            };
+            _processingPage.AutoPresetToggle.Unchecked += (s, e) =>
+            {
+                _processingPage.PresetSlider.IsEnabled = true;
+                OnPresetChanged();
+            };
+            _processingPage.PresetSlider.ValueChanged += (s, e) =>
+            {
+                if (_processingPage.AutoPresetToggle.IsChecked == true)
+                {
+                    return;
+                }
+                OnPresetChanged();
+            };
+
+            _processingPage.TreatPartialCheck.Checked += (s, e) => TriggerLivePreflight();
+            _processingPage.TreatPartialCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            _processingPage.TagPartialCheck.Checked += (s, e) =>
+            {
+                UpdateZoneBehaviorInputs();
+                TriggerLivePreflight();
+            };
+            _processingPage.TagPartialCheck.Unchecked += (s, e) =>
+            {
+                UpdateZoneBehaviorInputs();
+                TriggerLivePreflight();
+            };
+            _processingPage.EnableMultiZoneCheck.Checked += (s, e) => TriggerLivePreflight();
+            _processingPage.EnableMultiZoneCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            _processingPage.Offset3DBox.TextChanged += (s, e) => TriggerLivePreflight();
+            _processingPage.OffsetTopBox.TextChanged += (s, e) => TriggerLivePreflight();
+            _processingPage.OffsetBottomBox.TextChanged += (s, e) => TriggerLivePreflight();
+            _processingPage.OffsetSidesBox.TextChanged += (s, e) => TriggerLivePreflight();
+            _processingPage.UnitsBox.TextChanged += (s, e) => TriggerLivePreflight();
+            _processingPage.OffsetModeBox.TextChanged += (s, e) => TriggerLivePreflight();
+            _processingPage.IndexGranularitySlider.ValueChanged += (s, e) => TriggerLivePreflight();
+
+            _zonesPage.ZoneSourceCombo.SelectionChanged += (s, e) =>
+            {
+                UpdateReadinessText();
+                TriggerLivePreflight();
+            };
+            _zonesPage.ZoneSetBox.TextChanged += (s, e) =>
+            {
+                UpdateReadinessText();
+                TriggerLivePreflight();
+            };
+            _zonesPage.ZoneSetCombo.DropDownOpened += (s, e) => RefreshSelectionSetLists();
+            _zonesPage.ZoneSetCombo.SelectionChanged += (s, e) =>
+            {
+                if (_updatingSetLists) return;
+                if (_zonesPage.ZoneSetCombo.SelectedItem is not SetListItem item) return;
+                if (string.IsNullOrWhiteSpace(item.Name)) return;
+                _zonesPage.ZoneSetBox.Text = item.Name;
+                _zonesPage.ZoneSourceCombo.SelectedItem = item.IsSearch
+                    ? ZoneSourceType.ZoneSearchSet
+                    : ZoneSourceType.ZoneSelectionSet;
+            };
+            _zonesPage.RuleTargetDefinitionCombo.SelectionChanged += (s, e) =>
+            {
+                UpdateRuleDefinitionInputs(clearText: true, focusSetName: true);
+            };
+            _zonesPage.RuleSetCombo.DropDownOpened += (s, e) => RefreshSelectionSetLists();
+            _zonesPage.RuleSetCombo.SelectionChanged += (s, e) =>
+            {
+                if (_updatingSetLists) return;
+                if (_zonesPage.RuleSetCombo.SelectedItem is not SetListItem item) return;
+                if (string.IsNullOrWhiteSpace(item.Name)) return;
+                _zonesPage.RuleSetNameBox.Text = item.Name;
+                _zonesPage.RuleTargetDefinitionCombo.SelectedItem = item.IsSearch
+                    ? SpaceMapperTargetDefinition.SearchSet
+                    : SpaceMapperTargetDefinition.SelectionSet;
+                UpdateRuleDefinitionInputs(clearText: false, focusSetName: false);
+            };
+            _zonesPage.TargetRulesGrid.CellEditEnding += (s, e) =>
+            {
+                if (e.Row?.Item is SpaceMapperTargetRule rule)
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        NormalizeTargetRule(rule);
+                        _zonesPage.TargetRulesGrid.Items.Refresh();
+                    }), DispatcherPriority.Background);
+                }
+                UpdateReadinessText();
+                TriggerLivePreflight();
+            };
+            _mappingPage.MappingGrid.CellEditEnding += (s, e) =>
+            {
+                UpdateReadinessText();
+                TriggerLivePreflight();
+            };
+            TargetRules.CollectionChanged += (s, e) =>
+            {
+                UpdateReadinessText();
+                TriggerLivePreflight();
+            };
+            Mappings.CollectionChanged += (s, e) =>
+            {
+                UpdateReadinessText();
+                TriggerLivePreflight();
+            };
+        }
+
+        private void OnTemplateSelectionChanged()
+        {
+            if (_applyingTemplate)
+            {
+                return;
+            }
+
+            LoadSelectedTemplate();
+        }
+
+        private void RefreshTemplateList(string selectName = null)
+        {
+            _templates = _templateStore.Load() ?? new List<SpaceMapperTemplate>();
+            if (_templates.Count == 0)
+            {
+                var fallback = SpaceMapperTemplateStore.CreateDefault();
+                _templates.Add(fallback);
+                _templateStore.Save(_templates);
+            }
+
+            _setupPage.TemplateCombo.Items.Clear();
+            foreach (var template in _templates.OrderBy(t => t.Name ?? string.Empty))
+            {
+                _setupPage.TemplateCombo.Items.Add(template.Name);
+            }
+
+            var nameToSelect = selectName;
+            if (string.IsNullOrWhiteSpace(nameToSelect))
+            {
+                nameToSelect = _templates.FirstOrDefault()?.Name;
+            }
+
+            if (!string.IsNullOrWhiteSpace(nameToSelect))
+            {
+                _setupPage.TemplateCombo.SelectedItem = nameToSelect;
+            }
+        }
+
+        private SpaceMapperTemplate GetSelectedTemplate()
+        {
+            var name = _setupPage.TemplateCombo.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            return _templates.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void LoadSelectedTemplate()
+        {
+            var template = GetSelectedTemplate();
+            if (template == null)
+            {
+                return;
+            }
+
+            ApplyTemplate(template);
+        }
+
+        private void ApplyTemplate(SpaceMapperTemplate template)
+        {
+            if (template == null)
+            {
+                return;
+            }
+
+            _applyingTemplate = true;
+            try
+            {
+                TargetRules.Clear();
+                if (template.TargetRules != null)
+                {
+                    foreach (var rule in template.TargetRules)
+                    {
+                        TargetRules.Add(rule);
+                    }
+                }
+
+                if (TargetRules.Count == 0)
+                {
+                    TargetRules.Add(new SpaceMapperTargetRule
+                    {
+                        Name = "All Targets",
+                        TargetDefinition = SpaceMapperTargetDefinition.EntireModel,
+                        MembershipMode = SpaceMembershipMode.ContainedAndPartial,
+                        Enabled = true
+                    });
+                }
+                else
+                {
+                    foreach (var rule in TargetRules)
+                    {
+                        NormalizeTargetRule(rule);
+                    }
+                }
+
+                Mappings.Clear();
+                if (template.Mappings != null)
+                {
+                    foreach (var map in template.Mappings)
+                    {
+                        Mappings.Add(map);
+                    }
+                }
+
+                if (Mappings.Count == 0)
+                {
+                    Mappings.Add(new SpaceMapperMappingDefinition
+                    {
+                        Name = "Zone Name",
+                        ZoneCategory = "Zone",
+                        ZonePropertyName = "Name",
+                        TargetPropertyName = "Zone Name"
+                    });
+                }
+
+                _zonesPage.ZoneSourceCombo.SelectedItem = template.ZoneSource;
+                _zonesPage.ZoneSetBox.Text = template.ZoneSetName ?? string.Empty;
+
+                ApplySettings(template.ProcessingSettings ?? new SpaceMapperProcessingSettings());
+                SelectScraperProfile(template.PreferredScraperProfileName ?? "Default");
+            }
+            finally
+            {
+                _applyingTemplate = false;
+            }
+
+            UpdatePresetUi(_lastPreflight);
+            UpdateReadinessText();
+            if (_processingPage.LiveEstimateToggle.IsChecked == true)
+            {
+                TriggerLivePreflight();
+            }
+        }
+
+        private SpaceMapperTemplate BuildTemplateFromUi(string name)
+        {
+            return new SpaceMapperTemplate
+            {
+                Name = name,
+                TargetRules = TargetRules.ToList(),
+                Mappings = Mappings.ToList(),
+                ProcessingSettings = BuildSettings(),
+                PreferredScraperProfileName = GetSelectedScraperProfileName() ?? "Default",
+                ZoneSource = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zs ? zs : ZoneSourceType.DataScraperZones,
+                ZoneSetName = _zonesPage.ZoneSetBox.Text
+            };
+        }
+
+        private void NewTemplate()
+        {
+            var name = PromptText("New Space Mapper profile name:", "Space Mapper");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            var templates = _templateStore.Load();
+            if (templates.Any(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                MessageBox.Show($"A profile named '{name}' already exists.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var template = SpaceMapperTemplateStore.CreateDefault();
+            template.Name = name;
+            templates.Add(template);
+            _templateStore.Save(templates);
+            RefreshTemplateList(name);
+            ApplyTemplate(template);
+        }
+
+        private void SaveCurrentTemplate()
+        {
+            var name = _setupPage.TemplateCombo.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                MessageBox.Show("Select a Space Mapper profile to save.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var templates = _templateStore.Load();
+            var existing = templates.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+            var updated = BuildTemplateFromUi(name);
+
+            if (existing == null)
+            {
+                templates.Add(updated);
+            }
+            else
+            {
+                var index = templates.IndexOf(existing);
+                templates[index] = updated;
+            }
+
+            _templateStore.Save(templates);
+            RefreshTemplateList(name);
+        }
+
+        private void SaveTemplateAs()
+        {
+            var name = PromptText("Save Space Mapper profile as:", "Space Mapper");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            var templates = _templateStore.Load();
+            var existing = templates.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                var overwrite = MessageBox.Show($"Overwrite existing profile '{name}'?", "MicroEng", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (overwrite != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+            }
+
+            var updated = BuildTemplateFromUi(name);
+            if (existing == null)
+            {
+                templates.Add(updated);
+            }
+            else
+            {
+                var index = templates.IndexOf(existing);
+                templates[index] = updated;
+            }
+
+            _templateStore.Save(templates);
+            RefreshTemplateList(name);
+        }
+
+        private void DeleteTemplate()
+        {
+            var name = _setupPage.TemplateCombo.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            var templates = _templateStore.Load();
+            if (templates.Count <= 1)
+            {
+                MessageBox.Show("At least one Space Mapper profile is required.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var confirm = MessageBox.Show($"Delete profile '{name}'?", "MicroEng", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            templates = templates
+                .Where(t => !string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (templates.Count == 0)
+            {
+                templates.Add(SpaceMapperTemplateStore.CreateDefault());
+            }
+
+            _templateStore.Save(templates);
+            var nextName = templates.FirstOrDefault()?.Name;
+            RefreshTemplateList(nextName);
+        }
+
+        private void RefreshScraperProfiles(string selectName = null)
+        {
             var profiles = DataScraperCache.AllSessions
                 .Select(s => string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(p => p)
                 .ToList();
-            foreach (var p in profiles) _setupPage.ProfileCombo.Items.Add(p);
-            if (_setupPage.ProfileCombo.Items.Count == 0) _setupPage.ProfileCombo.Items.Add("Default");
-            _setupPage.ProfileCombo.SelectedIndex = 0;
 
-            _setupPage.ScopeCombo.ItemsSource = Enum.GetValues(typeof(SpaceMapperScope));
-            _setupPage.ScopeCombo.SelectedItem = SpaceMapperScope.EntireModel;
-
-            _zonesPage.ZoneSourceCombo.ItemsSource = Enum.GetValues(typeof(ZoneSourceType));
-            _zonesPage.ZoneSourceCombo.SelectedItem = ZoneSourceType.DataScraperZones;
-
-            _zonesPage.TargetSourceCombo.ItemsSource = Enum.GetValues(typeof(TargetSourceType));
-            _zonesPage.TargetSourceCombo.SelectedItem = TargetSourceType.EntireModel;
-
-            _processingPage.ProcessingModeCombo.ItemsSource = new[] { SpaceMapperProcessingMode.CpuNormal };
-            _processingPage.ProcessingModeCombo.SelectedItem = SpaceMapperProcessingMode.CpuNormal;
-            _processingPage.ProcessingModeCombo.IsEnabled = false;
-
-            if (TargetRules.Count == 0)
-                TargetRules.Add(new SpaceMapperTargetRule { Name = "Level 0", TargetType = SpaceMapperTargetType.SelectionTreeLevel, MinTreeLevel = 0, MaxTreeLevel = 0 });
-            if (Mappings.Count == 0)
-                Mappings.Add(new SpaceMapperMappingDefinition { Name = "Zone Name", ZoneCategory = "Zone", ZonePropertyName = "Name", TargetPropertyName = "Zone Name" });
-
-            if (!_handlersWired)
+            _setupPage.ScraperProfileCombo.Items.Clear();
+            foreach (var profile in profiles)
             {
-                AddHandlers();
-                _handlersWired = true;
+                _setupPage.ScraperProfileCombo.Items.Add(profile);
+            }
+
+            if (_setupPage.ScraperProfileCombo.Items.Count == 0)
+            {
+                _setupPage.ScraperProfileCombo.Items.Add("Default");
+            }
+
+            var nameToSelect = selectName;
+            if (string.IsNullOrWhiteSpace(nameToSelect))
+            {
+                nameToSelect = _setupPage.ScraperProfileCombo.SelectedItem?.ToString();
+            }
+
+            if (string.IsNullOrWhiteSpace(nameToSelect))
+            {
+                _setupPage.ScraperProfileCombo.SelectedIndex = 0;
+            }
+            else if (_setupPage.ScraperProfileCombo.Items.Contains(nameToSelect))
+            {
+                _setupPage.ScraperProfileCombo.SelectedItem = nameToSelect;
+            }
+            else
+            {
+                _setupPage.ScraperProfileCombo.SelectedIndex = 0;
+            }
+
+            var session = GetLatestScrapeSession(GetSelectedScraperProfileName());
+            DataScraperCache.LastSession = session;
+            UpdateScraperSummary(session);
+
+            if (!_applyingTemplate)
+            {
+                UpdateReadinessText();
             }
         }
 
-        private void AddHandlers()
+        private void SelectScraperProfile(string profileName)
         {
-            _setupPage.RefreshProfilesButton.Click += (s, e) => InitializeUi();
-            _setupPage.RunScraperButton.Click += (s, e) => OpenScraper();
-            _setupPage.RunButton.Click += (s, e) => RunSpaceMapper();
-            _zonesPage.AddRuleButton.Click += (s, e) => TargetRules.Add(new SpaceMapperTargetRule { Name = $"Rule {TargetRules.Count + 1}" });
-            _zonesPage.DeleteRuleButton.Click += (s, e) =>
+            if (string.IsNullOrWhiteSpace(profileName))
             {
-                if (_zonesPage.TargetRulesGrid.SelectedItem is SpaceMapperTargetRule rule)
-                    TargetRules.Remove(rule);
-            };
-            _mappingPage.AddMappingButton.Click += (s, e) => Mappings.Add(new SpaceMapperMappingDefinition { Name = $"Mapping {Mappings.Count + 1}", TargetPropertyName = "Zone Name" });
-            _mappingPage.DeleteMappingButton.Click += (s, e) =>
+                return;
+            }
+
+            if (_setupPage.ScraperProfileCombo.Items.Contains(profileName))
             {
-                if (_mappingPage.MappingGrid.SelectedItem is SpaceMapperMappingDefinition map)
-                    Mappings.Remove(map);
+                _setupPage.ScraperProfileCombo.SelectedItem = profileName;
+            }
+            else
+            {
+                RefreshScraperProfiles(profileName);
+            }
+        }
+
+        private void OnScraperProfileChanged()
+        {
+            var profile = GetSelectedScraperProfileName();
+            var session = GetLatestScrapeSession(profile);
+            DataScraperCache.LastSession = session;
+
+            UpdateScraperSummary(session);
+
+            if (_applyingTemplate)
+            {
+                return;
+            }
+
+            UpdateReadinessText();
+            TriggerLivePreflight();
+        }
+
+        private string GetSelectedScraperProfileName()
+        {
+            var name = _setupPage.ScraperProfileCombo.SelectedItem?.ToString();
+            return string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        }
+
+        private ScrapeSession GetLatestScrapeSession(string profileName)
+        {
+            if (string.IsNullOrWhiteSpace(profileName))
+            {
+                return null;
+            }
+
+            return DataScraperCache.AllSessions
+                .Where(s => string.Equals(s.ProfileName ?? "Default", profileName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(s => s.Timestamp)
+                .FirstOrDefault();
+        }
+
+        private void UpdateScraperSummary(ScrapeSession session)
+        {
+            if (session == null)
+            {
+                _setupPage.ScraperSummaryText.Text = DataScraperCache.AllSessions.Count == 0
+                    ? "No Data Scraper sessions found."
+                    : "No Data Scraper session selected.";
+                return;
+            }
+
+            var scope = string.Join(" ", new[] { session.ScopeType, session.ScopeDescription }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (string.IsNullOrWhiteSpace(scope))
+            {
+                scope = "Unknown scope";
+            }
+
+            var propertyCount = session.Properties?.Count ?? 0;
+            _setupPage.ScraperSummaryText.Text = $"Last scrape: {scope} | {session.ItemsScanned:N0} items | {propertyCount:N0} properties | {session.Timestamp:g}";
+        }
+
+        private void UpdateReadinessText()
+        {
+            if (_setupPage?.ReadinessText == null)
+            {
+                return;
+            }
+
+            var zonesReady = AreZonesConfigured();
+            var targetsReady = AreTargetsConfigured();
+            var mappingsReady = AreMappingsConfigured();
+
+            var lines = new List<string>
+            {
+                $"Zones configured: {(zonesReady ? "Yes" : "No")}",
+                $"Targets configured: {(targetsReady ? "Yes" : "No")}",
+                $"Mappings configured: {(mappingsReady ? "Yes" : "No")}"
             };
-            _mappingPage.SaveTemplateButton.Click += (s, e) => SaveTemplate();
-            _mappingPage.LoadTemplateButton.Click += (s, e) => LoadTemplate();
-            _resultsPage.ExportStatsButton.Click += (s, e) => ExportStats();
+
+            _setupPage.ReadinessText.Text = string.Join(Environment.NewLine, lines);
+        }
+
+        private void ValidateReadiness()
+        {
+            UpdateReadinessText();
+            var missing = new List<string>();
+            if (!AreZonesConfigured()) missing.Add("Zones");
+            if (!AreTargetsConfigured()) missing.Add("Targets");
+            if (!AreMappingsConfigured()) missing.Add("Mappings");
+
+            if (missing.Count == 0)
+            {
+                MessageBox.Show("All required sections are configured.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var message = $"Missing configuration: {string.Join(", ", missing)}.";
+            MessageBox.Show(message, "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private bool AreZonesConfigured()
+        {
+            if (_zonesPage.ZoneSourceCombo.SelectedItem == null)
+            {
+                return false;
+            }
+
+            var zoneSource = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zs
+                ? zs
+                : ZoneSourceType.DataScraperZones;
+
+            if (zoneSource == ZoneSourceType.DataScraperZones)
+            {
+                var profile = GetSelectedScraperProfileName();
+                return !string.IsNullOrWhiteSpace(profile) && SpaceMapperService.GetSession(profile) != null;
+            }
+
+            if ((zoneSource == ZoneSourceType.ZoneSelectionSet || zoneSource == ZoneSourceType.ZoneSearchSet)
+                && string.IsNullOrWhiteSpace(_zonesPage.ZoneSetBox.Text))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private bool AreTargetsConfigured()
+        {
+            if (TargetRules.Count == 0)
+            {
+                return false;
+            }
+
+            var enabledRules = TargetRules.Where(r => r.Enabled).ToList();
+            if (enabledRules.Count == 0)
+            {
+                return false;
+            }
+
+            return enabledRules.All(IsRuleConfigured);
+        }
+
+        private bool AreMappingsConfigured()
+        {
+            return Mappings.Count > 0;
+        }
+
+        private void AddTargetRule()
+        {
+            if (!EnsureZoneSourceReady())
+            {
+                return;
+            }
+
+            var targetDefinition = _zonesPage.RuleTargetDefinitionCombo.SelectedItem is SpaceMapperTargetDefinition rt
+                ? rt
+                : SpaceMapperTargetDefinition.EntireModel;
+
+            var ruleSetName = _zonesPage.RuleSetNameBox.Text?.Trim();
+            if (UsesSetSearchName(targetDefinition) && string.IsNullOrWhiteSpace(ruleSetName))
+            {
+                MessageBox.Show("Enter a Set/Search Name for the rule when using Selection/Search Set.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
+                _zonesPage.RuleSetNameBox.Focus();
+                return;
+            }
+            if (!UsesSetSearchName(targetDefinition))
+            {
+                ruleSetName = null;
+            }
+
+            var name = _zonesPage.RuleNameBox.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = $"Rule {TargetRules.Count + 1}";
+            }
+
+            int? minLevel = null;
+            int? maxLevel = null;
+            if (UsesLevels(targetDefinition))
+            {
+                if (!TryParseOptionalNonNegativeInt(_zonesPage.RuleMinLevelBox.Text, out minLevel))
+                {
+                    ShowValidationMessage("Min Level must be a whole number (0 or greater).",
+                        typeof(SpaceMapperStepZonesTargetsPage),
+                        () => _zonesPage.RuleMinLevelBox.Focus());
+                    return;
+                }
+
+                if (!TryParseOptionalNonNegativeInt(_zonesPage.RuleMaxLevelBox.Text, out maxLevel))
+                {
+                    ShowValidationMessage("Max Level must be a whole number (0 or greater).",
+                        typeof(SpaceMapperStepZonesTargetsPage),
+                        () => _zonesPage.RuleMaxLevelBox.Focus());
+                    return;
+                }
+
+                if (minLevel == null && maxLevel == null)
+                {
+                    minLevel = 0;
+                    maxLevel = 0;
+                }
+                else if (minLevel == null)
+                {
+                    minLevel = maxLevel;
+                }
+                else if (maxLevel == null)
+                {
+                    maxLevel = minLevel;
+                }
+
+                if (minLevel < 0 || maxLevel < 0)
+                {
+                    ShowValidationMessage("Min/Max Level must be 0 or greater.",
+                        typeof(SpaceMapperStepZonesTargetsPage),
+                        () => _zonesPage.RuleMinLevelBox.Focus());
+                    return;
+                }
+
+                if (minLevel > maxLevel)
+                {
+                    ShowValidationMessage("Min Level cannot be greater than Max Level.",
+                        typeof(SpaceMapperStepZonesTargetsPage),
+                        () => _zonesPage.RuleMinLevelBox.Focus());
+                    return;
+                }
+            }
+            var membership = _zonesPage.RuleMembershipCombo.SelectedItem is SpaceMembershipMode mm
+                ? mm
+                : SpaceMembershipMode.ContainedAndPartial;
+
+            var rule = new SpaceMapperTargetRule
+            {
+                Name = name,
+                TargetDefinition = targetDefinition,
+                MinLevel = minLevel,
+                MaxLevel = maxLevel,
+                SetSearchName = ruleSetName,
+                CategoryFilter = _zonesPage.RuleCategoryFilterBox.Text?.Trim(),
+                MembershipMode = membership,
+                Enabled = _zonesPage.RuleEnabledCheckBox.IsChecked == true
+            };
+            NormalizeTargetRule(rule);
+            TargetRules.Add(rule);
+            _zonesPage.TargetRulesGrid.SelectedItem = rule;
+            _zonesPage.TargetRulesGrid.ScrollIntoView(rule);
+            _zonesPage.TargetRulesGrid.Items.Refresh();
+        }
+
+        private void DeleteSelectedRule()
+        {
+            if (TargetRules.Count == 0)
+            {
+                MessageBox.Show("There are no rules to delete.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (_zonesPage.TargetRulesGrid.SelectedItem is SpaceMapperTargetRule rule)
+            {
+                TargetRules.Remove(rule);
+                _zonesPage.TargetRulesGrid.Items.Refresh();
+                return;
+            }
+
+            MessageBox.Show("Select a rule to delete.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private bool EnsureZoneSourceReady(bool showMessage = true)
+        {
+            var zoneSource = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zs
+                ? zs
+                : ZoneSourceType.DataScraperZones;
+
+            if ((zoneSource == ZoneSourceType.ZoneSelectionSet || zoneSource == ZoneSourceType.ZoneSearchSet)
+                && string.IsNullOrWhiteSpace(_zonesPage.ZoneSetBox.Text))
+            {
+                if (showMessage)
+                {
+                    MessageBox.Show("Enter a Set/Search Name for Zones when using Selection/Search Set.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    _zonesPage.ZoneSetBox.Focus();
+                }
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool UsesSetSearchName(SpaceMapperTargetDefinition definition)
+        {
+            return definition == SpaceMapperTargetDefinition.SelectionSet
+                || definition == SpaceMapperTargetDefinition.SearchSet;
+        }
+
+        private static bool UsesLevels(SpaceMapperTargetDefinition definition)
+        {
+            return definition == SpaceMapperTargetDefinition.SelectionTreeLevel;
+        }
+
+        private void UpdateZoneBehaviorInputs()
+        {
+            if (_processingPage == null)
+            {
+                return;
+            }
+
+            var enabled = _processingPage.TagPartialCheck.IsChecked == true;
+            _processingPage.ZoneBehaviorCategoryBox.IsEnabled = enabled;
+            _processingPage.ZoneBehaviorPropertyBox.IsEnabled = enabled;
+            _processingPage.ZoneBehaviorContainedBox.IsEnabled = enabled;
+            _processingPage.ZoneBehaviorPartialBox.IsEnabled = enabled;
+        }
+
+        private void RefreshSelectionSetLists()
+        {
+            if (_zonesPage == null)
+            {
+                return;
+            }
+
+            var lists = GetSelectionSetLists();
+
+            _updatingSetLists = true;
+            try
+            {
+                UpdateComboItems(_zonesPage.ZoneSetCombo, lists.Sets);
+                UpdateComboItems(_zonesPage.RuleSetCombo, lists.Sets);
+            }
+            finally
+            {
+                _updatingSetLists = false;
+            }
+        }
+
+        private static void UpdateComboItems(ComboBox combo, List<SetListItem> items)
+        {
+            if (combo == null)
+            {
+                return;
+            }
+
+            var selected = combo.SelectedItem as SetListItem;
+            combo.ItemsSource = items;
+
+            if (selected == null)
+            {
+                combo.SelectedItem = null;
+                return;
+            }
+
+            var match = items.FirstOrDefault(i =>
+                string.Equals(i.Name, selected.Name, StringComparison.OrdinalIgnoreCase)
+                && i.IsSearch == selected.IsSearch);
+            combo.SelectedItem = match;
+        }
+
+        private sealed class SetListItem
+        {
+            public SetListItem(string name, bool isSearch)
+            {
+                Name = name;
+                IsSearch = isSearch;
+                DisplayName = $"{name} ({(isSearch ? "Search" : "Selection")})";
+            }
+
+            public string Name { get; }
+            public bool IsSearch { get; }
+            public string DisplayName { get; }
+        }
+
+        private sealed class SelectionSetLists
+        {
+            public List<SetListItem> Sets { get; } = new();
+        }
+
+        private static SelectionSetLists GetSelectionSetLists()
+        {
+            var lists = new SelectionSetLists();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                var doc = NavisApp.ActiveDocument;
+                var root = doc?.SelectionSets?.RootItem;
+                if (root != null)
+                {
+                    CollectSelectionSets(root, lists.Sets, seen);
+                }
+            }
+            catch
+            {
+                // ignore managed API enumeration failures
+            }
+
+            if (lists.Sets.Count == 0)
+            {
+                try
+                {
+                    var state = ComBridge.State;
+                    var root = state.SelectionSetsEx();
+                    CollectSelectionSets(root, lists.Sets, seen, null);
+                }
+                catch
+                {
+                    // ignore COM enumeration failures
+                }
+            }
+
+            lists.Sets.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
+            return lists;
+        }
+
+        private static void CollectSelectionSets(FolderItem folder, List<SetListItem> items, HashSet<string> seen)
+        {
+            if (folder?.Children == null)
+            {
+                return;
+            }
+
+            foreach (SavedItem child in folder.Children)
+            {
+                if (child is SelectionSet set)
+                {
+                    var name = set.DisplayName;
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        continue;
+                    }
+
+                    AddSetItem(items, seen, name, set.HasSearch);
+                }
+                else if (child is FolderItem subFolder)
+                {
+                    CollectSelectionSets(subFolder, items, seen);
+                }
+            }
+        }
+
+        private static void CollectSelectionSets(ComApi.InwSelectionSetExColl collection,
+            List<SetListItem> items,
+            HashSet<string> seen,
+            string folderHint)
+        {
+            if (collection == null) return;
+
+            for (int i = 1; i <= collection.Count; i++)
+            {
+                object item;
+                try
+                {
+                    item = collection[i];
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (item is ComApi.InwOpSelectionSet set)
+                {
+                    var name = TryGetName(set);
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+
+                    var isSearch = TryGetSearchFlag(set)
+                        ?? string.Equals(folderHint, "search", StringComparison.OrdinalIgnoreCase);
+                    AddSetItem(items, seen, name, isSearch);
+                }
+                else if (item is ComApi.InwSelectionSetFolder folder)
+                {
+                    var folderName = TryGetName(folder);
+                    var nextHint = folderHint;
+                    if (!string.IsNullOrWhiteSpace(folderName))
+                    {
+                        var lowered = folderName.ToLowerInvariant();
+                        if (lowered.Contains("search"))
+                        {
+                            nextHint = "search";
+                        }
+                        else if (lowered.Contains("selection"))
+                        {
+                            nextHint = "selection";
+                        }
+                    }
+
+                    try
+                    {
+                        CollectSelectionSets(folder.SelectionSets(), items, seen, nextHint);
+                    }
+                    catch
+                    {
+                        // ignore folder enumeration failures
+                    }
+                }
+            }
+        }
+
+        private static void AddSetItem(List<SetListItem> items, HashSet<string> seen, string name, bool isSearch)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return;
+            }
+
+            var key = $"{name}|{(isSearch ? "S" : "N")}";
+            if (!seen.Add(key))
+            {
+                return;
+            }
+
+            items.Add(new SetListItem(name, isSearch));
+        }
+
+        private static string TryGetName(object obj)
+        {
+            if (obj == null) return null;
+
+            try
+            {
+                var prop = obj.GetType().GetProperty("name");
+                if (prop != null && prop.PropertyType == typeof(string))
+                {
+                    return prop.GetValue(obj) as string;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                var prop = obj.GetType().GetProperty("Name");
+                if (prop != null && prop.PropertyType == typeof(string))
+                {
+                    return prop.GetValue(obj) as string;
+                }
+            }
+            catch
+            {
+            }
+
+            return null;
+        }
+
+        private static bool? TryGetSearchFlag(object obj)
+        {
+            return TryGetBoolProperty(obj, "IsSearch", "IsSearchSet", "IsSearchSelection");
+        }
+
+        private static bool? TryGetBoolProperty(object obj, params string[] names)
+        {
+            if (obj == null || names == null) return null;
+
+            foreach (var name in names)
+            {
+                try
+                {
+                    var prop = obj.GetType().GetProperty(name);
+                    if (prop != null && prop.PropertyType == typeof(bool))
+                    {
+                        return (bool)prop.GetValue(obj);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return null;
+        }
+
+        private void UpdateRuleDefinitionInputs(bool clearText, bool focusSetName = false)
+        {
+            if (_zonesPage?.RuleTargetDefinitionCombo == null)
+            {
+                return;
+            }
+
+            var definition = _zonesPage.RuleTargetDefinitionCombo.SelectedItem is SpaceMapperTargetDefinition def
+                ? def
+                : SpaceMapperTargetDefinition.EntireModel;
+
+            var usesSet = UsesSetSearchName(definition);
+            var usesLevels = UsesLevels(definition);
+
+            _zonesPage.RuleSetNameBox.IsEnabled = usesSet;
+            _zonesPage.RuleSetCombo.IsEnabled = usesSet;
+            _zonesPage.RuleMinLevelBox.IsEnabled = usesLevels;
+            _zonesPage.RuleMaxLevelBox.IsEnabled = usesLevels;
+
+            if (_zonesPage.RuleSetNameHintText != null)
+            {
+                _zonesPage.RuleSetNameHintText.Visibility = usesSet ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if (_zonesPage.RuleMinMaxHintText != null)
+            {
+                _zonesPage.RuleMinMaxHintText.Visibility = usesLevels ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if (clearText)
+            {
+                if (!usesSet)
+                {
+                    _zonesPage.RuleSetNameBox.Text = string.Empty;
+                    _zonesPage.RuleSetCombo.SelectedItem = null;
+                }
+
+                if (!usesLevels)
+                {
+                    _zonesPage.RuleMinLevelBox.Text = string.Empty;
+                    _zonesPage.RuleMaxLevelBox.Text = string.Empty;
+                }
+                else
+                {
+                    if (string.IsNullOrWhiteSpace(_zonesPage.RuleMinLevelBox.Text))
+                    {
+                        _zonesPage.RuleMinLevelBox.Text = "0";
+                    }
+
+                    if (string.IsNullOrWhiteSpace(_zonesPage.RuleMaxLevelBox.Text))
+                    {
+                        _zonesPage.RuleMaxLevelBox.Text = "0";
+                    }
+                }
+            }
+
+            if (focusSetName && usesSet)
+            {
+                _zonesPage.RuleSetNameBox.Focus();
+            }
+        }
+
+        private static void NormalizeTargetRule(SpaceMapperTargetRule rule)
+        {
+            if (rule == null)
+            {
+                return;
+            }
+
+            if (UsesSetSearchName(rule.TargetDefinition))
+            {
+                rule.MinLevel = null;
+                rule.MaxLevel = null;
+                return;
+            }
+
+            if (UsesLevels(rule.TargetDefinition))
+            {
+                if (rule.MinLevel == null && rule.MaxLevel == null)
+                {
+                    rule.MinLevel = 0;
+                    rule.MaxLevel = 0;
+                }
+                else if (rule.MinLevel == null)
+                {
+                    rule.MinLevel = rule.MaxLevel;
+                }
+                else if (rule.MaxLevel == null)
+                {
+                    rule.MaxLevel = rule.MinLevel;
+                }
+                return;
+            }
+
+            rule.SetSearchName = null;
+            rule.MinLevel = null;
+            rule.MaxLevel = null;
+        }
+
+        private static bool IsRuleConfigured(SpaceMapperTargetRule rule)
+        {
+            if (rule == null)
+            {
+                return false;
+            }
+
+            if (UsesSetSearchName(rule.TargetDefinition))
+            {
+                return !string.IsNullOrWhiteSpace(rule.SetSearchName);
+            }
+
+            if (UsesLevels(rule.TargetDefinition))
+            {
+                if (rule.MinLevel == null || rule.MaxLevel == null)
+                {
+                    return false;
+                }
+
+                if (rule.MinLevel < 0 || rule.MaxLevel < 0)
+                {
+                    return false;
+                }
+
+                return rule.MinLevel <= rule.MaxLevel;
+            }
+
+            return true;
+        }
+
+        private void AddMapping()
+        {
+            if (!ValidateMappingBuilder())
+            {
+                return;
+            }
+
+            var name = _mappingPage.MappingNameBox.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = $"Mapping {Mappings.Count + 1}";
+            }
+
+            var zoneCategory = string.IsNullOrWhiteSpace(_mappingPage.ZoneCategoryBox.Text)
+                ? null
+                : _mappingPage.ZoneCategoryBox.Text.Trim();
+            var zoneProperty = string.IsNullOrWhiteSpace(_mappingPage.ZonePropertyBox.Text)
+                ? null
+                : _mappingPage.ZonePropertyBox.Text.Trim();
+            var targetCategory = string.IsNullOrWhiteSpace(_mappingPage.TargetCategoryBox.Text)
+                ? null
+                : _mappingPage.TargetCategoryBox.Text.Trim();
+            var targetProperty = string.IsNullOrWhiteSpace(_mappingPage.TargetPropertyBox.Text)
+                ? null
+                : _mappingPage.TargetPropertyBox.Text.Trim();
+            var writeMode = _mappingPage.WriteModeCombo.SelectedItem is WriteMode wm
+                ? wm
+                : WriteMode.Overwrite;
+            var multiZone = _mappingPage.MultiZoneCombo.SelectedItem is MultiZoneCombineMode mz
+                ? mz
+                : MultiZoneCombineMode.First;
+            var appendSeparator = _mappingPage.AppendSeparatorBox.Text ?? string.Empty;
+            var editable = _mappingPage.EditableCheckBox.IsChecked == true;
+
+            var mapping = new SpaceMapperMappingDefinition
+            {
+                Name = name,
+                ZoneCategory = zoneCategory,
+                ZonePropertyName = zoneProperty,
+                TargetCategory = targetCategory,
+                TargetPropertyName = targetProperty,
+                WriteMode = writeMode,
+                MultiZoneCombineMode = multiZone,
+                AppendSeparator = appendSeparator,
+                IsEditable = editable
+            };
+            Mappings.Add(mapping);
+            _mappingPage.MappingGrid.SelectedItem = mapping;
+            _mappingPage.MappingGrid.ScrollIntoView(mapping);
+        }
+
+        private void DeleteSelectedMapping()
+        {
+            if (Mappings.Count == 0)
+            {
+                MessageBox.Show("There are no mappings to delete.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (_mappingPage.MappingGrid.SelectedItem is SpaceMapperMappingDefinition map)
+            {
+                Mappings.Remove(map);
+                return;
+            }
+
+            MessageBox.Show("Select a mapping to delete.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
         }
 
         private void OpenScraper()
         {
-            var profile = _setupPage.ProfileCombo.SelectedItem?.ToString() ?? "Default";
+            var profile = GetSelectedScraperProfileName() ?? "Default";
             try
             {
                 MicroEngActions.TryShowDataScraper(profile, out _);
@@ -139,22 +1388,18 @@ namespace MicroEng.Navisworks
         {
             try
             {
-                var settings = BuildSettings();
-                var request = new SpaceMapperRequest
+                if (!ValidateRunInputs())
                 {
-                    ProfileName = _setupPage.ProfileCombo.SelectedItem?.ToString() ?? "Default",
-                    Scope = _setupPage.ScopeCombo.SelectedItem is SpaceMapperScope sc ? sc : SpaceMapperScope.EntireModel,
-                    ZoneSource = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zs ? zs : ZoneSourceType.DataScraperZones,
-                    ZoneSetName = _zonesPage.ZoneSetBox.Text,
-                    TargetSource = _zonesPage.TargetSourceCombo.SelectedItem is TargetSourceType ts ? ts : TargetSourceType.EntireModel,
-                    TargetRules = TargetRules.ToList(),
-                    Mappings = Mappings.ToList(),
-                    ProcessingSettings = settings
-                };
+                    return;
+                }
+
+                var request = BuildRequest();
 
                 var service = new SpaceMapperService(MicroEngActions.Log);
-                var result = service.Run(request);
+                var cache = _processingPage.ReusePreflightToggle.IsChecked == true ? _preflightService.Cache : null;
+                var result = service.Run(request, cache);
                 ShowResults(result);
+                UpdateCalibrationFromRun(request, result);
                 SpaceMapperNav.Navigate(typeof(SpaceMapperStepResultsPage));
             }
             catch (Exception ex)
@@ -167,7 +1412,7 @@ namespace MicroEng.Navisworks
         {
             return new SpaceMapperProcessingSettings
             {
-                ProcessingMode = _processingPage.ProcessingModeCombo.SelectedItem is SpaceMapperProcessingMode pm ? pm : SpaceMapperProcessingMode.Auto,
+                ProcessingMode = SpaceMapperProcessingMode.CpuNormal,
                 TreatPartialAsContained = _processingPage.TreatPartialCheck.IsChecked == true,
                 TagPartialSeparately = _processingPage.TagPartialCheck.IsChecked == true,
                 EnableMultipleZones = _processingPage.EnableMultiZoneCheck.IsChecked == true,
@@ -178,8 +1423,784 @@ namespace MicroEng.Navisworks
                 Units = _processingPage.UnitsBox.Text,
                 OffsetMode = _processingPage.OffsetModeBox.Text,
                 MaxThreads = ParseInt(_processingPage.MaxThreadsBox.Text),
-                BatchSize = ParseInt(_processingPage.BatchSizeBox.Text)
+                BatchSize = ParseInt(_processingPage.BatchSizeBox.Text),
+                IndexGranularity = (int)Math.Round(_processingPage.IndexGranularitySlider.Value),
+                PerformancePreset = GetSelectedPreset(),
+                ZoneBehaviorCategory = _processingPage.ZoneBehaviorCategoryBox.Text?.Trim(),
+                ZoneBehaviorPropertyName = _processingPage.ZoneBehaviorPropertyBox.Text?.Trim(),
+                ZoneBehaviorContainedValue = _processingPage.ZoneBehaviorContainedBox.Text?.Trim(),
+                ZoneBehaviorPartialValue = _processingPage.ZoneBehaviorPartialBox.Text?.Trim()
             };
+        }
+
+        private SpaceMapperRequest BuildRequest()
+        {
+            var settings = BuildSettings();
+            return new SpaceMapperRequest
+            {
+                TemplateName = _setupPage.TemplateCombo.SelectedItem?.ToString(),
+                ScraperProfileName = GetSelectedScraperProfileName(),
+                Scope = SpaceMapperScope.EntireModel,
+                ZoneSource = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zs ? zs : ZoneSourceType.DataScraperZones,
+                ZoneSetName = _zonesPage.ZoneSetBox.Text,
+                TargetRules = TargetRules.ToList(),
+                Mappings = Mappings.ToList(),
+                ProcessingSettings = settings
+            };
+        }
+
+        private void TriggerLivePreflight()
+        {
+            if (_applyingTemplate)
+            {
+                return;
+            }
+
+            if (_processingPage.LiveEstimateToggle.IsChecked != true)
+            {
+                return;
+            }
+
+            _preflightDebouncer.Debounce(token => RunPreflightOnUiThreadAsync(isLive: true, token));
+        }
+
+        private Task RunPreflightOnUiThreadAsync(bool isLive, CancellationToken token)
+        {
+            if (Dispatcher.CheckAccess())
+            {
+                return RunPreflightAsync(isLive, token);
+            }
+
+            return Dispatcher.InvokeAsync(() => RunPreflightAsync(isLive, token)).Task.Unwrap();
+        }
+
+        private async Task RunPreflightAsync(bool isLive, CancellationToken debounceToken)
+        {
+            if (debounceToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (!ValidatePreflightInputs(showMessage: !isLive))
+            {
+                ResetPreflightUi("Invalid input");
+                return;
+            }
+
+            var request = BuildRequest();
+            CancelPreflight();
+
+            _preflightCts = CancellationTokenSource.CreateLinkedTokenSource(debounceToken);
+            var token = _preflightCts.Token;
+
+            _processingPage.RunPreflightButton.IsEnabled = false;
+            _processingPage.PreflightProgressBar.IsIndeterminate = true;
+            _processingPage.PreflightProgressBar.Value = 0;
+            _processingPage.PreflightStatusText.Text = isLive ? "Live..." : "Running";
+
+            var progress = new Progress<SpaceMapperPreflightProgress>(p =>
+            {
+                _processingPage.PreflightStatusText.Text = string.IsNullOrWhiteSpace(p.Stage) ? "Running" : p.Stage;
+                _processingPage.PreflightProgressBar.IsIndeterminate = false;
+                _processingPage.PreflightProgressBar.Value = Math.Min(100, Math.Max(0, p.Percentage));
+            });
+
+            try
+            {
+                var result = await _preflightService.RunAsync(request, token, progress);
+                if (token.IsCancellationRequested)
+                {
+                    ResetPreflightUi("Cancelled");
+                    return;
+                }
+
+                if (result == null)
+                {
+                    ResetPreflightUi("No data");
+                    UpdateEstimateUi(request, null);
+                    return;
+                }
+
+                _lastPreflight = result;
+                UpdateEstimateUi(request, result);
+                _processingPage.PreflightStatusText.Text = "Complete";
+            }
+            catch (OperationCanceledException)
+            {
+                ResetPreflightUi("Cancelled");
+            }
+            catch (Exception ex)
+            {
+                ResetPreflightUi("Failed");
+                MicroEngActions.Log($"SpaceMapper Preflight: failed - {ex.Message}");
+            }
+            finally
+            {
+                _processingPage.RunPreflightButton.IsEnabled = true;
+                _processingPage.PreflightProgressBar.IsIndeterminate = false;
+            }
+        }
+
+        private void UpdateEstimateUi(SpaceMapperRequest request, SpaceMapperPreflightResult result)
+        {
+            if (result == null)
+            {
+                _processingPage.EstimateRuntimeText.Text = "n/a";
+                _processingPage.EstimateCountsText.Text = "-";
+                _processingPage.EstimatePairsText.Text = "-";
+                _processingPage.EstimateAvgText.Text = "-";
+                _processingPage.EstimateConfidenceText.Text = "Low";
+                _processingPage.EstimateCellSizeText.Text = "-";
+                _processingPage.EstimatePreflightTimeText.Text = "-";
+                UpdateIndexGranularityHint(null);
+                UpdatePresetUi(null);
+                return;
+            }
+
+            _processingPage.EstimateCountsText.Text = $"Zones: {result.ZoneCount:N0} Targets: {result.TargetCount:N0}";
+            _processingPage.EstimatePairsText.Text = $"{result.CandidatePairs:N0}";
+            _processingPage.EstimateAvgText.Text = $"{result.AvgCandidatesPerZone:N0}";
+
+            if (result.ZoneCount == 0 || result.TargetCount == 0)
+            {
+                _processingPage.EstimateRuntimeText.Text = "n/a";
+                _processingPage.EstimateConfidenceText.Text = "Low";
+                return;
+            }
+
+            var mappingCount = Mappings.Count(m => !string.IsNullOrWhiteSpace(m.TargetPropertyName));
+            var calibrationKey = GetCalibrationKey(request?.ProcessingSettings, result);
+            var calibration = _calibrationStore.GetOrCreate(calibrationKey);
+            _lastEstimate = SpaceMapperRuntimeEstimator.Estimate(result, calibration, mappingCount);
+
+            _processingPage.EstimateRuntimeText.Text = FormatEstimate(_lastEstimate.EstimatedTotal);
+            _processingPage.EstimateConfidenceText.Text = $"{_lastEstimate.ConfidenceLabel}";
+            _processingPage.EstimateCellSizeText.Text = FormatCellSize(result);
+            _processingPage.EstimatePreflightTimeText.Text = FormatPreflightTimestamp(result.TimestampUtc);
+            UpdateIndexGranularityHint(result);
+            UpdatePresetUi(result);
+        }
+
+        private SpaceMapperPerformancePreset GetSelectedPreset()
+        {
+            if (_processingPage.AutoPresetToggle.IsChecked == true)
+            {
+                return SpaceMapperPerformancePreset.Auto;
+            }
+
+            var v = (int)Math.Round(_processingPage.PresetSlider.Value);
+            return v switch
+            {
+                0 => SpaceMapperPerformancePreset.Fast,
+                1 => SpaceMapperPerformancePreset.Normal,
+                2 => SpaceMapperPerformancePreset.Accurate,
+                _ => SpaceMapperPerformancePreset.Normal
+            };
+        }
+
+        private void UpdatePresetUi(SpaceMapperPreflightResult preflight)
+        {
+            var selected = GetSelectedPreset();
+            _processingPage.PresetDescriptionText.Text = SpaceMapperPresetLogic.DescribePreset(selected);
+
+            if (selected == SpaceMapperPerformancePreset.Auto)
+            {
+                _ = SpaceMapperPresetLogic.ResolvePreset(selected, preflight, out var reason);
+                _processingPage.PresetResolvedText.Text = reason;
+                return;
+            }
+
+            _processingPage.PresetResolvedText.Text = string.Empty;
+        }
+
+        private void OnPresetChanged()
+        {
+            UpdatePresetUi(_lastPreflight);
+
+            if (_processingPage.LiveEstimateToggle.IsChecked != true)
+            {
+                return;
+            }
+
+            if (_lastPreflight != null)
+            {
+                UpdateEstimateUi(BuildRequest(), _lastPreflight);
+            }
+            else
+            {
+                TriggerLivePreflight();
+            }
+        }
+
+        private static string FormatEstimate(TimeSpan estimate)
+        {
+            if (estimate.TotalHours >= 1)
+            {
+                return estimate.ToString(@"h\:mm\:ss");
+            }
+            return estimate.ToString(@"m\:ss");
+        }
+
+        private static string FormatDuration(TimeSpan span)
+        {
+            if (span.TotalSeconds >= 1)
+            {
+                return $"{span.TotalSeconds:0.00}s";
+            }
+            return $"{span.TotalMilliseconds:0}ms";
+        }
+
+        private static string GetCalibrationKey(SpaceMapperProcessingSettings settings, SpaceMapperPreflightResult preflight)
+        {
+            var mode = settings?.ProcessingMode ?? SpaceMapperProcessingMode.CpuNormal;
+            var preset = SpaceMapperPresetLogic.ResolvePreset(settings, preflight, out _);
+            return $"{mode}/{preset}";
+        }
+
+        private void CancelPreflight()
+        {
+            if (_preflightCts == null)
+            {
+                return;
+            }
+
+            _preflightCts.Cancel();
+            _preflightCts.Dispose();
+            _preflightCts = null;
+        }
+
+        private void ResetPreflightUi(string status)
+        {
+            _preflightDebouncer.Cancel();
+            CancelPreflight();
+            _processingPage.PreflightStatusText.Text = status;
+            _processingPage.PreflightProgressBar.IsIndeterminate = false;
+            _processingPage.PreflightProgressBar.Value = 0;
+        }
+
+        private sealed class ValidationIssue
+        {
+            public string Message { get; set; }
+            public Action FocusAction { get; set; }
+            public Type PageType { get; set; }
+        }
+
+        private bool ValidateRunInputs()
+        {
+            var issues = new List<ValidationIssue>();
+            ValidateSetupInputs(issues);
+            ValidateZonesTargetsInputs(issues);
+            ValidateProcessingInputs(issues);
+            ValidateMappingInputs(issues);
+
+            if (issues.Count == 0)
+            {
+                return true;
+            }
+
+            ShowValidationIssues(issues);
+            NavigateToIssue(issues[0]);
+            return false;
+        }
+
+        private bool ValidatePreflightInputs(bool showMessage)
+        {
+            var issues = new List<ValidationIssue>();
+            ValidateSetupInputs(issues);
+            ValidateZonesTargetsInputs(issues);
+            ValidateProcessingInputs(issues);
+
+            if (issues.Count == 0)
+            {
+                return true;
+            }
+
+            if (showMessage)
+            {
+                ShowValidationIssues(issues);
+                NavigateToIssue(issues[0]);
+            }
+
+            return false;
+        }
+
+        private void ValidateSetupInputs(List<ValidationIssue> issues)
+        {
+            if (string.IsNullOrWhiteSpace(_setupPage.TemplateCombo.SelectedItem?.ToString()))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepSetupPage),
+                    Message = "Select a Space Mapper profile.",
+                    FocusAction = () => _setupPage.TemplateCombo.Focus()
+                });
+            }
+        }
+
+        private void ValidateZonesTargetsInputs(List<ValidationIssue> issues)
+        {
+            if (_zonesPage.ZoneSourceCombo.SelectedItem == null)
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                    Message = "Select a zone source.",
+                    FocusAction = () => _zonesPage.ZoneSourceCombo.Focus()
+                });
+            }
+
+            var zoneSource = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zs
+                ? zs
+                : ZoneSourceType.DataScraperZones;
+
+            if ((zoneSource == ZoneSourceType.ZoneSelectionSet || zoneSource == ZoneSourceType.ZoneSearchSet)
+                && string.IsNullOrWhiteSpace(_zonesPage.ZoneSetBox.Text))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                    Message = "Enter a Zone Set/Search name.",
+                    FocusAction = () => _zonesPage.ZoneSetBox.Focus()
+                });
+            }
+
+            if (zoneSource == ZoneSourceType.DataScraperZones)
+            {
+                var profile = GetSelectedScraperProfileName();
+                if (string.IsNullOrWhiteSpace(profile))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepSetupPage),
+                        Message = "Select a Data Scraper profile or change the Zone Source.",
+                        FocusAction = () => _setupPage.ScraperProfileCombo.Focus()
+                    });
+                }
+                else if (SpaceMapperService.GetSession(profile) == null)
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepSetupPage),
+                        Message = $"Run Data Scraper to create a profile for '{profile}'.",
+                        FocusAction = () => _setupPage.OpenScraperButton.Focus()
+                    });
+                }
+            }
+
+            if (TargetRules.Count == 0)
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                    Message = "Add at least one target rule.",
+                    FocusAction = () => _zonesPage.AddRuleButton.Focus()
+                });
+                return;
+            }
+
+            var enabledRules = TargetRules.Where(r => r.Enabled).ToList();
+            if (enabledRules.Count == 0)
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                    Message = "Enable at least one target rule.",
+                    FocusAction = () => _zonesPage.TargetRulesGrid.Focus()
+                });
+                return;
+            }
+
+            foreach (var rule in enabledRules)
+            {
+                if (string.IsNullOrWhiteSpace(rule.Name))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                        Message = "Each enabled rule needs a name.",
+                        FocusAction = () => FocusTargetRule(rule)
+                    });
+                }
+
+                if (UsesSetSearchName(rule.TargetDefinition)
+                    && string.IsNullOrWhiteSpace(rule.SetSearchName))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                        Message = $"Rule '{rule.Name ?? "Unnamed"}' needs a Set/Search name.",
+                        FocusAction = () => FocusTargetRule(rule)
+                    });
+                }
+
+                if (UsesLevels(rule.TargetDefinition))
+                {
+                    if (rule.MinLevel == null || rule.MaxLevel == null)
+                    {
+                        issues.Add(new ValidationIssue
+                        {
+                            PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                            Message = $"Rule '{rule.Name ?? "Unnamed"}' needs Min/Max Level.",
+                            FocusAction = () => FocusTargetRule(rule)
+                        });
+                    }
+                    else if (rule.MinLevel < 0 || rule.MaxLevel < 0)
+                    {
+                        issues.Add(new ValidationIssue
+                        {
+                            PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                            Message = $"Rule '{rule.Name ?? "Unnamed"}' has a negative Level.",
+                            FocusAction = () => FocusTargetRule(rule)
+                        });
+                    }
+                    else if (rule.MinLevel > rule.MaxLevel)
+                    {
+                        issues.Add(new ValidationIssue
+                        {
+                            PageType = typeof(SpaceMapperStepZonesTargetsPage),
+                            Message = $"Rule '{rule.Name ?? "Unnamed"}' has Min Level greater than Max Level.",
+                            FocusAction = () => FocusTargetRule(rule)
+                        });
+                    }
+                }
+            }
+        }
+
+        private void ValidateProcessingInputs(List<ValidationIssue> issues)
+        {
+            if (!TryParseDoubleInput(_processingPage.Offset3DBox.Text, out _))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "3D Offset must be a number.",
+                    FocusAction = () => _processingPage.Offset3DBox.Focus()
+                });
+            }
+
+            if (!TryParseDoubleInput(_processingPage.OffsetSidesBox.Text, out _))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "Offset Sides must be a number.",
+                    FocusAction = () => _processingPage.OffsetSidesBox.Focus()
+                });
+            }
+
+            if (!TryParseDoubleInput(_processingPage.OffsetBottomBox.Text, out _))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "Offset Bottom must be a number.",
+                    FocusAction = () => _processingPage.OffsetBottomBox.Focus()
+                });
+            }
+
+            if (!TryParseDoubleInput(_processingPage.OffsetTopBox.Text, out _))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "Offset Top must be a number.",
+                    FocusAction = () => _processingPage.OffsetTopBox.Focus()
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(_processingPage.UnitsBox.Text))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "Units cannot be blank.",
+                    FocusAction = () => _processingPage.UnitsBox.Focus()
+                });
+            }
+
+            if (string.IsNullOrWhiteSpace(_processingPage.OffsetModeBox.Text))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "Offset Mode cannot be blank.",
+                    FocusAction = () => _processingPage.OffsetModeBox.Focus()
+                });
+            }
+
+            if (_processingPage.TagPartialCheck.IsChecked == true)
+            {
+                if (string.IsNullOrWhiteSpace(_processingPage.ZoneBehaviorCategoryBox.Text))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepProcessingPage),
+                        Message = "Zone Behaviour Category cannot be blank.",
+                        FocusAction = () => _processingPage.ZoneBehaviorCategoryBox.Focus()
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(_processingPage.ZoneBehaviorPropertyBox.Text))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepProcessingPage),
+                        Message = "Zone Behaviour Property cannot be blank.",
+                        FocusAction = () => _processingPage.ZoneBehaviorPropertyBox.Focus()
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(_processingPage.ZoneBehaviorContainedBox.Text))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepProcessingPage),
+                        Message = "Contained Value cannot be blank.",
+                        FocusAction = () => _processingPage.ZoneBehaviorContainedBox.Focus()
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(_processingPage.ZoneBehaviorPartialBox.Text))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepProcessingPage),
+                        Message = "Partial Value cannot be blank.",
+                        FocusAction = () => _processingPage.ZoneBehaviorPartialBox.Focus()
+                    });
+                }
+            }
+
+            if (!TryParseOptionalNonNegativeInt(_processingPage.MaxThreadsBox.Text, out _))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "Max Threads must be 0 or a positive whole number.",
+                    FocusAction = () =>
+                    {
+                        _processingPage.AdvancedPerformanceExpander.IsExpanded = true;
+                        _processingPage.MaxThreadsBox.Focus();
+                    }
+                });
+            }
+
+            if (!TryParseOptionalNonNegativeInt(_processingPage.BatchSizeBox.Text, out _))
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepProcessingPage),
+                    Message = "Batch Size must be 0 or a positive whole number.",
+                    FocusAction = () =>
+                    {
+                        _processingPage.AdvancedPerformanceExpander.IsExpanded = true;
+                        _processingPage.BatchSizeBox.Focus();
+                    }
+                });
+            }
+        }
+
+        private void ValidateMappingInputs(List<ValidationIssue> issues)
+        {
+            if (Mappings.Count == 0)
+            {
+                issues.Add(new ValidationIssue
+                {
+                    PageType = typeof(SpaceMapperStepMappingPage),
+                    Message = "Add at least one attribute mapping.",
+                    FocusAction = () => _mappingPage.AddMappingButton.Focus()
+                });
+                return;
+            }
+
+            for (int i = 0; i < Mappings.Count; i++)
+            {
+                var mapping = Mappings[i];
+                if (string.IsNullOrWhiteSpace(mapping.ZonePropertyName))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepMappingPage),
+                        Message = $"Mapping row {i + 1}: Zone Property is required.",
+                        FocusAction = () => FocusMappingRow(mapping)
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(mapping.TargetCategory))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepMappingPage),
+                        Message = $"Mapping row {i + 1}: Target Category is required.",
+                        FocusAction = () => FocusMappingRow(mapping)
+                    });
+                }
+
+                if (string.IsNullOrWhiteSpace(mapping.TargetPropertyName))
+                {
+                    issues.Add(new ValidationIssue
+                    {
+                        PageType = typeof(SpaceMapperStepMappingPage),
+                        Message = $"Mapping row {i + 1}: Target Property is required.",
+                        FocusAction = () => FocusMappingRow(mapping)
+                    });
+                }
+            }
+        }
+
+        private bool ValidateMappingBuilder()
+        {
+            if (string.IsNullOrWhiteSpace(_mappingPage.ZonePropertyBox.Text))
+            {
+                ShowValidationMessage("Enter a Zone Property to read.",
+                    typeof(SpaceMapperStepMappingPage),
+                    () => _mappingPage.ZonePropertyBox.Focus());
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_mappingPage.TargetCategoryBox.Text))
+            {
+                ShowValidationMessage("Enter a Target Category to write to.",
+                    typeof(SpaceMapperStepMappingPage),
+                    () => _mappingPage.TargetCategoryBox.Focus());
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_mappingPage.TargetPropertyBox.Text))
+            {
+                ShowValidationMessage("Enter a Target Property to write to.",
+                    typeof(SpaceMapperStepMappingPage),
+                    () => _mappingPage.TargetPropertyBox.Focus());
+                return false;
+            }
+
+            if (_mappingPage.WriteModeCombo.SelectedItem == null)
+            {
+                ShowValidationMessage("Select a Write Mode.",
+                    typeof(SpaceMapperStepMappingPage),
+                    () => _mappingPage.WriteModeCombo.Focus());
+                return false;
+            }
+
+            if (_mappingPage.MultiZoneCombo.SelectedItem == null)
+            {
+                ShowValidationMessage("Select a Multi-Zone mode.",
+                    typeof(SpaceMapperStepMappingPage),
+                    () => _mappingPage.MultiZoneCombo.Focus());
+                return false;
+            }
+
+            return true;
+        }
+
+        private void ShowValidationIssues(IEnumerable<ValidationIssue> issues)
+        {
+            var messages = issues
+                .Select(i => i.Message)
+                .Where(m => !string.IsNullOrWhiteSpace(m))
+                .Distinct()
+                .ToList();
+
+            if (messages.Count == 0)
+            {
+                return;
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine("Fix the following before running Space Mapper:");
+            foreach (var msg in messages)
+            {
+                sb.AppendLine($"- {msg}");
+            }
+
+            MessageBox.Show(sb.ToString(), "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+
+        private void ShowValidationMessage(string message, Type pageType, Action focusAction)
+        {
+            MessageBox.Show(message, "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
+            NavigateToIssue(new ValidationIssue
+            {
+                PageType = pageType,
+                Message = message,
+                FocusAction = focusAction
+            });
+        }
+
+        private void NavigateToIssue(ValidationIssue issue)
+        {
+            if (issue == null)
+            {
+                return;
+            }
+
+            if (issue.PageType != null)
+            {
+                SpaceMapperNav.Navigate(issue.PageType);
+            }
+
+            if (issue.FocusAction != null)
+            {
+                Dispatcher.BeginInvoke(issue.FocusAction, DispatcherPriority.Background);
+            }
+        }
+
+        private void FocusTargetRule(SpaceMapperTargetRule rule)
+        {
+            if (rule == null)
+            {
+                return;
+            }
+
+            _zonesPage.TargetRulesGrid.SelectedItem = rule;
+            _zonesPage.TargetRulesGrid.ScrollIntoView(rule);
+            _zonesPage.TargetRulesGrid.Focus();
+        }
+
+        private void FocusMappingRow(SpaceMapperMappingDefinition mapping)
+        {
+            if (mapping == null)
+            {
+                return;
+            }
+
+            _mappingPage.MappingGrid.SelectedItem = mapping;
+            _mappingPage.MappingGrid.ScrollIntoView(mapping);
+            _mappingPage.MappingGrid.Focus();
+        }
+
+        private static bool TryParseDoubleInput(string text, out double value)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                value = 0;
+                return true;
+            }
+
+            if (!double.TryParse(text, out value))
+            {
+                return false;
+            }
+
+            return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        private static bool TryParseOptionalNonNegativeInt(string text, out int? value)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                value = null;
+                return true;
+            }
+
+            if (int.TryParse(text, out var parsed) && parsed >= 0)
+            {
+                value = parsed;
+                return true;
+            }
+
+            value = null;
+            return false;
         }
 
         private static double ParseDouble(string text)
@@ -190,6 +2211,45 @@ namespace MicroEng.Navisworks
         private static int? ParseInt(string text)
         {
             return int.TryParse(text, out var i) && i > 0 ? i : (int?)null;
+        }
+
+        private void UpdateCalibrationFromRun(SpaceMapperRequest request, SpaceMapperRunResult result)
+        {
+            if (request == null || result?.Stats == null)
+            {
+                return;
+            }
+
+            if (_lastPreflight == null)
+            {
+                return;
+            }
+
+            var signature = SpaceMapperPreflightService.BuildSignature(request);
+            if (!string.Equals(signature, _lastPreflight.Signature, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (_lastPreflight.CandidatePairs <= 0)
+            {
+                return;
+            }
+
+            var key = GetCalibrationKeyWithPreset(request.ProcessingSettings, result.Stats);
+            _calibrationStore.Update(key, result.Stats.Elapsed.TotalSeconds, _lastPreflight.CandidatePairs, result.Stats.WritesPerformed);
+
+            var mappingCount = Mappings.Count(m => !string.IsNullOrWhiteSpace(m.TargetPropertyName));
+            var calibration = _calibrationStore.GetOrCreate(key);
+            _lastEstimate = SpaceMapperRuntimeEstimator.Estimate(_lastPreflight, calibration, mappingCount);
+            UpdateEstimateUi(request, _lastPreflight);
+        }
+
+        private static string GetCalibrationKeyWithPreset(SpaceMapperProcessingSettings settings, SpaceMapperRunStats stats)
+        {
+            var mode = settings?.ProcessingMode ?? SpaceMapperProcessingMode.CpuNormal;
+            var preset = stats?.PresetUsed ?? SpaceMapperPerformancePreset.Normal;
+            return $"{mode}/{preset}";
         }
 
         private void ShowResults(SpaceMapperRunResult result)
@@ -209,24 +2269,18 @@ namespace MicroEng.Navisworks
             {
                 sb.AppendLine($"Zones: {result.Stats.ZonesProcessed}, Targets: {result.Stats.TargetsProcessed}");
                 sb.AppendLine($"Contained: {result.Stats.ContainedTagged}, Partial: {result.Stats.PartialTagged}, Multi-Zone: {result.Stats.MultiZoneTagged}, Skipped: {result.Stats.Skipped}");
+                sb.AppendLine($"Candidates: {result.Stats.CandidatePairs:N0} (avg {result.Stats.AvgCandidatesPerZone:0.##}/zone, max {result.Stats.MaxCandidatesPerZone:N0})");
+                sb.AppendLine($"Preflight index: {(result.Stats.UsedPreflightIndex ? "Yes" : "No")}");
+                sb.AppendLine($"Preset used: {result.Stats.PresetUsed}");
                 sb.AppendLine($"Mode: {result.Stats.ModeUsed}, Time: {result.Stats.Elapsed.TotalSeconds:0.00}s");
+                sb.AppendLine($"Stages: resolve {FormatDuration(result.Stats.ResolveTime)}, build {FormatDuration(result.Stats.BuildGeometryTime)}, index {FormatDuration(result.Stats.BuildIndexTime)}, candidates {FormatDuration(result.Stats.CandidateQueryTime)}, narrow {FormatDuration(result.Stats.NarrowPhaseTime)}, write {FormatDuration(result.Stats.WriteBackTime)}");
             }
             _resultsPage.ResultsSummaryBox.Text = sb.ToString();
         }
 
         private void SaveTemplate()
         {
-            var templates = _templateStore.Load();
-            var name = PromptText("Template name:", "Space Mapper");
-            if (string.IsNullOrWhiteSpace(name)) return;
-            var existing = templates.FirstOrDefault(t => string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
-            var tpl = existing ?? new SpaceMapperTemplate { Name = name };
-            tpl.TargetRules = TargetRules.ToList();
-            tpl.Mappings = Mappings.ToList();
-            tpl.ProcessingSettings = BuildSettings();
-
-            if (existing == null) templates.Add(tpl);
-            _templateStore.Save(templates);
+            SaveTemplateAs();
         }
 
         private void LoadTemplate()
@@ -247,19 +2301,13 @@ namespace MicroEng.Navisworks
                 return;
             }
 
-            TargetRules.Clear();
-            foreach (var r in tpl.TargetRules) TargetRules.Add(r);
-
-            Mappings.Clear();
-            foreach (var m in tpl.Mappings) Mappings.Add(m);
-
-            ApplySettings(tpl.ProcessingSettings);
+            RefreshTemplateList(tpl.Name);
+            ApplyTemplate(tpl);
         }
 
         private void ApplySettings(SpaceMapperProcessingSettings settings)
         {
             if (settings == null) return;
-            _processingPage.ProcessingModeCombo.SelectedItem = settings.ProcessingMode;
             _processingPage.TreatPartialCheck.IsChecked = settings.TreatPartialAsContained;
             _processingPage.TagPartialCheck.IsChecked = settings.TagPartialSeparately;
             _processingPage.EnableMultiZoneCheck.IsChecked = settings.EnableMultipleZones;
@@ -271,6 +2319,90 @@ namespace MicroEng.Navisworks
             _processingPage.OffsetModeBox.Text = settings.OffsetMode;
             _processingPage.MaxThreadsBox.Text = settings.MaxThreads?.ToString() ?? "0";
             _processingPage.BatchSizeBox.Text = settings.BatchSize?.ToString() ?? "0";
+            _processingPage.IndexGranularitySlider.Value = settings.IndexGranularity;
+            _processingPage.ZoneBehaviorCategoryBox.Text = settings.ZoneBehaviorCategory ?? "ME_SpaceInfo";
+            _processingPage.ZoneBehaviorPropertyBox.Text = settings.ZoneBehaviorPropertyName ?? "Zone Behaviour";
+            _processingPage.ZoneBehaviorContainedBox.Text = settings.ZoneBehaviorContainedValue ?? "Contained";
+            _processingPage.ZoneBehaviorPartialBox.Text = settings.ZoneBehaviorPartialValue ?? "Partial";
+            UpdateZoneBehaviorInputs();
+            ApplyPresetSettings(settings.PerformancePreset);
+        }
+
+        private void UpdateIndexGranularityHint(SpaceMapperPreflightResult preflight)
+        {
+            if (_processingPage?.IndexGranularityHintText == null)
+            {
+                return;
+            }
+
+            if (preflight == null)
+            {
+                _processingPage.IndexGranularityHintText.Text = "Controls spatial grid cell size. Smaller cells reduce candidate pairs but increase index build cost.";
+                return;
+            }
+
+            var units = string.IsNullOrWhiteSpace(_processingPage.UnitsBox.Text) ? "units" : _processingPage.UnitsBox.Text.Trim();
+            var label = GetIndexGranularityLabel();
+            _processingPage.IndexGranularityHintText.Text = $"Cell size used: {preflight.CellSizeUsed:0.##} {units} ({label})";
+        }
+
+        private string FormatCellSize(SpaceMapperPreflightResult preflight)
+        {
+            if (preflight == null)
+            {
+                return "-";
+            }
+
+            var units = string.IsNullOrWhiteSpace(_processingPage.UnitsBox.Text) ? "units" : _processingPage.UnitsBox.Text.Trim();
+            var label = GetIndexGranularityLabel();
+            return $"{preflight.CellSizeUsed:0.##} {units} ({label})";
+        }
+
+        private static string FormatPreflightTimestamp(DateTime timestampUtc)
+        {
+            if (timestampUtc == default)
+            {
+                return "-";
+            }
+
+            return timestampUtc.ToLocalTime().ToString("g");
+        }
+
+        private string GetIndexGranularityLabel()
+        {
+            var value = (int)Math.Round(_processingPage.IndexGranularitySlider.Value);
+            return value switch
+            {
+                1 => "Coarse",
+                2 => "Normal",
+                3 => "Fine",
+                4 => "Ultra",
+                _ => "Auto"
+            };
+        }
+
+        private void ApplyPresetSettings(SpaceMapperPerformancePreset preset)
+        {
+            if (preset == SpaceMapperPerformancePreset.Auto)
+            {
+                _processingPage.AutoPresetToggle.IsChecked = true;
+                _processingPage.PresetSlider.IsEnabled = false;
+                _processingPage.PresetSlider.Value = 1;
+            }
+            else
+            {
+                _processingPage.AutoPresetToggle.IsChecked = false;
+                _processingPage.PresetSlider.IsEnabled = true;
+                _processingPage.PresetSlider.Value = preset switch
+                {
+                    SpaceMapperPerformancePreset.Fast => 0,
+                    SpaceMapperPerformancePreset.Normal => 1,
+                    SpaceMapperPerformancePreset.Accurate => 2,
+                    _ => 1
+                };
+            }
+
+            UpdatePresetUi(_lastPreflight);
         }
 
         private void ExportStats()

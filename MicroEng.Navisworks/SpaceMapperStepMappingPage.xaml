@@ -51,6 +51,13 @@
           </Setter.Value>
         </Setter>
       </Style>
+      <Style x:Key="PropertyPickerButtonStyle" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+      </Style>
     </ResourceDictionary>
   </Page.Resources>
 
@@ -152,7 +159,60 @@
                            Text="Property name to read from the zone (e.g. Name)." />
               </ui:Flyout>
             </StackPanel>
-            <TextBox x:Name="ZonePropertyBoxControl" Grid.Column="1" MinWidth="180" Text="Name" />
+            <Grid Grid.Column="1">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <TextBox x:Name="ZonePropertyBoxControl" Grid.Column="0" MinWidth="180" Text="Name" />
+              <ui:Button x:Name="ZonePropertyPickerButtonControl"
+                         Grid.Column="1"
+                         Margin="6,0,0,0"
+                         Appearance="Secondary"
+                         Style="{StaticResource PropertyPickerButtonStyle}"
+                         ToolTip="Pick from scraped properties">
+                <ui:SymbolIcon Symbol="Search20" />
+              </ui:Button>
+              <ui:Flyout x:Name="ZonePropertyPickerFlyoutControl"
+                         Grid.Column="1"
+                         Placement="Bottom">
+                <Grid Width="300"
+                      MaxHeight="320">
+                  <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="8" />
+                    <RowDefinition Height="*" />
+                  </Grid.RowDefinitions>
+                  <ui:TextBlock Grid.Row="0"
+                                Text="Zone Property Picker"
+                                FontSize="12"
+                                FontWeight="SemiBold" />
+                  <ui:TextBlock x:Name="ZonePropertyPickerStatusTextControl"
+                                Grid.Row="1"
+                                Margin="0,4,0,0"
+                                FontSize="11"
+                                Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                Text="No Data Scraper session selected." />
+                  <TreeView x:Name="ZonePropertyTreeViewControl"
+                            Grid.Row="3"
+                            Margin="0,6,0,0"
+                            BorderThickness="0"
+                            Background="Transparent">
+                    <TreeView.ItemContainerStyle>
+                      <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                        <Setter Property="IsExpanded" Value="{Binding IsExpanded}" />
+                      </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.ItemTemplate>
+                      <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                        <TextBlock Text="{Binding Name}" />
+                      </HierarchicalDataTemplate>
+                    </TreeView.ItemTemplate>
+                  </TreeView>
+                </Grid>
+              </ui:Flyout>
+            </Grid>
           </Grid>
 
           <Grid Grid.Row="1" Grid.Column="2" Margin="0,0,0,8">

@@ -1,0 +1,415 @@
+Below is a concrete, implementable design for a **single “Comparison Report” button on Step 3 (Processing)** that:
+
+* runs **all Space Mapper methods/presets** (and traversal variants),
+* produces a **very detailed, AI‑friendly report** (Markdown + JSON),
+* helps you **validate correctness**, **measure speed**, and **spot regressions**,
+* does **not write anything** to the model (dry run),
+* is safe to run on large models (auto‑sampling + cancellation).
+
+I’m also including several **speed/correctness fixes** I recommend based on the Space Mapper code you’ve been sharing (these materially affect performance and make the comparison report more reliable).
+
+---
+
+# 1) First: key code change suggestions (speed + correctness)
+
+These are worth applying regardless of the comparison button, because they directly influence Fast/Normal/Accurate behavior and the validity of the report.
+
+## A. Fix: Engine mode argument ignored
+
+In `CpuIntersectionEngine` you currently have:
+
+```csharp
+public CpuIntersectionEngine(SpaceMapperProcessingMode mode = SpaceMapperProcessingMode.CpuNormal)
+{
+    Mode = SpaceMapperProcessingMode.CpuNormal;
+}
+```
+
+This ignores `mode` and breaks diagnostics/reporting. Fix:
+
+```csharp
+Mode = mode;
+```
+
+Also ensure `SpaceMapperEngineFactory.Create(...)` returns the requested mode (not always CPU Normal).
+
+## B. Fix: “EnableMultipleZones” is not enforced in writeback
+
+In your current service pipeline, intersections are grouped per target and written out, but there’s no hard enforcement of single-zone vs multi-zone output at the correct stage.
+
+If you implement **engine-side best-zone selection** (you said “yes” to this), then:
+
+* when `EnableMultipleZones == false`, the engine returns **≤ 1 hit per target**, and the service no longer needs to pick.
+
+This is both **faster** and **more correct**.
+
+## C. Fix: Zone geometry extraction filtered by `Vertices.Any()` (breaks Fast)
+
+Your service layer currently filters zones like:
+
+```csharp
+.Where(z => z?.BoundingBox != null && z.Vertices.Any())
+```
+
+That prevents “bounds-only” Fast/UltraFast modes (and creates misleading comparisons).
+
+Correct behavior:
+
+* For **Fast origin-point** and **AABB-only**, require only `BoundingBox != null`
+* For **Normal/Accurate**, require planes/geometry (or fall back explicitly)
+
+## D. Major perf: remove per-candidate timing in hot loop
+
+Timing per candidate inside `VisitCandidates(...)` (Stopwatch ticks around each classification) can dominate runtime on big models.
+
+Keep:
+
+* zone-level coarse timing, and
+* detailed per-candidate timing only when `ProcessingMode == Debug` (or a “Detailed diagnostics” toggle).
+
+## E. Major perf: avoid `ConcurrentBag` in tight loops
+
+Use `ThreadLocal<List<ZoneTargetIntersection>>` and merge at end.
+
+## F. Correctness: triangle-plane bug (Normal/Accurate)
+
+If your plane builder is fed bbox corner lists (8 verts) and treated as triangle triplets, Normal/Accurate becomes unstable.
+
+Fix rule:
+
+* only build triangle planes when `vertices.Count % 3 == 0`,
+* else fall back to bbox planes.
+
+This is critical for meaningful comparison outcomes.
+
+---
+
+# 2) Comparison Report button: what it does (user experience)
+
+## One-click workflow on Step 3 (Processing)
+
+Add a button:
+
+* **“Comparison Report”**
+* runs automatically
+* shows progress in the existing preflight progress area
+* writes two files:
+
+  * `SpaceMapper_Compare_<timestamp>.md`
+  * `SpaceMapper_Compare_<timestamp>.json`
+
+Then displays:
+
+* “Report saved: <path>”
+* “Copy path” and/or “Open folder” (optional)
+
+## Cancel support (highly recommended)
+
+When the comparison run is active:
+
+* button text changes to “Cancel Comparison”
+* clicking again cancels via `CancellationTokenSource`
+
+This prevents UI lockups on huge models.
+
+## Auto-sampling (so the button is safe)
+
+Comparison can be expensive because it runs multiple methods.
+
+Default behavior:
+
+* If the dataset is “small enough”, run full.
+* If it’s huge, automatically sample:
+
+  * e.g., `MaxTargets = 100,000` and `MaxZones = 5,000` (tunable)
+  * random seed recorded in report
+
+The report clearly states whether sampling occurred.
+
+---
+
+# 3) “All methods” definition (what runs)
+
+To make this valuable for correctness + performance, I recommend these variants (these are what the button executes):
+
+### Baseline (reference for correctness)
+
+1. **Normal / Zone-major**
+
+* This becomes the “comparison baseline”.
+
+### CPU presets
+
+2. **Fast / Zone-major**
+
+* Uses your fast classifier (origin-point or AABB-only depending on your current Fast definition).
+
+3. **Accurate / Zone-major**
+
+* Higher sampling / stricter checks.
+
+### Fast traversal variants (if enabled)
+
+4. **Fast / Target-major** (if allowed)
+
+* Only runs if partial options are OFF (or it falls back and is marked “skipped” in report).
+* Uses ZoneGrid + target center points.
+
+### Optional “legacy” Fast
+
+5. **Fast (AABB-only) / Zone-major** (optional)
+
+* This is very useful as a control if you’re transitioning Fast to origin-point.
+
+If you don’t want variant #5 permanently, keep it behind a `ComparisonOptions.IncludeLegacyFastAabb = true`.
+
+---
+
+# 4) What the report must contain (AI-friendly)
+
+Produce **both Markdown and JSON**.
+
+## A. Top-level metadata
+
+* Timestamp
+* Navisworks version (best effort)
+* Plugin version (assembly version)
+* Machine info:
+
+  * CPU cores, OS, RAM estimate
+  * GPU name if available (optional WMI)
+* Model info:
+
+  * file name
+  * counts of resolved zones/targets
+  * sampling info
+
+## B. Per-variant metrics (the “meat”)
+
+For each variant, include:
+
+**Settings**
+
+* preset, traversal mode, index granularity, threads, offsets, partial settings, multi-zone, best-zone behavior
+
+**Timings**
+
+* dataset build time (if measured once, state it)
+* preflight time
+* index build time
+* candidate query time
+* narrow-phase time
+* postprocess time (if any)
+* total time
+
+**Workload counts**
+
+* zones processed, targets processed
+* candidate pairs tested
+* avg candidates per zone/target, max candidates
+* hits:
+
+  * contained
+  * partial
+  * unmatched
+  * multi-zone matches (if enabled)
+
+**Diagnostics flags**
+
+* used preflight index (yes/no)
+* traversal chosen (Auto result)
+* any skips/fallbacks (e.g., “Target-major disabled because partials enabled”)
+
+## C. Cross-variant comparisons
+
+Compute an “agreement” section comparing every method against the baseline:
+
+For each variant vs baseline:
+
+* % targets with same best zone assignment
+* count of:
+
+  * baseline assigned vs variant unassigned
+  * baseline unassigned vs variant assigned
+  * both assigned but different zones
+* top N example mismatches:
+
+  * target key, display name/path
+  * baseline zone id/name vs variant zone id/name
+  * target center point coordinates
+  * zone bounding boxes (min/max) for both zones
+  * whether target point was inside each zone AABB (for fast methods)
+
+This makes the report extremely actionable for AI debugging.
+
+## D. “AI check” section (automatic sanity checks)
+
+Add a section that flags obvious problems automatically:
+
+* “Normal/Accurate ran but zones had 0 planes ⇒ plane extraction bug likely”
+* “EnableMultipleZones=false but variant returned multiple zones ⇒ best-zone selection not applied”
+* “CandidatePairs=0 but zones/targets > 0 ⇒ grid mismatch”
+* “TargetsProcessed differs across variants ⇒ dataset mismatch”
+* “Fast Target-major executed with partial options enabled ⇒ should have been prevented”
+
+---
+
+# 5) How to implement it cleanly (architecture)
+
+## A. Do not call the normal `Run()` method
+
+Your normal pipeline writes to the model.
+
+Instead, create a **dry-run path** that:
+
+* resolves zones/targets
+* builds geometry
+* runs engine compute
+* returns intersections + stats
+* **no PropertyWriter calls**
+
+Best way:
+
+* Extract the shared “resolve + build geometry + compute intersections” into a reusable internal pipeline method:
+
+  * used by normal Run (then does writeback)
+  * used by compare run (skips writeback)
+
+## B. Reuse the same dataset across variants
+
+To compare methods fairly, all variants should run on the same:
+
+* zone list (same IDs/order)
+* target list (same IDs/order)
+
+Sampling should happen once at dataset build time, not per variant.
+
+---
+
+# 6) Codex-ready prompt to implement the button and report
+
+Paste the following into Codex (this is written as an end-to-end change request):
+
+```text
+Implement a “Comparison Report” button on Space Mapper Step 3 (Processing) that runs all Space Mapper processing methods and outputs a detailed report (Markdown + JSON) for humans and AI debugging.
+
+PRIMARY REQUIREMENTS
+1) Add a new button on Step 3 Processing page:
+   - Label: “Comparison Report”
+   - When running, change to “Cancel Comparison”
+   - Use existing progress UI (status text + progress bar) to show progress.
+2) One click runs a dry-run benchmark + correctness comparison across variants:
+   Variants (minimum):
+     A) Normal / ZoneMajor (baseline)
+     B) Fast / ZoneMajor
+     C) Accurate / ZoneMajor
+     D) Fast / TargetMajor (only if partials OFF; otherwise mark as skipped)
+   Optional:
+     E) Fast (legacy AABB-only) / ZoneMajor if supported
+3) Must NOT write any properties to model. No PropertyWriter calls. Pure compute.
+4) Output files:
+   - Reports/SpaceMapper_Compare_<yyyyMMdd_HHmmss>.md
+   - Reports/SpaceMapper_Compare_<yyyyMMdd_HHmmss>.json
+   under the plugin folder.
+5) Report must be AI-friendly:
+   - include settings, environment info, timings, counts, diagnostics, agreement vs baseline, example mismatches.
+   - include automatic “sanity check” warnings.
+
+IMPLEMENTATION DETAILS
+A) UI changes:
+- In SpaceMapperStepProcessingPage.xaml add:
+   ui:Button x:Name="ComparisonReportButtonControl" Content="Comparison Report"
+   TextBlock x:Name="ComparisonReportStatusTextControl" (small, wrap)
+- In SpaceMapperStepProcessingPage.xaml.cs expose:
+   internal Button ComparisonReportButton => ComparisonReportButtonControl;
+   internal TextBlock ComparisonReportStatusText => ComparisonReportStatusTextControl;
+
+- In SpaceMapperControl.xaml.cs wire:
+   _processingPage.ComparisonReportButton.Click += async (...) => await RunComparisonReportAsync();
+
+- Implement cancellation:
+   private CancellationTokenSource _compareCts;
+   On click:
+     if _compareCts != null -> _compareCts.Cancel()
+     else -> create CTS and run
+
+B) Shared dry-run pipeline:
+- Create a new internal class SpaceMapperDryRunService (or extend SpaceMapperService with a ComputeOnly method) that:
+   - resolves zones and targets using the same logic as Run
+   - builds geometry once (zones + targets)
+   - DOES NOT call PropertyWriter
+   - returns:
+      zones list (ZoneGeometry)
+      targets list (TargetGeometry)
+      plus timing: ResolveTime, BuildGeometryTime
+- Ensure Fast modes do not require Vertices.Any() (bounds-only is allowed).
+
+C) Comparison runner:
+- Create SpaceMapperComparisonRunner with:
+   - Build dataset once (optionally sample if huge; record seed + sample sizes).
+   - For each variant:
+       * clone base processing settings
+       * set PerformancePreset + FastTraversalMode + any flags
+       * run preflight to obtain cache (if enabled by option) and record preflight metrics
+       * run engine.ComputeIntersections(zones, targets, settings, preflightCache, diagnostics, progress, token)
+       * materialize assignments per target:
+           best-zone assignment (single zone) ALWAYS computed for comparison,
+           multi-zone sets stored if EnableMultipleZones is true
+       * store per-variant metrics + diagnostics (candidate pairs, timings, hit counts, etc.)
+   - Compare each variant to baseline:
+       * same/different/unassigned metrics
+       * include top N mismatches with enough context (targetKey, zone ids, target center, zone bounds)
+   - Add automatic “sanity checks” section.
+
+D) Report output:
+- Markdown builder:
+   - header metadata
+   - per-variant section
+   - comparison section
+   - mismatch samples
+   - sanity check warnings
+- JSON output:
+   - define [DataContract] report classes so net48 can serialize via DataContractJsonSerializer
+   - include schemaVersion, variants, comparisons, mismatches
+
+E) Performance hygiene:
+- Do not do per-candidate Stopwatch timing unless in Debug mode.
+- Avoid ConcurrentBag if possible; use ThreadLocal lists.
+- Fix engine mode ctor bug:
+   CpuIntersectionEngine must set Mode = mode;
+- Fix SpaceMapperEngineFactory.Create(mode) to respect mode.
+
+ACCEPTANCE
+- Clicking “Comparison Report” creates md+json files and updates UI with saved path.
+- No model properties are changed.
+- Report includes timings, candidate counts, hit counts, agreement vs baseline, mismatch examples, and sanity checks.
+- Cancel works.
+```
+
+---
+
+# 7) Practical notes (so this is actually useful for you and for me/AI)
+
+## Baseline choice
+
+Use **Normal** as baseline (it’s the most reasonable CPU reference).
+
+## Mismatch samples should be “self-contained”
+
+For each mismatch, include enough raw data that another AI can diagnose without your model:
+
+* target key, target display path (if you have one), target bbox center
+* baseline zone id/name + bbox
+* variant zone id/name + bbox
+* whether point is inside each bbox
+
+## Always include “Resolved variant summary”
+
+For Auto + Fast traversal Auto:
+
+* record what the engine actually picked
+* record why (threshold reason)
+
+---
+
+If you want, I can also provide a “recommended threshold policy” for when the comparison tool should automatically sample, based on preflight candidate pairs and your estimator calibration—so it stays safe and still yields meaningful speed ratios.

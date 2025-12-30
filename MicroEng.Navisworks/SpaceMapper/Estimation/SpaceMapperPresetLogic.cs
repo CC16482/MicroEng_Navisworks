@@ -45,7 +45,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             switch (preset)
             {
                 case SpaceMapperPerformancePreset.Fast:
-                    return "Fast: spatial grid + AABB-only classification. Best for quick tagging.";
+                    return "Fast: spatial grid + origin point (bbox center) in zone AABB. Partial only when Tag Partial Separately or Treat Partial as Contained is enabled.";
                 case SpaceMapperPerformancePreset.Normal:
                     return "Normal: spatial grid + bbox corner sampling. Balanced default.";
                 case SpaceMapperPerformancePreset.Accurate:

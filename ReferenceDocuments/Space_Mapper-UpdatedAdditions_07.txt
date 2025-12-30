@@ -1,0 +1,603 @@
+Understood. Here is the **optional “next-next level” acceleration** on top of the Fast preset origin-point method:
+
+> **Fast preset (origin-point, partials OFF) → switch to target-major processing using a Zone spatial index**
+> Build a **grid over Zone AABBs**, then for each target **point** query the grid to get candidate zones.
+
+This can outperform your current zone-major approach (zone loop → query target grid) because it avoids scanning “all zones” and avoids revisiting targets across many zones.
+
+---
+
+# Why this optional path is worth it
+
+## When it wins
+
+This is most beneficial when:
+
+* **Targets ≫ Zones** (common: tens/hundreds of thousands of assets, thousands of rooms)
+* Fast preset is **origin-point containment**
+* **Partials are disabled** (Tag Partial Separately = OFF and Treat Partial as Contained = OFF)
+
+## What it improves
+
+* Less work in broad-phase:
+
+  * Each **target point** queries **one cell** and tests a small number of candidate zones
+* Less duplicated narrow-phase:
+
+  * Each target is processed **once** (not once per zone candidate discovered zone-major)
+* More predictable scaling:
+
+  * ~O(Targets × avgZonesInCell)
+
+---
+
+# Core rule (keep it safe)
+
+This optional algorithm should ONLY engage when Fast is truly “origin-point only”:
+
+* `FastOriginMode == true`
+* `needsPartial == false`
+  (`TagPartialSeparately == false && TreatPartialAsContained == false`)
+
+If partial tagging is enabled, do **not** use this target-major point-only traversal (unless you’re willing to accept that “partial” becomes meaningless / slower fallback).
+
+---
+
+# Implementation approach
+
+## 1) Add a “Fast traversal” option (optional UI; auto is fine)
+
+You can implement this with **no UI** (always auto), but it’s cleaner to add a small Advanced option:
+
+```csharp
+internal enum SpaceMapperFastTraversalMode
+{
+    Auto = 0,
+    ZoneMajor = 1,   // existing behavior
+    TargetMajor = 2  // new behavior
+}
+```
+
+Then add in your processing settings:
+
+* `FastTraversalMode` (default Auto)
+
+Auto selection heuristic:
+
+* If `targetsCount > zonesCount * 2` and `origin-point only` and `partials off` ⇒ TargetMajor
+* Else ⇒ ZoneMajor
+
+## 2) Build a ZoneGrid (SpatialHashGrid over zone AABBs)
+
+You already have `SpatialHashGrid(worldBounds, cellSize, items)` and `CountCandidates(queryAabb...)` in preflight.
+So for zone grid:
+
+```csharp
+var zoneGrid = new SpatialHashGrid(worldBounds, cellSize, zoneBoundsInflated);
+```
+
+## 3) Query by point efficiently
+
+The cleanest implementation is to extend `SpatialHashGrid` with:
+
+```csharp
+public void VisitPointCandidates(double x, double y, double z, Action<int> onCandidate)
+```
+
+This avoids:
+
+* allocating a visited array per thread
+* stamp logic
+* building a point AABB per query
+
+### If you don’t want to touch SpatialHashGrid yet
+
+You can temporarily query using a point AABB:
+
+```csharp
+var p = new Aabb(x, y, z, x, y, z);
+zoneGrid.VisitCandidates(p, visited, ref stamp, idx => { ... });
+```
+
+This works, but is slower than a proper point-candidate method.
+
+## 4) Target-major run algorithm
+
+For each target:
+
+1. compute center point from target bbox
+2. get candidate zones from the cell’s bucket list
+3. check `point in zoneBoundsInflated`
+4. if multi-zone enabled: emit all hits
+   else: pick best zone (smallest zone volume, then nearest center)
+
+---
+
+# Where this plugs into your existing pipeline
+
+## Preflight
+
+If you want Live Estimate + Reuse Preflight to benefit:
+
+* Preflight should also build (and cache) the `ZoneGrid` **when Fast origin-point + partials off**.
+
+I recommend extending `SpaceMapperPreflightCache` with:
+
+* `SpatialHashGrid ZoneGrid`
+* `Aabb[] ZoneBoundsInflated`
+* `bool UsedZoneGrid` or `FastTraversalChosen`
+
+Then:
+
+* If in this mode, compute candidatePairs by iterating targets and counting zone candidates via ZoneGrid point query.
+
+## Run
+
+In the CPU engine:
+
+* If preset resolves to Fast origin-point AND partials off AND ZoneGrid is available:
+
+  * use TargetMajor path
+* else:
+
+  * use your current ZoneMajor path
+
+---
+
+# Codex-ready OPTIONAL change request (paste into Codex)
+
+```text
+OPTIONAL PERFORMANCE FEATURE: Add “Fast Target-Major Traversal” using a ZoneGrid.
+
+Context:
+Fast preset now uses origin-point classification (target bbox center-in-zone AABB). We want a faster traversal that processes each target once:
+- build SpatialHashGrid over zone AABBs
+- for each target center point, query candidate zones from the cell bucket and test point-in-zoneAABB
+This is only enabled when partial tagging is OFF.
+
+Implementation tasks:
+
+1) Add a new enum + setting:
+- enum SpaceMapperFastTraversalMode { Auto, ZoneMajor, TargetMajor }
+- Add to SpaceMapperProcessingSettings (DataMember):
+  SpaceMapperFastTraversalMode FastTraversalMode { get; set; } = Auto;
+
+2) Decide whether target-major is allowed:
+- needsPartial = settings.TagPartialSeparately || settings.TreatPartialAsContained
+- originOnlyFast = (effectivePreset == Fast)   // and/or explicit Fast origin flag if exists
+- allowTargetMajor = originOnlyFast && !needsPartial
+
+3) Build ZoneGrid:
+- Create zoneBoundsInflated[] once per run (use the same bounds you already use for classification / offsets).
+- Compute worldBounds (same as existing).
+- cellSize uses existing logic (IndexGranularity).
+- Build: zoneGrid = new SpatialHashGrid(worldBounds, cellSize, zoneBoundsInflated)
+
+4) Extend SpaceMapperPreflightCache:
+- Add:
+  SpatialHashGrid ZoneGrid
+  Aabb[] ZoneBoundsInflated
+  bool UsedZoneGrid
+- In preflight, when allowTargetMajor and traversal resolves to TargetMajor:
+  - Build ZoneGrid and store it in cache
+  - CandidatePairs = sum over targets of zoneGrid candidate count for the target center point
+  - Record maxCandidates, avgCandidatesPerTarget, etc.
+
+5) Add SpatialHashGrid point query helper (high value):
+- Locate SpatialHashGrid implementation in the project.
+- Add:
+  public void VisitPointCandidates(double x, double y, double z, Action<int> onCandidate)
+  This should compute the cell key for the point and iterate only that cell’s bucket list (no visited/stamp required).
+- If too risky, fallback to using VisitCandidates(new Aabb(x,y,z,x,y,z), visited, ref stamp, ...).
+
+6) CPU engine new path:
+- In CpuIntersectionEngine.ComputeIntersections:
+  - Determine traversal:
+    if settings.FastTraversalMode == TargetMajor => use target-major
+    else if Auto and allowTargetMajor and targetsCount > zonesCount * 2 => target-major
+    else zone-major (existing)
+  - If using target-major:
+     * Use zoneGrid from preflightCache.ZoneGrid when available and signature matches, else build zoneGrid locally.
+     * Parallel.For over targets
+     * For each target:
+        - compute center from target bounds
+        - query candidate zones via VisitPointCandidates
+        - if point in zoneBoundsInflated[z]:
+            - if EnableMultipleZones => emit intersection
+            - else keep best zone by smallest zone volume (then nearest center)
+     * Merge results via ThreadLocal<List<ZoneTargetIntersection>> (avoid ConcurrentBag)
+     * Update diagnostics: TraversalUsed, CandidatePairsTested, AvgCandidatesPerTarget
+
+7) Ensure correctness:
+- Only use target-major when partial options are OFF.
+- Do not change Normal/Accurate logic.
+
+Acceptance:
+- On large models with many targets, Fast preset with partials off should run noticeably faster than zone-major.
+- Preflight estimate improves because it matches target-major candidate counting.
+- Build succeeds net48.
+```
+
+---
+
+# Practical tuning notes (so this actually “feels” faster)
+
+1. **Cell size matters more for target-major**
+   If your Index Granularity is “coarse”, each cell may contain many zones → more candidates per target.
+   So in Auto traversal, you can bias toward **Normal/Fine** index granularity when you select TargetMajor.
+
+2. **Multi-zone OFF should pick best zone inside the engine (optional)**
+   If you keep multi-zone tie-breaking in the service layer, you’ll allocate and pass more intersections.
+   In target-major, if multi-zone is OFF, it’s cleaner to emit only the best zone intersection per target.
+
+3. **Keep point test branch allocation-free**
+   Precompute arrays:
+
+* `zoneBounds[]`, `zoneVolumes[]`, `zoneIds[]`
+
+---
+
+If you want, reply with:
+
+* whether you want this exposed as a user setting (“Fast traversal mode”), or fully automatic, and
+* whether you want “best zone selection” moved into the engine for Fast mode (big memory win).
+
+
+
+Understood. With **Fast Traversal Mode** enabled and **Best Zone Selection** moved into the engine, you can make “Fast (origin-point)” materially faster and also reduce memory pressure (fewer intersections carried into the write-back stage).
+
+Below is the **implementation plan + concrete change list + a Codex-ready prompt**. I’m also flagging a few speed/correctness issues I can see in the files you uploaded.
+
+---
+
+# What you are implementing
+
+## 1) Fast Traversal Mode (user-selectable)
+
+Add a setting that lets the user choose how the engine traverses the problem:
+
+* **Auto (Recommended)**
+  Engine chooses the best traversal for the current run.
+* **Zone-major** (existing pattern)
+  For each zone → query candidate targets → classify.
+* **Target-major** (new)
+  For each target point → query candidate zones → classify.
+
+### Important constraint (keep it correct + predictable)
+
+**Target-major is only valid when Fast is “origin-point only” and partials are OFF** (otherwise you’ll miss partials where the center point is outside but the object intersects the zone).
+
+So:
+
+* If `TagPartialSeparately` OR `TreatPartialAsContained` is ON → **force Zone-major** (and optionally show a UI hint: “Target-major disabled when partials are enabled.”)
+
+## 2) Best Zone Selection (engine-side)
+
+When `EnableMultipleZones == false`, the engine should return **at most one zone per target**.
+
+For **Fast origin-point**, the most stable “best zone” rule is:
+
+1. Prefer **contained** results over partial (if partials exist in that mode)
+2. Pick the zone with **smallest zone volume** (AABB volume)
+3. Tie-breaker: nearest zone center to target center (optional)
+
+Doing this inside the engine avoids generating huge intersection lists only to throw most of them away later.
+
+---
+
+# High-value performance improvements to include (in the same pass)
+
+## A) The “next speed step” you asked for
+
+### Point-based indexing for Fast
+
+When Fast is origin-point only (partials OFF), index each target into **exactly one cell** by using its **center point AABB**:
+
+* Instead of indexing `TargetBounds = full target bbox`
+* Use `TargetBounds = point bbox at center (min=max=center)`
+
+This reduces:
+
+* grid build time (fewer multi-cell inserts)
+* memory overhead (smaller bucket lists)
+* candidate explosion caused by large target AABBs spanning many cells
+
+This is beneficial in **Zone-major Fast**.
+
+### Target-major Fast (ZoneGrid)
+
+For Target-major Fast you typically **don’t need a TargetGrid at all**.
+Instead:
+
+* Build a **ZoneGrid** from zone AABBs
+* For each target center point: query one cell’s zone bucket list
+
+That’s usually the fastest possible CPU approach short of GPU.
+
+## B) Remove timing overhead in Fast paths
+
+In your current CPU engine you use `Stopwatch.GetTimestamp()` inside the candidate callback (per candidate). For Fast origin-point, the actual check is so cheap that the timestamps can dominate runtime.
+
+Recommendation:
+
+* Keep detailed split timing only in Debug mode
+* Otherwise time at a coarser grain (per zone or per partition)
+
+## C) Fix a few correctness/perf issues visible in the uploaded code
+
+These are worth fixing regardless:
+
+1. **CpuIntersectionEngine constructor ignores its input**
+
+```csharp
+public CpuIntersectionEngine(SpaceMapperProcessingMode mode = SpaceMapperProcessingMode.CpuNormal)
+{
+    Mode = SpaceMapperProcessingMode.CpuNormal; // <- ignores 'mode'
+}
+```
+
+Should be:
+
+```csharp
+Mode = mode;
+```
+
+2. **SpaceMapperEngineFactory ignores requested mode**
+
+```csharp
+return new CpuIntersectionEngine(SpaceMapperProcessingMode.CpuNormal);
+```
+
+At minimum:
+
+```csharp
+return new CpuIntersectionEngine(requested);
+```
+
+3. **GeometryMath.BuildPlanes bug risk**
+   In `SpaceMapperGeometry.cs`, `ExtractVertices()` returns empty so you fall back to bbox vertices, but `BuildPlanes()` treats any vertex list as triangle triplets (i += 3). That can generate nonsense planes unless you explicitly detect triangle lists.
+   This matches the “triangle-plane bug” you mentioned earlier—confirm it’s fixed in your repo.
+
+---
+
+# Implementation details
+
+## 1) Add the new enum + setting (models)
+
+### In `SpaceMapperModels.cs`
+
+Add:
+
+```csharp
+public enum SpaceMapperFastTraversalMode
+{
+    Auto = 0,
+    ZoneMajor = 1,
+    TargetMajor = 2
+}
+```
+
+Then add a new DataMember to `SpaceMapperProcessingSettings`:
+
+```csharp
+[DataMember(Order = 18)]
+public SpaceMapperFastTraversalMode FastTraversalMode { get; set; } = SpaceMapperFastTraversalMode.Auto;
+```
+
+(Your last Order currently appears to be 17 in the uploaded file.)
+
+---
+
+## 2) Step 3 UI: add “Fast Traversal Mode”
+
+Add a small control under Processing (Step 3). Keep it as **Advanced** so you don’t overwhelm users.
+
+### Suggested UX
+
+* Label: **Fast Traversal**
+* Control: ComboBox with `Auto`, `Zone-major`, `Target-major`
+* Help text:
+  “Target-major is available only when partial options are disabled (Fast origin-point).”
+
+### Wiring
+
+Expose the ComboBox from `SpaceMapperStepProcessingPage.xaml(.cs)` like the other controls and read it in `SpaceMapperControl.BuildSettings()`.
+
+---
+
+## 3) Preflight: support ZoneGrid when Target-major is selected
+
+Your preflight currently assumes:
+
+* Build target index
+* For each zone, count candidates
+
+When using Target-major, preflight should instead:
+
+* Build **zone index**
+* For each target **point**, count candidate zones (bucket size)
+
+### Cache reuse
+
+Extend `SpaceMapperPreflightCache` to support both grids:
+
+* `SpatialHashGrid TargetGrid` (existing)
+* `SpatialHashGrid ZoneGrid` (new)
+* `Aabb[] TargetBounds` (full or point form depending on mode)
+* `Aabb[] ZoneBoundsInflated` (new, for ZoneGrid)
+* plus `Signature`
+
+Then:
+
+* If `Reuse preflight for Run` is checked, the engine will reuse whichever grid matches the selected traversal.
+
+---
+
+## 4) Engine: implement both fast traversal paths + best zone selection
+
+### A) Determine which algorithm is active
+
+In the CPU engine:
+
+1. Resolve whether you are in **Fast origin-point mode**
+2. Resolve traversal:
+
+   * If user set TargetMajor but partials enabled → force ZoneMajor
+   * If Auto:
+
+     * if fast origin-only and `targets > zones * 2` → TargetMajor
+     * else ZoneMajor
+
+### B) Zone-major fast path (with point-index)
+
+* Build or reuse TargetGrid
+* If partials OFF: index targets as point AABBs
+* For each zone AABB: query candidates
+* If multi-zone OFF: update **best zone per target** (engine-side)
+* If multi-zone ON: emit all hits
+
+### C) Target-major fast path (with ZoneGrid)
+
+* Build or reuse ZoneGrid
+* For each target center point: get candidate zones
+* If point in zone AABB → hit
+* If multi-zone OFF: pick best zone (smallest zone volume)
+* Else: emit all hits
+
+### Best zone selection rule (Fast origin-point)
+
+When multi-zone is OFF:
+
+* Pick the zone with **minimum AABB volume**
+* Tie-breaker (optional): minimum distance between zone center and target center
+
+---
+
+# Codex-ready change request (paste into Codex)
+
+```text
+Implement Fast Traversal Mode + Engine-side Best Zone Selection for Space Mapper (CPU Fast preset).
+
+GOAL
+1) Add a user setting “Fast Traversal Mode” with Auto / Zone-major / Target-major.
+2) When EnableMultipleZones == false, the engine must return at most one zone per target (“best zone selection”) so downstream grouping and memory use are reduced.
+3) Add the “next speed step”: point-based spatial index for targets in Fast Zone-major, and ZoneGrid-based traversal for Fast Target-major.
+
+CONSTRAINTS
+- Target-major is ONLY allowed when Fast preset uses origin-point classification AND partial options are OFF:
+  needsPartial = TreatPartialAsContained || TagPartialSeparately
+  If needsPartial == true -> force Zone-major even if user selects Target-major (show UI hint).
+- For Fast origin-point classification:
+  Contained: target center point inside zone AABB
+  Optional partial (only if partial options enabled): if target full AABB intersects zone AABB => IsPartial=true
+- Best zone selection (when multi-zone OFF): choose the smallest zone AABB volume; tie-breaker optional by nearest zone center.
+
+STEP 1 — MODELS
+- In SpaceMapperModels.cs:
+  Add enum SpaceMapperFastTraversalMode { Auto=0, ZoneMajor=1, TargetMajor=2 }
+  Add to SpaceMapperProcessingSettings:
+    [DataMember(Order = next)] public SpaceMapperFastTraversalMode FastTraversalMode {get;set;} = Auto;
+  Extend SpaceMapperEngineDiagnostics and SpaceMapperRunStats with:
+    string TraversalUsed
+    double AvgCandidatesPerTarget
+    int MaxCandidatesPerTarget
+  Keep existing per-zone fields for compatibility.
+
+STEP 2 — UI (Step 3 Processing)
+- In SpaceMapperStepProcessingPage.xaml add an “Advanced” row:
+  Label: Fast Traversal
+  ComboBox (or WPF-UI styled ComboBox) with Auto / Zone-major / Target-major
+  Add a TextBlock hint that Target-major is disabled if partial options are enabled.
+- In SpaceMapperStepProcessingPage.xaml.cs expose:
+  internal ComboBox FastTraversalCombo => FastTraversalComboControl;
+- In SpaceMapperControl.xaml.cs:
+  - BuildSettings(): set settings.FastTraversalMode from ComboBox selection
+  - ApplySettings(): restore ComboBox selection
+  - Any changes to partial checkboxes should update the enabled/disabled state of Target-major option and trigger live preflight.
+
+STEP 3 — PREFLIGHT (estimation + cache reuse)
+- Update SpaceMapperPreflightService:
+  - Include FastTraversalMode and PerformancePreset (and IndexGranularity if present) in the signature so cache reuse is correct.
+  - Extend SpaceMapperPreflightCache to store BOTH:
+     SpatialHashGrid TargetGrid (existing) and SpatialHashGrid ZoneGrid (new)
+     Aabb[] TargetBounds (full or point bounds based on fast mode)
+     Aabb[] ZoneBoundsInflated for ZoneGrid
+  - If traversal resolves to TargetMajor:
+     Build ZoneGrid from zone bounds (inflated)
+     CandidatePairs = sum over targets: ZoneGrid bucket count at target center point (do not require contains test)
+     Store ZoneGrid in cache
+  - Else ZoneMajor:
+     If Fast origin-only and partials OFF:
+        Build TargetBounds as point AABBs (min=max=center) so each target is indexed into exactly one cell
+     Build TargetGrid from TargetBounds
+     CandidatePairs = sum over zones: TargetGrid.CountCandidates(zoneAabb)
+     Store TargetGrid in cache
+
+STEP 4 — ENGINE (CPU)
+- In SpaceMapperEngines.cs:
+  Fix CpuIntersectionEngine ctor to respect input mode.
+  Fix SpaceMapperEngineFactory to return CpuIntersectionEngine(requested).
+- Implement traversal resolution:
+   bool needsPartial = settings.TreatPartialAsContained || settings.TagPartialSeparately;
+   bool isFast = (resolvedPreset == Fast) // use your preset resolver
+   var traversal = settings.FastTraversalMode;
+   if (traversal == TargetMajor && (needsPartial || !isFast)) traversal = ZoneMajor;
+   if (traversal == Auto):
+      if (isFast && !needsPartial && targetsCount > zonesCount * 2) traversal = TargetMajor; else traversal = ZoneMajor;
+   diagnostics.TraversalUsed = traversal.ToString();
+
+- Implement Fast ZoneMajor:
+   * Use target grid (from preflight cache when available)
+   * If isFast && !needsPartial -> index targets as POINT AABBs
+   * Classification:
+      - center inside zoneAabb => hit contained
+      - else if needsPartial && targetAabb intersects zoneAabb => hit partial
+   * If EnableMultipleZones:
+        emit all hits (thread-local list)
+     Else:
+        maintain best hit per target index in-engine using zone volume (smallest wins),
+        avoid ConcurrentBag of all hits.
+
+- Implement Fast TargetMajor:
+   * Build/reuse ZoneGrid from preflight cache
+   * Parallel.For over targets:
+      - compute target center
+      - query ZoneGrid candidates for point (add helper to SpatialHashGrid if needed)
+      - choose best zone (smallest volume) if multi-zone off, else add all hits
+   * Return results list
+
+- Diagnostics:
+   CandidatePairs should reflect the number of candidate checks performed in the traversal.
+   For TargetMajor fill AvgCandidatesPerTarget / MaxCandidatesPerTarget (and keep existing per-zone fields as 0 or computed separately).
+
+STEP 5 — GRID HELPERS (SpatialHashGrid)
+- Find SpatialHashGrid class in the project.
+- Add:
+   int CountPointCandidates(double x,y,z)
+   void VisitPointCandidates(double x,y,z, Action<int> visitor)
+  These should map the point to its cell key and iterate that bucket only (no visited/stamp needed).
+  Keep existing VisitCandidates for AABB queries.
+
+ACCEPTANCE
+- Step 3 shows Fast Traversal Mode control.
+- If partial options are ON, Target-major becomes disabled or automatically reverts to Zone-major with a visible hint.
+- When EnableMultipleZones is OFF, the engine returns <= 1 intersection per target.
+- Fast+TargetMajor should be noticeably faster on large models (targets >> zones).
+- Preflight cache reuse works and signature prevents incorrect reuse across different traversal modes.
+```
+
+---
+
+# One additional UX recommendation (small, high value)
+
+On Step 3, show a single-line “resolved mode” readout:
+
+* **Resolved:** Fast + Target-major (Origin-point)
+  or
+* **Resolved:** Fast + Zone-major (partials enabled)
+
+This reduces user confusion when Auto overrides choices due to partials.
+
+---
+
+If you want, I can also give you the **exact “best zone” tie-breaker order** for Normal/Accurate later (where overlap volume becomes meaningful), but for your Fast/origin workflow the “smallest zone volume” rule is the most robust and predictable.

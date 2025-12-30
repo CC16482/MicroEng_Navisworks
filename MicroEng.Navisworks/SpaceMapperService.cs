@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using Autodesk.Navisworks.Api;
 using MicroEng.Navisworks.SpaceMapper.Estimation;
 using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
@@ -29,9 +31,48 @@ namespace MicroEng.Navisworks
         public string Message { get; set; }
     }
 
+    internal sealed class SpaceMapperWritebackResult
+    {
+        public int ContainedTagged { get; set; }
+        public int PartialTagged { get; set; }
+        public int MultiZoneTagged { get; set; }
+        public int Skipped { get; set; }
+        public int SkippedUnchanged { get; set; }
+        public long WritesPerformed { get; set; }
+        public int TargetsWritten { get; set; }
+        public int CategoriesWritten { get; set; }
+        public int PropertiesWritten { get; set; }
+        public double AvgMsPerCategoryWrite { get; set; }
+        public double AvgMsPerTargetWrite { get; set; }
+        public SpaceMapperWritebackStrategy StrategyUsed { get; set; } = SpaceMapperWritebackStrategy.OptimizedSingleCategory;
+        public TimeSpan Elapsed { get; set; }
+        public List<ZoneSummary> ZoneSummaries { get; set; } = new();
+    }
+
+    internal sealed class SpaceMapperResolvedData
+    {
+        public List<SpaceMapperResolvedItem> ZoneModels { get; set; } = new();
+        public List<TargetGeometry> TargetModels { get; set; } = new();
+        public Dictionary<string, List<SpaceMapperTargetRule>> TargetsByRule { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public TimeSpan ResolveTime { get; set; }
+    }
+
+    internal sealed class SpaceMapperComputeDataset
+    {
+        public List<ZoneGeometry> Zones { get; set; } = new();
+        public List<TargetGeometry> TargetsForEngine { get; set; } = new();
+        public List<SpaceMapperResolvedItem> ZoneModels { get; set; } = new();
+        public List<TargetGeometry> TargetModels { get; set; } = new();
+        public Dictionary<string, List<SpaceMapperTargetRule>> TargetsByRule { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public TimeSpan ResolveTime { get; set; }
+        public TimeSpan BuildGeometryTime { get; set; }
+    }
+
     internal class SpaceMapperService
     {
         private readonly Action<string> _log;
+        private const string PackedWritebackPropertyName = "SpaceMapperPacked";
+        private const string WritebackSignaturePropertyName = "SpaceMapperSignature";
 
         public SpaceMapperService(Action<string> log)
         {
@@ -63,65 +104,32 @@ namespace MicroEng.Navisworks
                 DataScraperCache.LastSession = session;
             }
 
-            var resolveSw = Stopwatch.StartNew();
-            var zoneModels = ResolveZones(session, request.ZoneSource, request.ZoneSetName, doc).ToList();
-            var targetsByRule = new Dictionary<string, List<SpaceMapperTargetRule>>(StringComparer.OrdinalIgnoreCase);
-            var targetModels = ResolveTargets(doc, request.TargetRules, targetsByRule).ToList();
-            resolveSw.Stop();
-            stats.ResolveTime = resolveSw.Elapsed;
+            var resolved = ResolveData(request, doc, session);
+            stats.ResolveTime = resolved.ResolveTime;
 
-            if (!zoneModels.Any())
+            if (!resolved.ZoneModels.Any())
             {
                 result.Message = "No zones found.";
                 return result;
             }
 
-            if (!targetModels.Any())
+            if (!resolved.TargetModels.Any())
             {
                 result.Message = "No targets found for the selected rules.";
                 return result;
             }
 
-            var buildSw = Stopwatch.StartNew();
-            var zones = zoneModels
-                .Select(z => GeometryExtractor.ExtractZoneGeometry(z.ModelItem, z.ItemKey, z.DisplayName, request.ProcessingSettings))
-                .Where(z => z?.BoundingBox != null && z.Vertices.Any())
-                .ToList();
+            var cacheToUse = TryGetReusablePreflightCache(request, preflightCache, resolved.TargetModels);
+            var dataset = BuildGeometryData(resolved, request.ProcessingSettings, buildTargetGeometry: cacheToUse == null, token);
+            stats.BuildGeometryTime = dataset.BuildGeometryTime;
 
-            var cacheToUse = TryGetReusablePreflightCache(request, preflightCache, targetModels);
-            List<TargetGeometry> targetsForEngine;
-            if (cacheToUse != null)
-            {
-                targetsForEngine = targetModels;
-            }
-            else
-            {
-                targetsForEngine = targetModels
-                    .Select(t =>
-                    {
-                        var bbox = t.ModelItem?.BoundingBox();
-                        if (bbox == null) return null;
-                        return new TargetGeometry
-                        {
-                            ItemKey = t.ItemKey,
-                            DisplayName = t.DisplayName,
-                            ModelItem = t.ModelItem,
-                            BoundingBox = bbox
-                        };
-                    })
-                    .Where(t => t != null)
-                    .ToList();
-            }
-            buildSw.Stop();
-            stats.BuildGeometryTime = buildSw.Elapsed;
-
-            if (!zones.Any())
+            if (!dataset.Zones.Any())
             {
                 result.Message = "No zones found.";
                 return result;
             }
 
-            if (cacheToUse == null && !targetsForEngine.Any())
+            if (cacheToUse == null && !dataset.TargetsForEngine.Any())
             {
                 result.Message = "No targets with bounding boxes found.";
                 return result;
@@ -129,109 +137,48 @@ namespace MicroEng.Navisworks
 
             var engine = SpaceMapperEngineFactory.Create(request.ProcessingSettings.ProcessingMode);
             var diagnostics = new SpaceMapperEngineDiagnostics();
-            var intersections = engine.ComputeIntersections(zones, targetsForEngine, request.ProcessingSettings, cacheToUse, diagnostics, null, token)
+            var intersections = engine.ComputeIntersections(dataset.Zones, dataset.TargetsForEngine, request.ProcessingSettings, cacheToUse, diagnostics, null, token)
                 ?? new List<ZoneTargetIntersection>();
             result.Intersections = intersections.ToList();
 
-            stats.ZonesProcessed = zones.Count;
-            stats.TargetsProcessed = cacheToUse?.TargetKeys?.Length ?? targetsForEngine.Count;
+            stats.ZonesProcessed = dataset.Zones.Count;
+            stats.TargetsProcessed = cacheToUse?.TargetKeys?.Length ?? dataset.TargetsForEngine.Count;
             stats.ModeUsed = engine.Mode.ToString();
             stats.PresetUsed = diagnostics.PresetUsed;
+            stats.TraversalUsed = diagnostics.TraversalUsed;
             stats.CandidatePairs = diagnostics.CandidatePairs;
             stats.AvgCandidatesPerZone = diagnostics.AvgCandidatesPerZone;
             stats.MaxCandidatesPerZone = diagnostics.MaxCandidatesPerZone;
+            stats.AvgCandidatesPerTarget = diagnostics.AvgCandidatesPerTarget;
+            stats.MaxCandidatesPerTarget = diagnostics.MaxCandidatesPerTarget;
             stats.UsedPreflightIndex = diagnostics.UsedPreflightIndex;
             stats.BuildIndexTime = diagnostics.BuildIndexTime;
             stats.CandidateQueryTime = diagnostics.CandidateQueryTime;
             stats.NarrowPhaseTime = diagnostics.NarrowPhaseTime;
 
-            var zoneLookup = zones.ToDictionary(z => z.ZoneId, z => z);
-            var targetLookup = targetModels.ToDictionary(t => t.ItemKey, t => t);
+            var writeback = ExecuteWriteback(
+                dataset,
+                request.ProcessingSettings,
+                request.Mappings,
+                session,
+                intersections,
+                writeToModel: true,
+                token);
 
-            var ruleMembership = BuildRuleMembership(targetsByRule);
-            var zoneValueLookup = new ZoneValueLookup(session);
-
-            var writeSw = Stopwatch.StartNew();
-            foreach (var group in intersections.GroupBy(i => i.TargetItemKey, StringComparer.OrdinalIgnoreCase))
-            {
-                if (!targetLookup.TryGetValue(group.Key, out var tgt)) continue;
-                var rulesForTarget = ruleMembership.TryGetValue(group.Key, out var list) ? list : new List<SpaceMapperTargetRule>();
-                if (!rulesForTarget.Any()) continue;
-
-                var relevant = FilterByMembership(group, rulesForTarget, request.ProcessingSettings).ToList();
-                if (relevant.Count == 0)
-                {
-                    stats.Skipped++;
-                    continue;
-                }
-
-                if (!request.ProcessingSettings.EnableMultipleZones)
-                {
-                    var best = SelectBestIntersection(relevant);
-                    relevant = best != null ? new List<ZoneTargetIntersection> { best } : new List<ZoneTargetIntersection>();
-                }
-
-                var isMultiZone = relevant.Count > 1;
-                if (isMultiZone) stats.MultiZoneTagged++;
-
-                if (request.ProcessingSettings.TagPartialSeparately)
-                {
-                    var behaviorCategory = request.ProcessingSettings.ZoneBehaviorCategory;
-                    var behaviorProperty = request.ProcessingSettings.ZoneBehaviorPropertyName;
-                    var containedValue = request.ProcessingSettings.ZoneBehaviorContainedValue;
-                    var partialValue = request.ProcessingSettings.ZoneBehaviorPartialValue;
-
-                    if (!string.IsNullOrWhiteSpace(behaviorCategory)
-                        && !string.IsNullOrWhiteSpace(behaviorProperty))
-                    {
-                        var hasPartial = relevant.Any(r => r.IsPartial);
-                        var behaviorValue = hasPartial ? partialValue : containedValue;
-                        if (!string.IsNullOrWhiteSpace(behaviorValue))
-                        {
-                            PropertyWriter.WriteProperty(tgt.ModelItem, behaviorCategory, behaviorProperty, behaviorValue, WriteMode.Overwrite, string.Empty);
-                            stats.WritesPerformed++;
-                        }
-                    }
-                }
-
-                foreach (var mapping in request.Mappings)
-                {
-                    var values = new List<string>();
-                    foreach (var inter in relevant)
-                    {
-                        if (!zoneLookup.TryGetValue(inter.ZoneId, out var zone)) continue;
-                        var val = zoneValueLookup.GetValue(inter.ZoneId, mapping.ZoneCategory, mapping.ZonePropertyName);
-                        if (!string.IsNullOrWhiteSpace(val))
-                        {
-                            values.Add(val);
-                        }
-                    }
-
-                    var combined = CombineValues(values, mapping.MultiZoneCombineMode, mapping.AppendSeparator);
-                    if (string.IsNullOrWhiteSpace(combined)) continue;
-                    PropertyWriter.WriteProperty(tgt.ModelItem, mapping.TargetCategory, mapping.TargetPropertyName, combined, mapping.WriteMode, mapping.AppendSeparator);
-                    stats.WritesPerformed++;
-                }
-
-                foreach (var inter in relevant)
-                {
-                    if (inter.IsContained) stats.ContainedTagged++;
-                    if (inter.IsPartial) stats.PartialTagged++;
-                    if (zoneLookup.TryGetValue(inter.ZoneId, out var z))
-                    {
-                        var summary = stats.ZoneSummaries.FirstOrDefault(s => string.Equals(s.ZoneId, z.ZoneId, StringComparison.OrdinalIgnoreCase));
-                        if (summary == null)
-                        {
-                            summary = new ZoneSummary { ZoneId = z.ZoneId, ZoneName = z.DisplayName };
-                            stats.ZoneSummaries.Add(summary);
-                        }
-                        if (inter.IsContained) summary.ContainedCount++;
-                        if (inter.IsPartial) summary.PartialCount++;
-                    }
-                }
-            }
-            writeSw.Stop();
-            stats.WriteBackTime = writeSw.Elapsed;
+            stats.ContainedTagged = writeback.ContainedTagged;
+            stats.PartialTagged = writeback.PartialTagged;
+            stats.MultiZoneTagged = writeback.MultiZoneTagged;
+            stats.Skipped = writeback.Skipped;
+            stats.SkippedUnchanged = writeback.SkippedUnchanged;
+            stats.WritesPerformed = writeback.WritesPerformed;
+            stats.WritebackTargetsWritten = writeback.TargetsWritten;
+            stats.WritebackCategoriesWritten = writeback.CategoriesWritten;
+            stats.WritebackPropertiesWritten = writeback.PropertiesWritten;
+            stats.AvgMsPerCategoryWrite = writeback.AvgMsPerCategoryWrite;
+            stats.AvgMsPerTargetWrite = writeback.AvgMsPerTargetWrite;
+            stats.WritebackStrategy = writeback.StrategyUsed;
+            stats.WriteBackTime = writeback.Elapsed;
+            stats.ZoneSummaries = writeback.ZoneSummaries;
 
             result.Stats = stats;
             sw.Stop();
@@ -242,9 +189,747 @@ namespace MicroEng.Navisworks
             return result;
         }
 
+        internal static SpaceMapperWritebackResult ExecuteWriteback(
+            SpaceMapperComputeDataset dataset,
+            SpaceMapperProcessingSettings settings,
+            IReadOnlyList<SpaceMapperMappingDefinition> mappings,
+            ScrapeSession session,
+            IEnumerable<ZoneTargetIntersection> intersections,
+            bool writeToModel,
+            CancellationToken token)
+        {
+            var result = new SpaceMapperWritebackResult();
+            if (dataset == null || intersections == null)
+            {
+                return result;
+            }
+
+            settings ??= new SpaceMapperProcessingSettings();
+            mappings ??= Array.Empty<SpaceMapperMappingDefinition>();
+
+            var strategy = settings.WritebackStrategy;
+            var showInternalProperties = settings.ShowInternalPropertiesDuringWriteback;
+            var writeToModelEffective = writeToModel && strategy != SpaceMapperWritebackStrategy.VirtualNoBake;
+            result.StrategyUsed = strategy;
+
+            var zoneLookup = dataset.Zones.ToDictionary(z => z.ZoneId, z => z);
+            var targetLookup = dataset.TargetModels.ToDictionary(t => t.ItemKey, t => t);
+            var ruleMembership = BuildRuleMembership(dataset.TargetsByRule);
+            var zoneValueLookup = new ZoneValueLookup(session);
+            var summaryLookup = new Dictionary<string, ZoneSummary>(StringComparer.OrdinalIgnoreCase);
+
+            var sw = Stopwatch.StartNew();
+            foreach (var group in intersections.GroupBy(i => i.TargetItemKey, StringComparer.OrdinalIgnoreCase))
+            {
+                token.ThrowIfCancellationRequested();
+
+                if (!targetLookup.TryGetValue(group.Key, out var tgt)) continue;
+                var rulesForTarget = ruleMembership.TryGetValue(group.Key, out var list) ? list : new List<SpaceMapperTargetRule>();
+                if (!rulesForTarget.Any()) continue;
+
+                var relevant = FilterByMembership(group, rulesForTarget, settings).ToList();
+                if (relevant.Count == 0)
+                {
+                    result.Skipped++;
+                    continue;
+                }
+
+                if (!settings.EnableMultipleZones)
+                {
+                    var best = SelectBestIntersection(relevant);
+                    relevant = best != null ? new List<ZoneTargetIntersection> { best } : new List<ZoneTargetIntersection>();
+                }
+
+                var isLegacy = strategy == SpaceMapperWritebackStrategy.LegacyPerMapping;
+                var targetCategories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var targetPropertiesWritten = 0;
+                var useSignature = settings.SkipUnchangedWriteback;
+                var usePacking = settings.PackWritebackProperties;
+
+                PropertyWriter.PropertyWriterSession writer = null;
+                if (writeToModelEffective && !isLegacy)
+                {
+                    writer = new PropertyWriter.PropertyWriterSession(tgt.ModelItem, showInternalProperties);
+                }
+
+                bool RegisterWrite(string categoryName, bool wrote)
+                {
+                    if (!wrote)
+                    {
+                        return false;
+                    }
+
+                    result.WritesPerformed++;
+                    result.PropertiesWritten++;
+                    targetPropertiesWritten++;
+
+                    if (isLegacy)
+                    {
+                        result.CategoriesWritten++;
+                    }
+                    else if (!string.IsNullOrWhiteSpace(categoryName))
+                    {
+                        targetCategories.Add(categoryName);
+                    }
+
+                    return true;
+                }
+
+                var isMultiZone = relevant.Count > 1;
+                if (isMultiZone) result.MultiZoneTagged++;
+
+                UpdateAssignmentStats(relevant, zoneLookup, summaryLookup, result);
+
+                var writeEntries = BuildWritebackEntries(relevant, mappings, settings, zoneLookup, zoneValueLookup);
+                if (writeEntries.Count == 0)
+                {
+                    result.Skipped++;
+                    continue;
+                }
+
+                List<ResolvedWritebackEntry> resolvedEntries = null;
+                if (useSignature || usePacking)
+                {
+                    resolvedEntries = ResolveWritebackEntries(tgt.ModelItem, writeEntries);
+                }
+
+                string signatureValue = null;
+                string signatureCategory = null;
+                if (useSignature)
+                {
+                    var signatureSource = resolvedEntries ?? ResolveWritebackEntries(tgt.ModelItem, writeEntries);
+                    signatureCategory = ResolveSignatureCategory(signatureSource, settings);
+                    signatureValue = BuildWritebackSignature(signatureSource, usePacking);
+                    var existingSignature = ReadPropertyValue(tgt.ModelItem, signatureCategory, WritebackSignaturePropertyName);
+                    if (string.Equals(existingSignature, signatureValue, StringComparison.Ordinal))
+                    {
+                        result.SkippedUnchanged++;
+                        continue;
+                    }
+                }
+
+                if (resolvedEntries != null && resolvedEntries.Count == 0)
+                {
+                    result.Skipped++;
+                    continue;
+                }
+
+                void WriteResolvedEntries(IReadOnlyList<ResolvedWritebackEntry> entriesToWrite)
+                {
+                    foreach (var entry in entriesToWrite)
+                    {
+                        if (entry == null)
+                        {
+                            continue;
+                        }
+
+                        var wrote = false;
+                        if (writeToModelEffective)
+                        {
+                            wrote = isLegacy
+                                ? PropertyWriter.WriteProperty(tgt.ModelItem, entry.CategoryName, entry.PropertyName, entry.Value, WriteMode.Overwrite, string.Empty, showInternalProperties)
+                                : writer?.WriteProperty(entry.CategoryName, entry.PropertyName, entry.Value, WriteMode.Overwrite, string.Empty) == true;
+                        }
+                        else
+                        {
+                            wrote = true;
+                        }
+
+                        RegisterWrite(entry.CategoryName, wrote);
+                    }
+                }
+
+                if (usePacking)
+                {
+                    var sourceEntries = resolvedEntries ?? ResolveWritebackEntries(tgt.ModelItem, writeEntries);
+                    var packedValue = BuildPackedValue(sourceEntries);
+                    var packedEntries = new List<ResolvedWritebackEntry>();
+                    if (!string.IsNullOrWhiteSpace(packedValue))
+                    {
+                        var packedCategory = ResolvePackedCategory(sourceEntries, settings);
+                        packedEntries.Add(new ResolvedWritebackEntry(packedCategory, PackedWritebackPropertyName, packedValue));
+                    }
+
+                    if (useSignature && !string.IsNullOrWhiteSpace(signatureValue))
+                    {
+                        var sigCategory = signatureCategory ?? ResolveSignatureCategory(sourceEntries, settings);
+                        packedEntries.Add(new ResolvedWritebackEntry(sigCategory, WritebackSignaturePropertyName, signatureValue));
+                    }
+
+                    if (packedEntries.Count == 0)
+                    {
+                        result.Skipped++;
+                        continue;
+                    }
+
+                    WriteResolvedEntries(packedEntries);
+                }
+                else if (resolvedEntries != null)
+                {
+                    var entriesToWrite = resolvedEntries;
+                    if (useSignature && !string.IsNullOrWhiteSpace(signatureValue))
+                    {
+                        var sigCategory = signatureCategory ?? ResolveSignatureCategory(resolvedEntries, settings);
+                        entriesToWrite = new List<ResolvedWritebackEntry>(resolvedEntries)
+                        {
+                            new ResolvedWritebackEntry(sigCategory, WritebackSignaturePropertyName, signatureValue)
+                        };
+                    }
+
+                    WriteResolvedEntries(entriesToWrite);
+                }
+                else
+                {
+                    foreach (var entry in writeEntries)
+                    {
+                        var wrote = false;
+                        if (writeToModelEffective)
+                        {
+                            wrote = isLegacy
+                                ? PropertyWriter.WriteProperty(tgt.ModelItem, entry.CategoryName, entry.PropertyName, entry.Value, entry.Mode, entry.AppendSeparator, showInternalProperties)
+                                : writer?.WriteProperty(entry.CategoryName, entry.PropertyName, entry.Value, entry.Mode, entry.AppendSeparator) == true;
+                        }
+                        else
+                        {
+                            wrote = true;
+                        }
+
+                        RegisterWrite(entry.CategoryName, wrote);
+                    }
+                }
+
+                writer?.Commit();
+
+                if (!isLegacy && targetCategories.Count > 0)
+                {
+                    result.CategoriesWritten += targetCategories.Count;
+                }
+
+                if (targetPropertiesWritten > 0)
+                {
+                    result.TargetsWritten++;
+                }
+            }
+
+            sw.Stop();
+            result.Elapsed = sw.Elapsed;
+            if (result.CategoriesWritten > 0)
+            {
+                result.AvgMsPerCategoryWrite = result.Elapsed.TotalMilliseconds / result.CategoriesWritten;
+            }
+            if (result.TargetsWritten > 0)
+            {
+                result.AvgMsPerTargetWrite = result.Elapsed.TotalMilliseconds / result.TargetsWritten;
+            }
+            result.ZoneSummaries = summaryLookup.Values.ToList();
+            return result;
+        }
+
+        private sealed class WritebackEntry
+        {
+            public string CategoryName { get; set; }
+            public string PropertyName { get; set; }
+            public string Value { get; set; }
+            public WriteMode Mode { get; set; }
+            public string AppendSeparator { get; set; }
+        }
+
+        private sealed class ResolvedWritebackEntry
+        {
+            public ResolvedWritebackEntry(string categoryName, string propertyName, string value)
+            {
+                CategoryName = categoryName;
+                PropertyName = propertyName;
+                Value = value;
+            }
+
+            public string CategoryName { get; }
+            public string PropertyName { get; }
+            public string Value { get; }
+        }
+
+        private static List<WritebackEntry> BuildWritebackEntries(
+            IReadOnlyList<ZoneTargetIntersection> relevant,
+            IReadOnlyList<SpaceMapperMappingDefinition> mappings,
+            SpaceMapperProcessingSettings settings,
+            IReadOnlyDictionary<string, ZoneGeometry> zoneLookup,
+            ZoneValueLookup zoneValueLookup)
+        {
+            var entries = new List<WritebackEntry>();
+
+            if (settings?.TagPartialSeparately == true)
+            {
+                var behaviorCategory = settings.ZoneBehaviorCategory;
+                var behaviorProperty = settings.ZoneBehaviorPropertyName;
+                var containedValue = settings.ZoneBehaviorContainedValue;
+                var partialValue = settings.ZoneBehaviorPartialValue;
+
+                if (!string.IsNullOrWhiteSpace(behaviorCategory)
+                    && !string.IsNullOrWhiteSpace(behaviorProperty))
+                {
+                    var hasPartial = relevant.Any(r => r.IsPartial);
+                    var behaviorValue = hasPartial ? partialValue : containedValue;
+                    if (!string.IsNullOrWhiteSpace(behaviorValue))
+                    {
+                        entries.Add(new WritebackEntry
+                        {
+                            CategoryName = behaviorCategory,
+                            PropertyName = behaviorProperty,
+                            Value = behaviorValue,
+                            Mode = WriteMode.Overwrite,
+                            AppendSeparator = string.Empty
+                        });
+                    }
+                }
+            }
+
+            if (mappings == null || mappings.Count == 0)
+            {
+                return entries;
+            }
+
+            foreach (var mapping in mappings)
+            {
+                if (mapping == null
+                    || string.IsNullOrWhiteSpace(mapping.TargetCategory)
+                    || string.IsNullOrWhiteSpace(mapping.TargetPropertyName))
+                {
+                    continue;
+                }
+
+                var values = new List<string>();
+                foreach (var inter in relevant)
+                {
+                    if (inter == null || string.IsNullOrWhiteSpace(inter.ZoneId))
+                    {
+                        continue;
+                    }
+
+                    if (zoneLookup != null && !zoneLookup.ContainsKey(inter.ZoneId))
+                    {
+                        continue;
+                    }
+
+                    var val = zoneValueLookup?.GetValue(inter.ZoneId, mapping.ZoneCategory, mapping.ZonePropertyName);
+                    if (!string.IsNullOrWhiteSpace(val))
+                    {
+                        values.Add(val);
+                    }
+                }
+
+                var combined = CombineValues(values, mapping.MultiZoneCombineMode, mapping.AppendSeparator);
+                if (string.IsNullOrWhiteSpace(combined))
+                {
+                    continue;
+                }
+
+                entries.Add(new WritebackEntry
+                {
+                    CategoryName = mapping.TargetCategory,
+                    PropertyName = mapping.TargetPropertyName,
+                    Value = combined,
+                    Mode = mapping.WriteMode,
+                    AppendSeparator = mapping.AppendSeparator
+                });
+            }
+
+            return entries;
+        }
+
+        private static List<ResolvedWritebackEntry> ResolveWritebackEntries(ModelItem item, IReadOnlyList<WritebackEntry> entries)
+        {
+            var resolved = new Dictionary<string, ResolvedWritebackEntry>(StringComparer.OrdinalIgnoreCase);
+            if (item == null || entries == null || entries.Count == 0)
+            {
+                return new List<ResolvedWritebackEntry>();
+            }
+
+            foreach (var entry in entries)
+            {
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(entry.CategoryName)
+                    || string.IsNullOrWhiteSpace(entry.PropertyName))
+                {
+                    continue;
+                }
+
+                if (!TryResolveWriteValue(item, entry, out var finalValue))
+                {
+                    continue;
+                }
+
+                var key = $"{entry.CategoryName}|{entry.PropertyName}";
+                resolved[key] = new ResolvedWritebackEntry(entry.CategoryName, entry.PropertyName, finalValue);
+            }
+
+            return resolved.Values.ToList();
+        }
+
+        private static bool TryResolveWriteValue(ModelItem item, WritebackEntry entry, out string finalValue)
+        {
+            finalValue = entry?.Value ?? string.Empty;
+            if (entry == null || string.IsNullOrWhiteSpace(finalValue))
+            {
+                return false;
+            }
+
+            var category = entry.CategoryName;
+            var property = entry.PropertyName;
+            switch (entry.Mode)
+            {
+                case WriteMode.Append:
+                {
+                    var existing = ReadPropertyValue(item, category, property);
+                    if (!string.IsNullOrWhiteSpace(existing))
+                    {
+                        var sep = entry.AppendSeparator ?? string.Empty;
+                        finalValue = string.IsNullOrWhiteSpace(sep)
+                            ? $"{existing},{finalValue}"
+                            : $"{existing}{sep}{finalValue}";
+                    }
+                    return !string.IsNullOrWhiteSpace(finalValue);
+                }
+                case WriteMode.OnlyIfBlank:
+                {
+                    var existing = ReadPropertyValue(item, category, property);
+                    return string.IsNullOrWhiteSpace(existing);
+                }
+                default:
+                    return true;
+            }
+        }
+
+        private static string ResolvePackedCategory(IReadOnlyList<ResolvedWritebackEntry> entries, SpaceMapperProcessingSettings settings)
+        {
+            var category = GetDominantCategory(entries);
+            if (!string.IsNullOrWhiteSpace(category))
+            {
+                return category;
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings?.ZoneBehaviorCategory))
+            {
+                return settings.ZoneBehaviorCategory;
+            }
+
+            return "ME_SpaceInfo";
+        }
+
+        private static string ResolveSignatureCategory(IReadOnlyList<ResolvedWritebackEntry> entries, SpaceMapperProcessingSettings settings)
+        {
+            var category = GetDominantCategory(entries);
+            if (!string.IsNullOrWhiteSpace(category))
+            {
+                return category;
+            }
+
+            if (!string.IsNullOrWhiteSpace(settings?.ZoneBehaviorCategory))
+            {
+                return settings.ZoneBehaviorCategory;
+            }
+
+            return "ME_SpaceInfo";
+        }
+
+        private static string GetDominantCategory(IReadOnlyList<ResolvedWritebackEntry> entries)
+        {
+            if (entries == null || entries.Count == 0)
+            {
+                return null;
+            }
+
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in entries)
+            {
+                if (entry == null || string.IsNullOrWhiteSpace(entry.CategoryName))
+                {
+                    continue;
+                }
+
+                if (!counts.ContainsKey(entry.CategoryName))
+                {
+                    counts[entry.CategoryName] = 0;
+                }
+                counts[entry.CategoryName]++;
+            }
+
+            if (counts.Count == 0)
+            {
+                return null;
+            }
+
+            return counts
+                .OrderByDescending(kvp => kvp.Value)
+                .ThenBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(kvp => kvp.Key)
+                .FirstOrDefault();
+        }
+
+        private static string BuildPackedValue(IReadOnlyList<ResolvedWritebackEntry> entries)
+        {
+            if (entries == null || entries.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var ordered = entries
+                .Where(e => e != null
+                    && !string.IsNullOrWhiteSpace(e.CategoryName)
+                    && !string.IsNullOrWhiteSpace(e.PropertyName)
+                    && !string.IsNullOrWhiteSpace(e.Value))
+                .OrderBy(e => e.CategoryName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(e => e.PropertyName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (ordered.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var sb = new StringBuilder();
+            foreach (var entry in ordered)
+            {
+                if (sb.Length > 0)
+                {
+                    sb.Append(" | ");
+                }
+
+                sb.Append(entry.CategoryName)
+                    .Append('.')
+                    .Append(entry.PropertyName)
+                    .Append('=')
+                    .Append(EscapePackedValue(entry.Value));
+            }
+
+            return sb.ToString();
+        }
+
+        private static string BuildWritebackSignature(IReadOnlyList<ResolvedWritebackEntry> entries, bool packed)
+        {
+            var sb = new StringBuilder();
+            sb.Append("v1|pack=").Append(packed ? '1' : '0').Append('\n');
+
+            if (entries != null && entries.Count > 0)
+            {
+                var ordered = entries
+                    .Where(e => e != null
+                        && !string.IsNullOrWhiteSpace(e.CategoryName)
+                        && !string.IsNullOrWhiteSpace(e.PropertyName))
+                    .OrderBy(e => e.CategoryName, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(e => e.PropertyName, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var entry in ordered)
+                {
+                    sb.Append(entry.CategoryName)
+                        .Append('|')
+                        .Append(entry.PropertyName)
+                        .Append('|')
+                        .Append(entry.Value ?? string.Empty)
+                        .Append('\n');
+                }
+            }
+
+            using var sha = SHA256.Create();
+            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+            return ToHexString(hash);
+        }
+
+        private static string EscapePackedValue(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            return value.Replace("\r", string.Empty).Replace("\n", "\\n");
+        }
+
+        private static string ToHexString(byte[] bytes)
+        {
+            if (bytes == null || bytes.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            var sb = new StringBuilder(bytes.Length * 2);
+            foreach (var b in bytes)
+            {
+                sb.Append(b.ToString("x2"));
+            }
+            return sb.ToString();
+        }
+
+        private static string ReadPropertyValue(ModelItem item, string categoryName, string propertyName)
+        {
+            if (item == null || string.IsNullOrWhiteSpace(categoryName) || string.IsNullOrWhiteSpace(propertyName))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                foreach (var cat in item.PropertyCategories)
+                {
+                    if (!string.Equals(cat.DisplayName ?? cat.Name, categoryName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    foreach (var prop in cat.Properties)
+                    {
+                        if (string.Equals(prop.DisplayName ?? prop.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return prop.Value?.ToDisplayString() ?? prop.Value?.ToString() ?? string.Empty;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore read failures
+            }
+
+            return string.Empty;
+        }
+
+        private static void UpdateAssignmentStats(
+            IEnumerable<ZoneTargetIntersection> relevant,
+            IReadOnlyDictionary<string, ZoneGeometry> zoneLookup,
+            IDictionary<string, ZoneSummary> summaryLookup,
+            SpaceMapperWritebackResult result)
+        {
+            if (relevant == null || result == null || summaryLookup == null)
+            {
+                return;
+            }
+
+            foreach (var inter in relevant)
+            {
+                if (inter == null)
+                {
+                    continue;
+                }
+
+                if (inter.IsContained) result.ContainedTagged++;
+                if (inter.IsPartial) result.PartialTagged++;
+                if (zoneLookup != null && zoneLookup.TryGetValue(inter.ZoneId, out var z))
+                {
+                    if (!summaryLookup.TryGetValue(z.ZoneId, out var summary))
+                    {
+                        summary = new ZoneSummary { ZoneId = z.ZoneId, ZoneName = z.DisplayName };
+                        summaryLookup[z.ZoneId] = summary;
+                    }
+                    if (inter.IsContained) summary.ContainedCount++;
+                    if (inter.IsPartial) summary.PartialCount++;
+                }
+            }
+        }
+
+        internal static SpaceMapperResolvedData ResolveData(SpaceMapperRequest request, Document doc, ScrapeSession session)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (doc == null) throw new ArgumentNullException(nameof(doc));
+
+            var sw = Stopwatch.StartNew();
+            var zoneModels = ResolveZones(session, request.ZoneSource, request.ZoneSetName, doc).ToList();
+            var targetsByRule = new Dictionary<string, List<SpaceMapperTargetRule>>(StringComparer.OrdinalIgnoreCase);
+            var targetModels = ResolveTargets(doc, request.TargetRules, targetsByRule).ToList();
+            sw.Stop();
+
+            return new SpaceMapperResolvedData
+            {
+                ZoneModels = zoneModels,
+                TargetModels = targetModels,
+                TargetsByRule = targetsByRule,
+                ResolveTime = sw.Elapsed
+            };
+        }
+
+        internal static SpaceMapperComputeDataset BuildGeometryData(
+            SpaceMapperResolvedData resolved,
+            SpaceMapperProcessingSettings settings,
+            bool buildTargetGeometry,
+            CancellationToken token,
+            bool? forceRequirePlanes = null)
+        {
+            if (resolved == null) throw new ArgumentNullException(nameof(resolved));
+
+            var sw = Stopwatch.StartNew();
+            var zones = new List<ZoneGeometry>(resolved.ZoneModels.Count);
+            var requirePlanes = forceRequirePlanes ?? (settings == null || !settings.UseOriginPointOnly);
+
+            foreach (var zoneModel in resolved.ZoneModels)
+            {
+                token.ThrowIfCancellationRequested();
+                var zone = GeometryExtractor.ExtractZoneGeometry(zoneModel.ModelItem, zoneModel.ItemKey, zoneModel.DisplayName, settings);
+                if (zone?.BoundingBox == null)
+                {
+                    continue;
+                }
+
+                if (requirePlanes && (zone.Planes == null || zone.Planes.Count == 0))
+                {
+                    continue;
+                }
+
+                zones.Add(zone);
+            }
+
+            var targetsForEngine = new List<TargetGeometry>(resolved.TargetModels.Count);
+            if (buildTargetGeometry)
+            {
+                foreach (var target in resolved.TargetModels)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var geom = GeometryExtractor.ExtractTargetGeometry(target.ModelItem, target.ItemKey, target.DisplayName);
+                    if (geom?.BoundingBox == null)
+                    {
+                        continue;
+                    }
+                    targetsForEngine.Add(geom);
+                }
+            }
+            else
+            {
+                targetsForEngine.AddRange(resolved.TargetModels);
+            }
+
+            sw.Stop();
+
+            return new SpaceMapperComputeDataset
+            {
+                Zones = zones,
+                TargetsForEngine = targetsForEngine,
+                ZoneModels = resolved.ZoneModels,
+                TargetModels = resolved.TargetModels,
+                TargetsByRule = resolved.TargetsByRule,
+                ResolveTime = resolved.ResolveTime,
+                BuildGeometryTime = sw.Elapsed
+            };
+        }
+
         private static SpaceMapperPreflightCache TryGetReusablePreflightCache(SpaceMapperRequest request, SpaceMapperPreflightCache cache, IReadOnlyList<TargetGeometry> targets)
         {
-            if (request == null || cache == null || cache.Grid == null || cache.TargetBounds == null || cache.TargetKeys == null)
+            if (request == null || cache == null)
+            {
+                return null;
+            }
+
+            var hasTargetGrid = cache.Grid != null
+                && cache.TargetBounds != null
+                && cache.TargetKeys != null;
+
+            var hasZoneGrid = cache.ZoneGrid != null
+                && cache.TargetBounds != null
+                && cache.TargetKeys != null
+                && cache.ZoneBoundsInflated != null
+                && cache.ZoneIndexMap != null;
+
+            if (!hasTargetGrid && !hasZoneGrid)
             {
                 return null;
             }
@@ -391,9 +1076,20 @@ namespace MicroEng.Navisworks
             {
                 case ZoneSourceType.ZoneSelectionSet:
                 case ZoneSourceType.ZoneSearchSet:
-                    // Placeholder: fall back to selection for now
-                    foreach (ModelItem item in doc.CurrentSelection?.SelectedItems ?? new ModelItemCollection())
-                        yield return new SpaceMapperResolvedItem { ItemKey = GetItemKey(item), ModelItem = item, DisplayName = item.DisplayName };
+                    foreach (var item in ResolveSelectionSetInternal(setName))
+                    {
+                        if (item == null)
+                        {
+                            continue;
+                        }
+
+                        yield return new SpaceMapperResolvedItem
+                        {
+                            ItemKey = GetItemKey(item),
+                            ModelItem = item,
+                            DisplayName = item.DisplayName
+                        };
+                    }
                     break;
                 case ZoneSourceType.DataScraperZones:
                 default:
@@ -740,18 +1436,51 @@ namespace MicroEng.Navisworks
 
     internal static class PropertyWriter
     {
-        public static void WriteProperty(ModelItem item, string categoryName, string propertyName, string value, WriteMode mode, string appendSeparator)
+        public static bool WriteProperty(
+            ModelItem item,
+            string categoryName,
+            string propertyName,
+            string value,
+            WriteMode mode,
+            string appendSeparator,
+            bool showInternalProperties)
         {
-            if (item == null) return;
+            if (TryWriteProperty(item, categoryName, propertyName, value, mode, appendSeparator, showInternalProperties))
+            {
+                return true;
+            }
+
+            if (!showInternalProperties)
+            {
+                return TryWriteProperty(item, categoryName, propertyName, value, mode, appendSeparator, true);
+            }
+
+            return false;
+        }
+
+        private static bool TryWriteProperty(
+            ModelItem item,
+            string categoryName,
+            string propertyName,
+            string value,
+            WriteMode mode,
+            string appendSeparator,
+            bool showInternalProperties)
+        {
+            if (item == null) return false;
 
             categoryName = string.IsNullOrWhiteSpace(categoryName) ? null : categoryName.Trim();
             propertyName = string.IsNullOrWhiteSpace(propertyName) ? null : propertyName.Trim();
-            if (string.IsNullOrWhiteSpace(categoryName) || string.IsNullOrWhiteSpace(propertyName)) return;
+            if (string.IsNullOrWhiteSpace(categoryName) || string.IsNullOrWhiteSpace(propertyName)) return false;
 
-            var existing = ReadProperty(item, categoryName, propertyName);
-            if (mode == WriteMode.OnlyIfBlank && !string.IsNullOrWhiteSpace(existing))
+            var existing = string.Empty;
+            if (mode == WriteMode.Append || mode == WriteMode.OnlyIfBlank)
             {
-                return;
+                existing = ReadProperty(item, categoryName, propertyName);
+                if (mode == WriteMode.OnlyIfBlank && !string.IsNullOrWhiteSpace(existing))
+                {
+                    return false;
+                }
             }
 
             var finalValue = value;
@@ -766,7 +1495,11 @@ namespace MicroEng.Navisworks
             {
                 var state = ComBridge.State;
                 var path = ComBridge.ToInwOaPath(item);
-                var propertyNode = (ComApi.InwGUIPropertyNode2)state.GetGUIPropertyNode(path, true);
+                var propertyNode = (ComApi.InwGUIPropertyNode2)state.GetGUIPropertyNode(path, showInternalProperties);
+                if (propertyNode == null)
+                {
+                    return false;
+                }
 
                 ComApi.InwOaPropertyVec propertyVector = null;
                 try
@@ -785,22 +1518,29 @@ namespace MicroEng.Navisworks
                         ComApi.nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
                 }
 
-                var existingProp = FindProperty(propertyVector, propertyName);
-                if (existingProp == null)
-                {
-                    existingProp = (ComApi.InwOaProperty)state.ObjectFactory(
-                        ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
-                    existingProp.name = propertyName;
+            var existingProp = FindProperty(propertyVector, propertyName);
+            if (existingProp != null && IsSameValue(existingProp, finalValue))
+            {
+                return false;
+            }
+
+            if (existingProp == null)
+            {
+                existingProp = (ComApi.InwOaProperty)state.ObjectFactory(
+                    ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
+                existingProp.name = propertyName;
                     existingProp.UserName = propertyName;
                     propertyVector.Properties().Add(existingProp);
                 }
 
                 existingProp.value = finalValue;
                 propertyNode.SetUserDefined(0, categoryName, categoryName, propertyVector);
+                return true;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Trace.WriteLine($"[SpaceMapper] Failed to write {categoryName}.{propertyName} on {item.DisplayName}: {ex.Message}");
+                return false;
             }
         }
 
@@ -817,6 +1557,77 @@ namespace MicroEng.Navisworks
             }
 
             return null;
+        }
+
+        private static ComApi.InwOaPropertyVec GetOrCreatePropertyVector(
+            ComApi.InwGUIPropertyNode2 propertyNode,
+            string categoryName)
+        {
+            if (propertyNode == null || string.IsNullOrWhiteSpace(categoryName))
+            {
+                return null;
+            }
+
+            ComApi.InwOaPropertyVec propertyVector = null;
+            try
+            {
+                var getMethod = propertyNode.GetType().GetMethod("GetUserDefined");
+                propertyVector = getMethod?.Invoke(propertyNode, new object[] { 0, categoryName }) as ComApi.InwOaPropertyVec;
+            }
+            catch
+            {
+                // ignore read failures
+            }
+
+            if (propertyVector == null)
+            {
+                var state = ComBridge.State;
+                propertyVector = (ComApi.InwOaPropertyVec)state.ObjectFactory(
+                    ComApi.nwEObjectType.eObjectType_nwOaPropertyVec, null, null);
+            }
+
+            return propertyVector;
+        }
+
+        private static bool IsSameValue(ComApi.InwOaProperty prop, string value)
+        {
+            if (prop == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var existing = prop.value?.ToString() ?? string.Empty;
+                return string.Equals(existing, value ?? string.Empty, StringComparison.Ordinal);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string GetPropertyValue(ComApi.InwOaPropertyVec vec, string propertyName)
+        {
+            if (vec == null || string.IsNullOrWhiteSpace(propertyName))
+            {
+                return string.Empty;
+            }
+
+            var prop = FindProperty(vec, propertyName);
+            if (prop == null)
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                return prop.value?.ToString() ?? string.Empty;
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private static string ReadProperty(ModelItem item, string categoryName, string propertyName)
@@ -842,6 +1653,190 @@ namespace MicroEng.Navisworks
                 // ignore
             }
             return string.Empty;
+        }
+
+        internal sealed class PropertyWriterSession
+        {
+            private readonly ModelItem _item;
+            private ComApi.InwGUIPropertyNode2 _propertyNode;
+            private readonly bool _preferShowInternal;
+            private bool _fallbackTried;
+            private readonly Dictionary<string, ComApi.InwOaPropertyVec> _categoryVectors =
+                new(StringComparer.OrdinalIgnoreCase);
+            private readonly HashSet<string> _dirtyCategories = new(StringComparer.OrdinalIgnoreCase);
+            private readonly Dictionary<string, HashSet<string>> _dirtyProperties =
+                new(StringComparer.OrdinalIgnoreCase);
+
+            public PropertyWriterSession(ModelItem item, bool showInternalProperties)
+            {
+                _item = item;
+                _preferShowInternal = showInternalProperties;
+                if (item == null)
+                {
+                    return;
+                }
+
+                _propertyNode = TryGetPropertyNode(showInternalProperties);
+                if (_propertyNode == null && !showInternalProperties)
+                {
+                    _fallbackTried = true;
+                    _propertyNode = TryGetPropertyNode(true);
+                }
+            }
+
+            public bool WriteProperty(string categoryName, string propertyName, string value, WriteMode mode, string appendSeparator)
+            {
+                if (_propertyNode == null || _item == null)
+                {
+                    return false;
+                }
+
+                categoryName = string.IsNullOrWhiteSpace(categoryName) ? null : categoryName.Trim();
+                propertyName = string.IsNullOrWhiteSpace(propertyName) ? null : propertyName.Trim();
+                if (string.IsNullOrWhiteSpace(categoryName) || string.IsNullOrWhiteSpace(propertyName))
+                {
+                    return false;
+                }
+
+                if (!_categoryVectors.TryGetValue(categoryName, out var propertyVector))
+                {
+                    propertyVector = GetOrCreatePropertyVector(_propertyNode, categoryName);
+                    if (propertyVector == null)
+                    {
+                        return false;
+                    }
+                    _categoryVectors[categoryName] = propertyVector;
+                }
+
+                var existing = string.Empty;
+                if (mode == WriteMode.Append || mode == WriteMode.OnlyIfBlank)
+                {
+                    existing = GetPropertyValue(propertyVector, propertyName);
+                    if (string.IsNullOrWhiteSpace(existing))
+                    {
+                        existing = ReadProperty(_item, categoryName, propertyName);
+                    }
+
+                    if (mode == WriteMode.OnlyIfBlank && !string.IsNullOrWhiteSpace(existing))
+                    {
+                        return false;
+                    }
+                }
+
+                var finalValue = value;
+                if (mode == WriteMode.Append && !string.IsNullOrWhiteSpace(existing))
+                {
+                    finalValue = string.IsNullOrWhiteSpace(appendSeparator)
+                        ? $"{existing},{value}"
+                        : $"{existing}{appendSeparator}{value}";
+                }
+
+                var existingProp = FindProperty(propertyVector, propertyName);
+                if (existingProp != null && IsSameValue(existingProp, finalValue))
+                {
+                    return false;
+                }
+
+                if (existingProp == null)
+                {
+                    var state = ComBridge.State;
+                    existingProp = (ComApi.InwOaProperty)state.ObjectFactory(
+                        ComApi.nwEObjectType.eObjectType_nwOaProperty, null, null);
+                    existingProp.name = propertyName;
+                    existingProp.UserName = propertyName;
+                    propertyVector.Properties().Add(existingProp);
+                }
+
+                existingProp.value = finalValue;
+                _dirtyCategories.Add(categoryName);
+                TrackDirtyProperty(categoryName, propertyName);
+                return true;
+            }
+
+            public void Commit()
+            {
+                if (_propertyNode == null || _dirtyCategories.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var kvp in _categoryVectors)
+                {
+                    if (!_dirtyCategories.Contains(kvp.Key))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        _propertyNode.SetUserDefined(0, kvp.Key, kvp.Key, kvp.Value);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!_preferShowInternal && !_fallbackTried && TryFallbackPropertyNode())
+                        {
+                            try
+                            {
+                                _propertyNode.SetUserDefined(0, kvp.Key, kvp.Key, kvp.Value);
+                                continue;
+                            }
+                            catch (Exception retryEx)
+                            {
+                                System.Diagnostics.Trace.WriteLine($"[SpaceMapper] Failed to write category {kvp.Key} on {_item?.DisplayName}: {retryEx.Message}");
+                                continue;
+                            }
+                        }
+
+                        System.Diagnostics.Trace.WriteLine($"[SpaceMapper] Failed to write category {kvp.Key} on {_item?.DisplayName}: {ex.Message}");
+                    }
+                }
+            }
+
+            public int DirtyCategoryCount => _dirtyCategories.Count;
+
+            public int DirtyPropertyCount
+            {
+                get
+                {
+                    var count = 0;
+                    foreach (var set in _dirtyProperties.Values)
+                    {
+                        count += set.Count;
+                    }
+                    return count;
+                }
+            }
+
+            private ComApi.InwGUIPropertyNode2 TryGetPropertyNode(bool showInternalProperties)
+            {
+                try
+                {
+                    var state = ComBridge.State;
+                    var path = ComBridge.ToInwOaPath(_item);
+                    return (ComApi.InwGUIPropertyNode2)state.GetGUIPropertyNode(path, showInternalProperties);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            private bool TryFallbackPropertyNode()
+            {
+                _fallbackTried = true;
+                _propertyNode = TryGetPropertyNode(true);
+                return _propertyNode != null;
+            }
+
+            private void TrackDirtyProperty(string categoryName, string propertyName)
+            {
+                if (!_dirtyProperties.TryGetValue(categoryName, out var set))
+                {
+                    set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    _dirtyProperties[categoryName] = set;
+                }
+                set.Add(propertyName);
+            }
         }
     }
 }

@@ -190,7 +190,7 @@ namespace MicroEng.Navisworks
             {
                 LegacySpaceMapperTargetType.SelectionTreeLevel => SpaceMapperTargetDefinition.SelectionTreeLevel,
                 LegacySpaceMapperTargetType.SelectionSet => SpaceMapperTargetDefinition.SelectionSet,
-                LegacySpaceMapperTargetType.SearchSet => SpaceMapperTargetDefinition.SearchSet,
+                LegacySpaceMapperTargetType.SearchSet => SpaceMapperTargetDefinition.SelectionSet,
                 LegacySpaceMapperTargetType.CurrentSelection => SpaceMapperTargetDefinition.CurrentSelection,
                 _ => SpaceMapperTargetDefinition.EntireModel
             };
@@ -201,7 +201,7 @@ namespace MicroEng.Navisworks
             return source switch
             {
                 LegacyTargetSourceType.SelectionSet => SpaceMapperTargetDefinition.SelectionSet,
-                LegacyTargetSourceType.SearchSet => SpaceMapperTargetDefinition.SearchSet,
+                LegacyTargetSourceType.SearchSet => SpaceMapperTargetDefinition.SelectionSet,
                 LegacyTargetSourceType.EntireModel => SpaceMapperTargetDefinition.EntireModel,
                 _ => SpaceMapperTargetDefinition.EntireModel
             };
@@ -214,10 +214,14 @@ namespace MicroEng.Navisworks
                 return;
             }
 
+            if (rule.TargetDefinition == SpaceMapperTargetDefinition.SearchSet)
+            {
+                rule.TargetDefinition = SpaceMapperTargetDefinition.SelectionSet;
+            }
+
             switch (rule.TargetDefinition)
             {
                 case SpaceMapperTargetDefinition.SelectionSet:
-                case SpaceMapperTargetDefinition.SearchSet:
                     rule.MinLevel = null;
                     rule.MaxLevel = null;
                     break;

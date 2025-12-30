@@ -31,6 +31,10 @@ namespace MicroEng.Navisworks
         internal TextBox MappingNameBox => MappingNameBoxControl;
         internal TextBox ZoneCategoryBox => ZoneCategoryBoxControl;
         internal TextBox ZonePropertyBox => ZonePropertyBoxControl;
+        internal Wpf.Ui.Controls.Button ZonePropertyPickerButton => ZonePropertyPickerButtonControl;
+        internal Wpf.Ui.Controls.Flyout ZonePropertyPickerFlyout => ZonePropertyPickerFlyoutControl;
+        internal TreeView ZonePropertyTreeView => ZonePropertyTreeViewControl;
+        internal TextBlock ZonePropertyPickerStatusText => ZonePropertyPickerStatusTextControl;
         internal TextBox TargetCategoryBox => TargetCategoryBoxControl;
         internal TextBox TargetPropertyBox => TargetPropertyBoxControl;
         internal ComboBox WriteModeCombo => WriteModeComboBoxControl;

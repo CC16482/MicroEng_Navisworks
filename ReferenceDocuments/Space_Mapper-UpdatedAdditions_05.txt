@@ -1,0 +1,289 @@
+Below is a **complete, “drop-in” approach** to add the **ultra‑fast “Origin Point in Zone AABB”** method to Space Mapper, and integrate it **cleanly via your existing Performance Presets** (your “Option B”: no extra UI clutter—Fast preset just *becomes* the origin-based method).
+
+I’m also calling out one **important bug** I can see in your current plane-building fallback that will cause **Normal/Accurate** to behave incorrectly until fixed.
+
+---
+
+## 1) What you’re implementing
+
+### New Fast method
+
+For each target element:
+
+* Compute its **origin point** as the **center of its bounding box**:
+
+  * `cx = (minX + maxX) / 2`, etc.
+* For each zone:
+
+  * Compute the zone’s **query AABB** (your existing offset-inflated zone bounds)
+  * Check: **Is the target origin point inside the zone AABB?**
+
+    * If yes → treat as **Contained**
+    * If no → usually ignore (fastest)
+    * Optionally (only when needed) mark **Partial** if the target AABB overlaps the zone AABB
+
+This is **extremely fast** and works great for:
+
+* fast tagging passes
+* “good enough” room attribution
+* early QA workflows
+* pre-populating fields for downstream tools
+
+### “Option B” preset integration (clean UX)
+
+* **Fast** preset ⇒ **Origin Point in Zone AABB**
+* **Normal / Accurate** ⇒ keep your existing methods
+* **Auto** ⇒ still resolves to Fast/Normal/Accurate as you already do, and therefore automatically chooses the origin method when it picks Fast.
+
+No new dropdowns/toggles required.
+
+---
+
+## 2) One critical issue you should fix now (Normal/Accurate bug)
+
+### Problem
+
+Your `GeometryMath.BuildPlanes(...)` currently tries to build planes using vertex triplets **even when the “vertices” are just bounding-box corners** (8 points). That produces **random triangle planes**, not the 6 AABB planes, and then your “fallback to bbox planes” **never runs** because `planes.Count != 0`.
+
+That will cause `ClassifyByPlanes(...)` to reject targets incorrectly (or behave unpredictably) in Normal/Accurate.
+
+**Fix:** only build triangle planes when `vertices.Count % 3 == 0` (i.e., real triangle lists). Otherwise, fall back to bbox planes.
+
+This fix is in your geometry file here. 
+
+---
+
+## 3) Code changes
+
+### 3.1 Fix BuildPlanes fallback (RECOMMENDED / REQUIRED)
+
+**File:** `SpaceMapperGeometry.cs` (the one containing `GeometryMath`) 
+
+**Replace this block:**
+
+```csharp
+if (vertices != null && vertices.Count >= 3)
+{
+    // Use triangle-based planes (one per tri from triplets)
+    for (int i = 0; i + 2 < vertices.Count; i += 3)
+    {
+        ...
+    }
+}
+```
+
+**With this safer version:**
+
+```csharp
+// Only treat "vertices" as triangle soup if it's actually a triangle list.
+// Bounding-box corner lists (8 verts) must NOT go through this path.
+if (vertices != null && vertices.Count >= 3 && (vertices.Count % 3 == 0))
+{
+    for (int i = 0; i + 2 < vertices.Count; i += 3)
+    {
+        var p0 = vertices[i];
+        var p1 = vertices[i + 1];
+        var p2 = vertices[i + 2];
+        var plane = FromTriangle(p0, p1, p2);
+        if (plane.HasValue)
+        {
+            planes.Add(plane.Value);
+        }
+    }
+}
+```
+
+This ensures bbox corners don’t create bogus planes and the bbox-plane fallback will run.
+
+---
+
+### 3.2 Implement Fast preset = Origin Point in Zone AABB
+
+**File:** `SpaceMapperEngines.cs` 
+Class: `CpuIntersectionEngine`
+
+#### A) Add a new classifier method
+
+Add this near the other `Classify*` methods (e.g., near `ClassifyAabbOnly` / `ClassifyByPlanes`):
+
+```csharp
+private static ZoneTargetIntersection ClassifyByOriginPointInZoneAabb(
+    ZoneGeometry zone,
+    in Aabb zoneBounds,
+    in Aabb targetBounds,
+    string targetKey,
+    bool allowPartial)
+{
+    // Compute "origin" as the target bounding box center (very fast).
+    var cx = (targetBounds.MinX + targetBounds.MaxX) * 0.5;
+    var cy = (targetBounds.MinY + targetBounds.MaxY) * 0.5;
+    var cz = (targetBounds.MinZ + targetBounds.MaxZ) * 0.5;
+
+    var inside =
+        cx >= zoneBounds.MinX && cx <= zoneBounds.MaxX &&
+        cy >= zoneBounds.MinY && cy <= zoneBounds.MaxY &&
+        cz >= zoneBounds.MinZ && cz <= zoneBounds.MaxZ;
+
+    if (inside)
+    {
+        return new ZoneTargetIntersection
+        {
+            ZoneId = zone.ZoneId,
+            TargetItemKey = targetKey,
+            IsContained = true,
+            IsPartial = false,
+            // Still compute overlap (cheap) for best-zone selection when multi-zone is off
+            OverlapVolume = EstimateOverlap(zoneBounds, targetBounds)
+        };
+    }
+
+    // Fastest path: if we don't need partial detection, bail out immediately.
+    if (!allowPartial)
+        return null;
+
+    // Optional partial: if AABBs intersect but origin is not inside, tag as partial.
+    if (!zoneBounds.Intersects(targetBounds))
+        return null;
+
+    return new ZoneTargetIntersection
+    {
+        ZoneId = zone.ZoneId,
+        TargetItemKey = targetKey,
+        IsContained = false,
+        IsPartial = true,
+        OverlapVolume = EstimateOverlap(zoneBounds, targetBounds)
+    };
+}
+```
+
+#### B) Modify ClassifyIntersection to use it for Fast
+
+Find:
+
+```csharp
+private static ZoneTargetIntersection ClassifyIntersection(ZoneGeometry zone, in Aabb zoneBounds, in Aabb targetBounds, string targetKey, SpaceMapperPerformancePreset preset)
+{
+    if (preset == SpaceMapperPerformancePreset.Fast)
+    {
+        return ClassifyAabbOnly(zone, zoneBounds, targetBounds, targetKey);
+    }
+
+    return ClassifyByPlanes(zone, zoneBounds, targetBounds, targetKey, preset);
+}
+```
+
+Replace with:
+
+```csharp
+private static ZoneTargetIntersection ClassifyIntersection(
+    ZoneGeometry zone,
+    in Aabb zoneBounds,
+    in Aabb targetBounds,
+    string targetKey,
+    SpaceMapperPerformancePreset preset,
+    bool allowFastPartial)
+{
+    if (preset == SpaceMapperPerformancePreset.Fast)
+    {
+        // Fast == origin point in zone AABB (with optional partial tagging)
+        return ClassifyByOriginPointInZoneAabb(zone, zoneBounds, targetBounds, targetKey, allowFastPartial);
+    }
+
+    return ClassifyByPlanes(zone, zoneBounds, targetBounds, targetKey, preset);
+}
+```
+
+#### C) Update the call site inside the zone loop
+
+Inside `ComputeIntersections(...)` in the `Parallel.ForEach(zones, ...)` body, you currently do:
+
+```csharp
+var hit = ClassifyIntersection(zone, zoneBounds, targetBounds[idx], targetKeys[idx], effectivePreset);
+```
+
+Change it to:
+
+```csharp
+// Only compute partial classification in Fast when the user actually needs it
+// (so Fast stays extremely fast by default).
+var allowFastPartial = settings != null && (settings.TagPartialSeparately || settings.TreatPartialAsContained);
+
+var hit = ClassifyIntersection(zone, zoneBounds, targetBounds[idx], targetKeys[idx], effectivePreset, allowFastPartial);
+```
+
+**Important:** declare `allowFastPartial` once per zone (outside the `VisitCandidates` callback) if you want it micro-optimized, e.g.:
+
+```csharp
+var allowFastPartial = settings != null && (settings.TagPartialSeparately || settings.TreatPartialAsContained);
+
+grid.VisitCandidates(zoneBounds, visited, ref stamp, idx =>
+{
+    ...
+    var hit = ClassifyIntersection(zone, zoneBounds, targetBounds[idx], targetKeys[idx], effectivePreset, allowFastPartial);
+    ...
+});
+```
+
+---
+
+## 4) UI / preset text updates (so users understand what “Fast” now means)
+
+You’re already using:
+
+```csharp
+_processingPage.PresetDescriptionText.Text = SpaceMapperPresetLogic.DescribePreset(selected);
+```
+
+in `SpaceMapperControl.xaml.cs`. 
+
+### Update your preset description strings
+
+In **`SpaceMapperPresetLogic.DescribePreset(...)`** (wherever that is in your repo), update **Fast** to something like:
+
+* **Fast:** “Spatial grid + origin point (bbox center) in zone AABB. Best for quick tagging.”
+* Optionally add: “Enable Tag Partial Separately (or Treat Partial as Contained) to include partial AABB overlap tagging.”
+
+No functional dependency here—just clarity.
+
+---
+
+## 5) How this affects accuracy and behavior
+
+### Expected behavior changes
+
+* **Fast** will now:
+
+  * Tag elements where the **bbox center** falls inside the zone AABB as **Contained**.
+  * Only compute **Partial** overlaps if the user enables:
+
+    * **Tag Partial Separately**, or
+    * **Treat Partial as Contained**
+* Large objects that span multiple rooms:
+
+  * may be assigned to whichever zone contains their bbox center
+* For multi-zone enabled:
+
+  * you may see multiple zones contain a target’s origin (e.g., overlapping AABBs) → your existing multi-zone logic still works.
+
+### Why this is good
+
+This becomes your “instant mapping” mode that users can trust for bulk tagging and then refine with Normal/Accurate if needed.
+
+---
+
+
+
+## 6) Quick sanity test you should run after implementing
+
+1. Open a model with Rooms and Objects.
+2. In Space Mapper:
+
+   * Preset = **Fast**
+   * Tag Partial Separately = **off**
+   * Run Preflight (optional) then Run Space Mapper
+3. Confirm:
+
+   * Objects are tagged primarily by “center point in room AABB”
+4. Turn **Tag Partial Separately = on** and re-run:
+
+   * Confirm some extra “partial” hits appear where AABBs overlap but centers are outside.

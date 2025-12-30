@@ -68,6 +68,7 @@ namespace MicroEng.Navisworks
         internal TextBlock EstimateRuntimeText => EstimateRuntimeTextControl;
         internal TextBlock EstimateCountsText => EstimateCountsTextControl;
         internal TextBlock EstimatePairsText => EstimatePairsTextControl;
+        internal TextBlock EstimateAvgLabelText => EstimateAvgLabelTextControl;
         internal TextBlock EstimateAvgText => EstimateAvgTextControl;
         internal TextBlock EstimateConfidenceText => EstimateConfidenceTextControl;
         internal TextBlock EstimateCellSizeText => EstimateCellSizeTextControl;
@@ -77,7 +78,21 @@ namespace MicroEng.Navisworks
         internal Wpf.Ui.Controls.Button RunPreflightButton => RunPreflightButtonControl;
         internal CheckBox LiveEstimateToggle => LiveEstimateToggleControl;
         internal CheckBox ReusePreflightToggle => ReusePreflightToggleControl;
+        internal Wpf.Ui.Controls.Button ComparisonReportButton => ComparisonReportButtonControl;
+        internal TextBlock ComparisonReportStatusText => ComparisonReportStatusTextControl;
+        internal ComboBox BenchmarkModeCombo => BenchmarkModeComboControl;
+        internal TextBlock BenchmarkModeHintText => BenchmarkModeHintTextControl;
+        internal ComboBox WritebackStrategyCombo => WritebackStrategyComboControl;
+        internal CheckBox SkipUnchangedWritebackCheck => SkipUnchangedWritebackCheckControl;
+        internal CheckBox PackWritebackCheck => PackWritebackCheckControl;
+        internal CheckBox ShowInternalWritebackCheck => ShowInternalWritebackCheckControl;
+        internal CheckBox CloseDockPanesCheck => CloseDockPanesCheckControl;
+        internal TextBlock BenchmarkSummaryText => BenchmarkSummaryTextControl;
+        internal TextBlock BenchmarkSummaryDetailText => BenchmarkSummaryDetailTextControl;
         internal Expander AdvancedPerformanceExpander => AdvancedPerformanceExpanderControl;
+        internal ComboBox FastTraversalCombo => FastTraversalComboControl;
+        internal TextBlock FastTraversalHintText => FastTraversalHintTextControl;
+        internal TextBlock FastTraversalResolvedText => FastTraversalResolvedTextControl;
 
         private void OnOffset3DFlyoutOpened(WpfFlyout sender, RoutedEventArgs args)
         {

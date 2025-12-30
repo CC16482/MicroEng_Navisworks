@@ -1,0 +1,222 @@
+Your benchmark data is telling you something very clear: **Space Mapper is no longer compute‑bound; it’s write‑bound.**
+
+In your “ComputeOnly” runs, total time is on the order of **milliseconds** (single‑digit to tens of ms). 
+In your “FullWriteback” runs, total time is **~103–249 seconds**, and essentially all of that is **Postprocess/writeback**. 
+
+If we compute the implied average cost per write from your FullWriteback report:
+
+* Normal/Zone‑major: 208,841 ms / 1,444 writes ≈ **145 ms per write**
+* Fast/Zone‑major: 249,082 ms / 1,502 writes ≈ **166 ms per write**
+* Accurate/Zone‑major: 248,674 ms / 1,484 writes ≈ **168 ms per write**
+* Fast/Target‑major: 102,821 ms / 660 writes ≈ **156 ms per write**
+
+So, your “handicap” is exactly what you described: **each COM write is expensive**, and overall time scales almost linearly with “writes performed”.
+
+---
+
+## Why COM property writes are so slow in Navisworks
+
+Even if your geometry engine is extremely optimized, **user-defined property writes via COM** are typically slow because they:
+
+1. **Cross the COM interop boundary** per call (marshalling, apartment rules, etc.).
+2. **Trigger internal model/property database updates** inside Navisworks.
+3. Often **cause UI watchers to refresh** (Properties window, Find Items, Selection Inspector, Sets, etc.).
+4. Frequently require “category reconstruction” semantics: in Navisworks COM, updating/adding to a user-defined category is not a cheap “append”; many patterns effectively recreate the category contents. This is discussed in practical COM property-writing guidance.
+
+Bottom line: **you cannot GPU your way out of this**. The GPU can help find intersections, but it won’t help the COM write pipeline.
+
+---
+
+## The highest-impact ways to speed it up (ranked)
+
+### 1) Reduce the number of COM writes (this is the biggest lever)
+
+Your report shows ~660–1502 writes per run. If you halve writes, you roughly halve time (your own results show that).
+
+Concrete strategies:
+
+* **Write one category per target item, once** (not “one property at a time”).
+* **Pack multiple values into fewer properties**:
+
+  * Instead of writing ZoneName, ZoneId, Level, Discipline, etc. as separate COM writes, write:
+
+    * One user-defined category: `ME_SpaceMapper`
+    * A small fixed set of properties inside it (or even one JSON payload property if you want extreme write minimization).
+* **Best Zone Selection (single-zone)**: if you currently write multiple zone values per target (multi-zone), and your mapping schema writes more properties for multi-zone outcomes, enforce “best zone” and store alternates in one delimited field (still one write).
+
+This is the “physics” of your benchmark: at ~150 ms/write, dropping from 1500 → 300 writes is the difference between **~4 minutes → ~45 seconds**.
+
+---
+
+### 2) Batch writes per item and per category (avoid redundant COM setup)
+
+From the code pattern you’ve shown earlier in your project, the common slow path is:
+
+* Convert ModelItem → COM Path
+* `GetGUIPropertyNode(...)`
+* Build property vec
+* `SetUserDefined(...)`
+  …and repeat that for each mapping/property.
+
+Instead, do:
+
+* For each target item:
+
+  * Compute all mapping outputs first
+  * Group by `TargetCategory` (ideally there’s only one)
+  * Make **one** `GetGUIPropertyNode(...)`
+  * Make **one** `SetUserDefined(...)` per category with **all properties in the vec**
+
+This reduces “writes performed” in your report from:
+
+* `#targets × #mappings`
+  to
+* `#targets × #categories` (often 1)
+
+Given your report, you’re effectively doing ~2 writes per target on some variants; batching could cut total time close to in half immediately. 
+
+---
+
+### 3) Avoid “create category” behavior that can multiply tabs and work
+
+In COM patterns, `SetUserDefined` typically has a mode that controls create vs overwrite. Practical examples show different behaviors based on that first argument.
+
+If you “create” repeatedly, you risk:
+
+* duplicate tabs (“Tab1”, “Tab1”, …),
+* more internal churn,
+* bigger property database overhead,
+* slower subsequent writes.
+
+**Performance + correctness recommendation:**
+
+* Treat `ME_SpaceMapper` as *MicroEng-owned*.
+* Always **overwrite** that category in one call per item (safe because you control what belongs in it).
+* Do not attempt to “add one property to an existing category” unless you really must preserve other data; that preservation requires copying existing properties (extra overhead).
+
+---
+
+### 4) Minimize UI-driven slowdowns during writeback
+
+There’s long-standing community guidance that **open dock panes can drastically slow property writing**, especially panes like Find Items / Properties because they continuously refresh.
+
+Practical approach in MicroEng:
+
+* On Step 3 (Processing), show a “Writeback Performance Checklist” banner:
+
+  * “Close Properties window”
+  * “Close Find Items / Sets / Selection Inspector”
+  * “Disable selection sync while writing”
+* Provide a “Performance mode” toggle that:
+
+  * turns off your own sync features,
+  * stops Data Matrix auto-refresh,
+  * pauses any watchers you have attached to selection/document-changed events.
+
+For users, the Properties window is easy to toggle via View > Workspace > Windows > Properties.
+
+This won’t always be a 10× win, but on some machines/models it’s noticeable and it’s “free”.
+
+---
+
+### 5) Try `GetGUIPropertyNode(path, false)` (if it works for your scenario)
+
+There’s a community hint that **setting the “show internal” flag to false** on `GetGUIPropertyNode` can solve certain performance issues.
+
+You are currently using `true` in common COM examples.
+
+Recommendation:
+
+* Add a hidden/advanced option: `ShowInternalPropertiesDuringWriteback` (default **false**).
+* Test:
+
+  * If user-defined writes still succeed, keep it false (possible win).
+  * If it breaks on some models, fall back to true.
+
+This is worth testing because it is a low-effort switch.
+
+---
+
+### 6) Make “Bake to model” optional by introducing a “Virtual Writeback” mode
+
+Since your long-term plan is MicroEng Overwatch integration, you have a strong strategic alternative:
+
+* Keep Space Mapper results in your **in-memory cache** (like Data Scraper sessions).
+* Expose them in **Data Matrix** / Space Mapper Results UI.
+* Export to JSON/CSV/Overwatch immediately.
+* Only **bake** properties into the model when explicitly requested (overnight job, milestone deliverable, etc.).
+
+This turns the normal workflow into:
+
+* fast compute (milliseconds → seconds),
+* near-zero time cost during interactive work,
+* heavy COM write only when truly necessary.
+
+Given your benchmark difference between ComputeOnly vs FullWriteback, this is the cleanest way to remove the bottleneck entirely.
+
+---
+
+## What I would implement next (practical “MicroEng-grade” solution)
+
+If you want the best blend of usability + performance:
+
+1. **Writeback Strategy (dropdown):**
+
+   * `Virtual (No Bake)` – default for day-to-day
+   * `Optimized Bake (Single Category)` – batch per item/category
+   * `Legacy Bake (Per Mapping)` – compatibility mode
+
+2. **Writeback Scope:**
+
+   * All processed targets
+   * Only changed targets (requires “diff” detection)
+   * Only blank targets
+
+3. **Diff detection (huge for repeat runs):**
+
+   * Write a stable “SpaceMapperSignature” property (settings hash + zone profile id)
+   * Write a stable “SpaceAssignmentHash” (zone id + key fields)
+   * On next run, skip items where hashes match
+
+This can turn a second run from minutes → seconds because you only write deltas.
+
+---
+
+## Codex-ready change request prompt (focused on solving the write bottleneck)
+
+Paste this into Codex chat:
+
+> **Goal:** Space Mapper is writeback-bound (COM property writes). Implement an optimized writeback pipeline to reduce COM calls and speed up writes dramatically.
+>
+> **Context:** We already have Space Mapper compute fast (spatial grid, preflight index reuse, comparison report). Benchmark shows ComputeOnly is ms, FullWriteback is 100–250s with ~150ms per write. We need to reduce writes + reduce redundant COM setup.
+>
+> **Implement:**
+>
+> 1. Add `WritebackStrategy` enum: `VirtualNoBake`, `OptimizedSingleCategory`, `LegacyPerMapping`. Default: `OptimizedSingleCategory` (or `VirtualNoBake` if you think safer).
+> 2. Implement a new writer that, per target item, groups all mapping outputs by `TargetCategory` and writes **one user-defined category per target** using **one** `GetGUIPropertyNode` and **one** `SetUserDefined` call per category.
+>
+>    * Build one `InwOaPropertyVec` containing **all** properties for that category.
+>    * Use overwrite mode (safe because MicroEng owns `ME_SpaceInfo` / `ME_SpaceMapper`).
+>    * Do not call the existing `WriteProperty(...)` repeatedly.
+> 3. Add an advanced toggle to test `GetGUIPropertyNode(path, showInternal:false)` to improve performance; default to false, fallback to true if it fails.
+> 4. Optimize away unnecessary reads: if `WriteMode == Overwrite`, skip reading existing properties entirely. Only read for `OnlyIfBlank` and `Append`.
+> 5. Add metrics to diagnostics:
+>
+>    * `WritebackCategoriesWritten` (count of `SetUserDefined` calls)
+>    * `WritebackPropsWritten` (total properties in vecs)
+>    * `AvgMsPerCategoryWrite`, `AvgMsPerTargetWrite`
+> 6. Update the “Compare Report” to include these writeback metrics so we can validate that the optimized mode reduces write calls and improves total time.
+> 7. Add UI help text on the Processing page: “Close Properties/Find Items windows for fastest writes” with a “Why?” tooltip (do not try to programmatically close Autodesk panes).
+>
+> **Acceptance criteria:**
+>
+> * In comparison report, `writes performed` should drop from `targets × mappings` to approximately `targets × categories` (ideally 1× targets).
+> * FullWriteback time should drop materially on the same dataset.
+> * No duplicate user data tabs are created.
+> * Build remains clean net48; Navisworks 2025 loads plugin.
+>
+> **Files likely involved:** SpaceMapperService writeback stage, PropertyWriter, SpaceMapperModels (new enum + diagnostics), SpaceMapperStepProcessingPage UI summary, report generator.
+
+---
+
+If you want, paste your current writeback code path (the method that ultimately calls `SetUserDefined`) and I will tell you exactly where you’re paying redundant COM costs, and what to cache/group first. The benchmark indicates you have enough headroom on compute that you can afford more intelligent staging—**writeback is now the product.**

@@ -168,5 +168,35 @@ namespace MicroEng.Navisworks.SpaceMapper.Geometry
                 }
             }
         }
+
+        public int CountPointCandidates(double x, double y, double z)
+        {
+            var key = new CellKey(
+                ToCell(x, _worldBounds.MinX),
+                ToCell(y, _worldBounds.MinY),
+                ToCell(z, _worldBounds.MinZ));
+
+            return _cells.TryGetValue(key, out var list) ? list.Count : 0;
+        }
+
+        public void VisitPointCandidates(double x, double y, double z, Action<int> onCandidate)
+        {
+            if (onCandidate == null) throw new ArgumentNullException(nameof(onCandidate));
+
+            var key = new CellKey(
+                ToCell(x, _worldBounds.MinX),
+                ToCell(y, _worldBounds.MinY),
+                ToCell(z, _worldBounds.MinZ));
+
+            if (!_cells.TryGetValue(key, out var list))
+            {
+                return;
+            }
+
+            for (int k = 0; k < list.Count; k++)
+            {
+                onCandidate(list[k]);
+            }
+        }
     }
 }

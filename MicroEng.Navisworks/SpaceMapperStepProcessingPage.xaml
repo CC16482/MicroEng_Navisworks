@@ -49,6 +49,7 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
@@ -103,7 +104,7 @@
               <TextBlock Text="Performance Presets" FontWeight="SemiBold" Margin="0,0,0,4" />
               <TextBlock TextWrapping="Wrap">
                 Auto chooses Fast/Normal/Accurate based on preflight density.
-                Fast uses AABB-only classification, Normal uses corner sampling, Accurate uses extra sampling points.
+                Fast uses origin point (bbox center) in zone AABB, Normal uses corner sampling, Accurate uses extra sampling points.
               </TextBlock>
             </StackPanel>
           </ui:Flyout>
@@ -437,7 +438,7 @@
             <TextBlock x:Name="EstimatePairsTextControl" Text="-" />
           </StackPanel>
           <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-            <TextBlock Text="Avg candidates/zone:" Width="160" />
+            <TextBlock x:Name="EstimateAvgLabelTextControl" Text="Avg candidates/zone:" Width="160" />
             <TextBlock x:Name="EstimateAvgTextControl" Text="-" />
           </StackPanel>
           <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
@@ -521,10 +522,152 @@
              HorizontalContentAlignment="Stretch"
              VerticalContentAlignment="Top"
              VerticalAlignment="Top">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <ui:TextBlock Grid.Row="0"
+                      Grid.Column="0"
+                      Text="Benchmark &amp; Testing"
+                      FontSize="14"
+                      FontWeight="SemiBold" />
+
+        <ui:Button x:Name="ComparisonReportButtonControl"
+                   Grid.Row="0"
+                   Grid.Column="1"
+                   Content="Benchmark"
+                   Margin="8,0,0,0" />
+
+        <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,6,0,0">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="Mode:" Width="140" VerticalAlignment="Center" />
+            <ComboBox x:Name="BenchmarkModeComboControl" Width="260" SelectedIndex="0">
+              <ComboBoxItem Content="Compute only (no model changes)" />
+              <ComboBoxItem Content="Simulate writeback (no model changes)" />
+              <ComboBoxItem Content="Full run per preset (writes properties)" />
+            </ComboBox>
+          </StackPanel>
+          <TextBlock x:Name="BenchmarkModeHintTextControl"
+                     Margin="0,4,0,0"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Text="Full run writes properties to the model. Simulate writeback runs mapping logic without writing." />
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <TextBlock Text="Writeback strategy:" Width="140" VerticalAlignment="Center" />
+            <ComboBox x:Name="WritebackStrategyComboControl" Width="260" SelectedIndex="1">
+              <ComboBoxItem Content="Virtual (no bake)" />
+              <ComboBoxItem Content="Optimized (single category)" />
+              <ComboBoxItem Content="Legacy (per mapping)" />
+            </ComboBox>
+          </StackPanel>
+
+          <CheckBox x:Name="SkipUnchangedWritebackCheckControl"
+                    Content="Skip unchanged targets (signature)"
+                    Margin="0,6,0,0" />
+          <TextBlock Text="Stores a signature per target so repeat runs can skip unchanged items."
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Margin="0,2,0,0" />
+
+          <CheckBox x:Name="PackWritebackCheckControl"
+                    Content="Pack outputs into a single property"
+                    Margin="0,6,0,0" />
+          <TextBlock Text="Replaces individual mapping properties with a packed value to reduce writes."
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Margin="0,2,0,0" />
+
+          <CheckBox x:Name="ShowInternalWritebackCheckControl"
+                    Content="Show internal properties during writeback"
+                    Margin="0,6,0,0" />
+
+          <CheckBox x:Name="CloseDockPanesCheckControl"
+                    Content="Close other Navisworks panes during run (restore after)"
+                    Margin="0,6,0,0" />
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <TextBlock Text="Tip: Close Properties/Find Items windows for fastest writes."
+                       FontSize="11"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <TextBlock Text="Why?"
+                       Margin="6,0,0,0"
+                       FontSize="11"
+                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                       ToolTip="Navisworks refreshes those panes on each COM write, which slows writeback." />
+          </StackPanel>
+        </StackPanel>
+
+        <Border Grid.Row="2"
+                Grid.ColumnSpan="2"
+                Margin="0,8,0,0"
+                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="8">
+          <StackPanel>
+            <TextBlock Text="Latest benchmark"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       Margin="0,0,0,4" />
+            <TextBlock x:Name="ComparisonReportStatusTextControl"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="BenchmarkSummaryTextControl"
+                       Margin="0,4,0,0"
+                       FontSize="12"
+                       FontWeight="SemiBold"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="BenchmarkSummaryDetailTextControl"
+                       Margin="0,2,0,0"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+          </StackPanel>
+        </Border>
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="5"
+             Padding="10"
+             Margin="0,8,0,0"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Top"
+             VerticalAlignment="Top">
       <Expander x:Name="AdvancedPerformanceExpanderControl"
                 Header="Advanced Performance"
                 IsExpanded="False">
         <StackPanel Margin="0,6,0,0">
+          <StackPanel Orientation="Horizontal" Margin="0,4">
+            <TextBlock Text="Fast Traversal:" Width="120" VerticalAlignment="Center" />
+            <ComboBox x:Name="FastTraversalComboControl" Width="140" SelectedIndex="0">
+              <ComboBoxItem Content="Auto" />
+              <ComboBoxItem Content="Zone-major" />
+              <ComboBoxItem Content="Target-major" />
+            </ComboBox>
+          </StackPanel>
+          <TextBlock x:Name="FastTraversalHintTextControl"
+                     Margin="0,2,0,0"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     Text="Target-major is available only when partial options are disabled." />
+          <TextBlock x:Name="FastTraversalResolvedTextControl"
+                     Margin="0,2,0,6"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
           <StackPanel Orientation="Horizontal" Margin="0,4">
             <TextBlock Text="Max Threads:" Width="120" VerticalAlignment="Center" />
             <TextBox x:Name="MaxThreadsBoxControl" Width="80" Text="0" />

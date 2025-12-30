@@ -1,5 +1,7 @@
 ﻿using System;
 
+using MicroEng.Navisworks;
+
 namespace MicroEng.Navisworks.SpaceMapper.Estimation
 {
     public sealed class SpaceMapperPreflightResult
@@ -12,6 +14,8 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
         public long CandidatePairs { get; set; }
         public int MaxCandidatesPerZone { get; set; }
         public double AvgCandidatesPerZone { get; set; }
+        public int MaxCandidatesPerTarget { get; set; }
+        public double AvgCandidatesPerTarget { get; set; }
 
         public double CellSizeUsed { get; set; }
 
@@ -19,6 +23,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
         public TimeSpan QueryTime { get; set; }
 
         public string Signature { get; set; }
+        public SpaceMapperFastTraversalMode TraversalUsed { get; set; } = SpaceMapperFastTraversalMode.ZoneMajor;
     }
 
     public sealed class SpaceMapperRuntimeEstimate

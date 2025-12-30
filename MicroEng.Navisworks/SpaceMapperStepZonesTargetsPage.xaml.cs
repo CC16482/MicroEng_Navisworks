@@ -24,13 +24,15 @@ namespace MicroEng.Navisworks
 
         internal ComboBox ZoneSourceCombo => ZoneSourceComboBox;
         internal TextBox ZoneSetBox => ZoneSetBoxControl;
-        internal ComboBox ZoneSetCombo => ZoneSetComboBox;
+        internal Wpf.Ui.Controls.DropDownButton ZoneSetDropDownButton => ZoneSetDropDownButtonControl;
+        internal ContextMenu ZoneSetMenu => ZoneSetMenuControl;
         internal TextBox RuleNameBox => RuleNameBoxControl;
         internal ComboBox RuleTargetDefinitionCombo => RuleTargetDefinitionComboBoxControl;
         internal TextBox RuleMinLevelBox => RuleMinLevelBoxControl;
         internal TextBox RuleMaxLevelBox => RuleMaxLevelBoxControl;
         internal TextBox RuleSetNameBox => RuleSetNameBoxControl;
-        internal ComboBox RuleSetCombo => RuleSetComboBoxControl;
+        internal Wpf.Ui.Controls.DropDownButton RuleSetDropDownButton => RuleSetDropDownButtonControl;
+        internal ContextMenu RuleSetMenu => RuleSetMenuControl;
         internal TextBox RuleCategoryFilterBox => RuleCategoryFilterBoxControl;
         internal ComboBox RuleMembershipCombo => RuleMembershipComboBoxControl;
         internal CheckBox RuleEnabledCheckBox => RuleEnabledCheckBoxControl;

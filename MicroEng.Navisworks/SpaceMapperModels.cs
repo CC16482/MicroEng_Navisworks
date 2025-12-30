@@ -22,12 +22,44 @@ namespace MicroEng.Navisworks
         SelectionTreeLevel = 4
     }
 
+    public sealed class SpaceMapperTargetDefinitionOption
+    {
+        public SpaceMapperTargetDefinition Value { get; set; }
+        public string DisplayName { get; set; }
+
+        public override string ToString()
+        {
+            return string.IsNullOrWhiteSpace(DisplayName) ? Value.ToString() : DisplayName;
+        }
+    }
+
     public enum SpaceMapperPerformancePreset
     {
         Fast = 0,
         Normal = 1,
         Accurate = 2,
         Auto = 3
+    }
+
+    public enum SpaceMapperFastTraversalMode
+    {
+        Auto = 0,
+        ZoneMajor = 1,
+        TargetMajor = 2
+    }
+
+    public enum SpaceMapperWritebackStrategy
+    {
+        VirtualNoBake = 0,
+        OptimizedSingleCategory = 1,
+        LegacyPerMapping = 2
+    }
+
+    internal enum SpaceMapperBenchmarkMode
+    {
+        ComputeOnly = 0,
+        SimulateWriteback = 1,
+        FullWriteback = 2
     }
 
     public enum SpaceMembershipMode
@@ -125,6 +157,27 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 17)]
         public string ZoneBehaviorPartialValue { get; set; } = "Partial";
+
+        [DataMember(Order = 18)]
+        public bool UseOriginPointOnly { get; set; }
+
+        [DataMember(Order = 19)]
+        public SpaceMapperFastTraversalMode FastTraversalMode { get; set; } = SpaceMapperFastTraversalMode.Auto;
+
+        [DataMember(Order = 20)]
+        public SpaceMapperWritebackStrategy WritebackStrategy { get; set; } = SpaceMapperWritebackStrategy.OptimizedSingleCategory;
+
+        [DataMember(Order = 21)]
+        public bool ShowInternalPropertiesDuringWriteback { get; set; }
+
+        [DataMember(Order = 22)]
+        public bool CloseDockPanesDuringRun { get; set; }
+
+        [DataMember(Order = 23)]
+        public bool SkipUnchangedWriteback { get; set; }
+
+        [DataMember(Order = 24)]
+        public bool PackWritebackProperties { get; set; }
     }
 
     [DataContract]
@@ -244,9 +297,12 @@ namespace MicroEng.Navisworks
     {
         public bool UsedPreflightIndex { get; set; }
         public SpaceMapperPerformancePreset PresetUsed { get; set; } = SpaceMapperPerformancePreset.Normal;
+        public string TraversalUsed { get; set; }
         public long CandidatePairs { get; set; }
         public double AvgCandidatesPerZone { get; set; }
         public int MaxCandidatesPerZone { get; set; }
+        public double AvgCandidatesPerTarget { get; set; }
+        public int MaxCandidatesPerTarget { get; set; }
         public TimeSpan BuildIndexTime { get; set; }
         public TimeSpan CandidateQueryTime { get; set; }
         public TimeSpan NarrowPhaseTime { get; set; }
@@ -260,13 +316,23 @@ namespace MicroEng.Navisworks
         public int PartialTagged { get; set; }
         public int MultiZoneTagged { get; set; }
         public int Skipped { get; set; }
+        public int SkippedUnchanged { get; set; }
         public string ModeUsed { get; set; }
         public TimeSpan Elapsed { get; set; }
         public SpaceMapperPerformancePreset PresetUsed { get; set; } = SpaceMapperPerformancePreset.Normal;
+        public string TraversalUsed { get; set; }
         public long CandidatePairs { get; set; }
         public double AvgCandidatesPerZone { get; set; }
         public int MaxCandidatesPerZone { get; set; }
+        public double AvgCandidatesPerTarget { get; set; }
+        public int MaxCandidatesPerTarget { get; set; }
         public long WritesPerformed { get; set; }
+        public int WritebackTargetsWritten { get; set; }
+        public int WritebackCategoriesWritten { get; set; }
+        public int WritebackPropertiesWritten { get; set; }
+        public double AvgMsPerCategoryWrite { get; set; }
+        public double AvgMsPerTargetWrite { get; set; }
+        public SpaceMapperWritebackStrategy WritebackStrategy { get; set; } = SpaceMapperWritebackStrategy.OptimizedSingleCategory;
         public bool UsedPreflightIndex { get; set; }
         public TimeSpan ResolveTime { get; set; }
         public TimeSpan BuildGeometryTime { get; set; }

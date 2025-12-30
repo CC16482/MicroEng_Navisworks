@@ -1,0 +1,164 @@
+Below is a targeted review of the **Space Mapper CPU path** based on the latest files you uploaded, focused on **speed, robustness, and correctness**, plus an implementation plan for the next performance step:
+
+> **Next step requested:** when the preset resolves to **Fast**, build a **point-based spatial index** (each target indexed into exactly one cell using its center/origin point) to reduce index build cost and candidate-pair explosion.
+
+---
+
+## 1) High-impact performance wins I recommend
+
+### A. Point-based index for Fast (center-point bounds)
+
+This is the single biggest “next level” improvement because it attacks two bottlenecks at once:
+
+* **Index build cost** drops: a target goes into **one cell** (instead of many).
+* **Candidate explosion** drops: large targets no longer “pollute” many cells.
+
+**Key rule:** this is only “correct” if Fast is using **origin/center-point containment** (not full AABB intersection accuracy).
+If you need “partial” detection (AABB overlap), you should *not* use the point-index target bounds, because you lose the true extent.
+
+**Decision logic (recommended):**
+
+* `UseOriginPointOnly == true` AND (`TagPartialSeparately == false` AND `TreatPartialAsContained == false`)
+
+  * ⇒ build point-index bounds (min=max=center)
+* else
+
+  * ⇒ keep full AABB bounds
+
+This aligns perfectly with your current UX: users can enable “partials” and accept a slower method, or disable partials and get ultra-fast speed.
+
+---
+
+### B. Remove per-candidate `Stopwatch.GetTimestamp()` timing inside the hot loop
+
+In `SpaceMapperEngines.cs`, you currently do:
+
+```csharp
+var t0 = Stopwatch.GetTimestamp();
+var hit = ClassifyIntersection(...);
+var t1 = Stopwatch.GetTimestamp();
+zoneNarrowTicks += t1 - t0;
+```
+
+This is **very expensive** when you have millions of candidates. You are effectively benchmarking every candidate and adding substantial overhead.
+
+**Recommendation:**
+
+* Keep timing at **zone-level** (coarse).
+* Only enable per-candidate timing in `Debug` mode or behind a “Detailed diagnostics” toggle.
+
+This change alone can make “CPU Normal” feel dramatically faster.
+
+---
+
+### C. Replace `ConcurrentBag` with thread-local lists (reduce contention)
+
+`ConcurrentBag<ZoneTargetIntersection>` is convenient but adds contention under load.
+
+**Recommendation:**
+Use `ThreadLocal<List<ZoneTargetIntersection>>` and merge at the end. This is a standard high-throughput parallel pattern and typically improves throughput noticeably.
+
+---
+
+### D. Fix repeated enumeration in writeback (major hidden cost)
+
+In `SpaceMapperService.cs`, you do:
+
+```csharp
+var relevant = FilterByMembership(...);
+if (!relevant.Any()) ...
+var isMultiZone = relevant.Count() > 1;
+foreach (var mapping in request.Mappings)
+  foreach (var inter in relevant) ...
+foreach (var inter in relevant) ...
+```
+
+`relevant` is an `IEnumerable<>` and will re-enumerate multiple times.
+
+**Recommendation:**
+Materialize once:
+
+```csharp
+var relevant = FilterByMembership(...).ToList();
+```
+
+This improves both speed and predictability.
+
+---
+
+### E. Zone summary lookup is O(n²)
+
+This is another hidden cost:
+
+```csharp
+var summary = stats.ZoneSummaries.FirstOrDefault(...)
+```
+
+inside a large loop. Replace with a dictionary keyed by ZoneId.
+
+---
+
+## 2) Correctness issues / “missing wiring” I’d fix (also impacts speed)
+
+### A. Offsets are not applied consistently to zones during the run
+
+In `SpaceMapperService.ResolveZones(...)` you call:
+
+```csharp
+GeometryExtractor.ExtractZoneGeometry(item, key, ..., new SpaceMapperProcessingSettings());
+```
+
+This discards the **user’s offsets** (Offset3D/Top/Bottom/Sides) during the actual run.
+
+Meanwhile **preflight inflates** zone bounds using request settings. That creates a mismatch:
+
+* estimate says one thing,
+* run behaves differently.
+
+**Fix (recommended):**
+
+* Pass the actual `request.ProcessingSettings` into zone extraction OR apply offsets consistently in one place.
+
+---
+
+### B. `GeometryMath.BuildPlanes()` generates bogus planes when fed bbox vertices
+
+Your `SpaceMapperGeometry.cs` currently builds triangle planes if `vertices.Count >= 3`, even if the vertices are **bbox corners** (8 points), not triangle triplets. This matches the “triangle-plane bug” you referenced earlier.
+
+**Fix (recommended):**
+Only generate triangle planes when `vertices.Count % 3 == 0`. Otherwise, fall back to bbox planes.
+
+This helps correctness and removes wasted work.
+
+---
+
+### C. Preflight signature does not include processing mode / fast-method flags
+
+`BuildSignature()` in `SpaceMapperPreflightService.cs` currently includes offsets/partials/rules, but **not**:
+
+* `ProcessingMode`
+* any “Fast preset / origin-only method” flag
+* (and later, any “index granularity”)
+
+If you don’t include these, you can accidentally reuse the wrong index.
+
+---
+
+## 3) Implementing the “point-based spatial index” without rewriting `SpatialHashGrid`
+
+Good news: you don’t need a brand new grid class.
+
+Because `SpatialHashGrid` indexes targets based on their AABBs, you can force point-style indexing simply by building target bounds like this:
+
+* Full AABB mode:
+
+  * `targetBounds[i] = ToAabb(bbox)`
+* Point index mode:
+
+  * `targetBounds[i] = new Aabb(cx,cy,cz, cx,cy,cz)` (min=max=center)
+
+That automatically indexes each target into exactly one cell.
+
+**Important constraint:** point-index mode must only run with the Fast/origin classification mode, not partial AABB overlap logic.
+
+---

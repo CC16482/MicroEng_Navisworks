@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -33,12 +34,14 @@ namespace MicroEng.Navisworks
         public ObservableCollection<SpaceMapperMappingDefinition> Mappings { get; } = new();
         public ObservableCollection<ZoneSummary> ZoneSummaries { get; } = new();
 
-        private readonly SpaceMapperTemplateStore _templateStore = new(AppDomain.CurrentDomain.BaseDirectory);
+        private readonly SpaceMapperTemplateStore _templateStore = new(
+            Path.GetDirectoryName(typeof(SpaceMapperControl).Assembly.Location) ?? AppDomain.CurrentDomain.BaseDirectory);
         private List<SpaceMapperTemplate> _templates = new();
         private readonly SpaceMapperPreflightService _preflightService = new();
         private readonly SpaceMapperCalibrationStore _calibrationStore = new();
         private readonly AsyncDebouncer _preflightDebouncer = new(TimeSpan.FromMilliseconds(500));
         private CancellationTokenSource _preflightCts;
+        private CancellationTokenSource _compareCts;
         private SpaceMapperPreflightResult _lastPreflight;
         private SpaceMapperRuntimeEstimate _lastEstimate;
         private readonly SpaceMapperStepSetupPage _setupPage;
@@ -51,6 +54,7 @@ namespace MicroEng.Navisworks
         private bool _initialized;
         private bool _applyingTemplate;
         private bool _updatingSetLists;
+        private const string NotApplicableText = "N/A";
 
         public SpaceMapperControl()
         {
@@ -117,8 +121,7 @@ namespace MicroEng.Navisworks
             try
             {
                 _zonesPage.ZoneSourceCombo.ItemsSource = Enum.GetValues(typeof(ZoneSourceType));
-                _zonesPage.RuleTargetDefinitionCombo.ItemsSource = Enum.GetValues(typeof(SpaceMapperTargetDefinition));
-                _zonesPage.RuleTargetDefinitionCombo.SelectedItem = SpaceMapperTargetDefinition.EntireModel;
+                _zonesPage.RuleTargetDefinitionCombo.SelectedValue = SpaceMapperTargetDefinition.EntireModel;
                 _zonesPage.RuleMembershipCombo.ItemsSource = Enum.GetValues(typeof(SpaceMembershipMode));
                 _zonesPage.RuleMembershipCombo.SelectedItem = SpaceMembershipMode.ContainedAndPartial;
                 _zonesPage.RuleEnabledCheckBox.IsChecked = true;
@@ -146,7 +149,6 @@ namespace MicroEng.Navisworks
 
         private void AddHandlers()
         {
-            RefreshSetsButtonControl.Click += (s, e) => RefreshSelectionSetLists();
             RunSpaceMapperButtonControl.Click += (s, e) => RunSpaceMapper();
             _setupPage.NewTemplateButton.Click += (s, e) => NewTemplate();
             _setupPage.SaveTemplateButton.Click += (s, e) => SaveCurrentTemplate();
@@ -164,9 +166,46 @@ namespace MicroEng.Navisworks
             _mappingPage.DeleteMappingButton.Click += (s, e) => DeleteSelectedMapping();
             _mappingPage.SaveTemplateButton.Click += (s, e) => SaveTemplate();
             _mappingPage.LoadTemplateButton.Click += (s, e) => LoadTemplate();
+            _mappingPage.ZonePropertyPickerButton.Click += (s, e) => ToggleZonePropertyPicker();
+            _mappingPage.ZonePropertyTreeView.SelectedItemChanged += OnZonePropertyTreeSelectionChanged;
             _resultsPage.ExportStatsButton.Click += (s, e) => ExportStats();
 
             _processingPage.RunPreflightButton.Click += async (s, e) => await RunPreflightAsync(isLive: false, CancellationToken.None);
+            _processingPage.ComparisonReportButton.Click += async (s, e) => await RunComparisonReportAsync();
+              if (_processingPage.BenchmarkModeCombo != null)
+              {
+                  _processingPage.BenchmarkModeCombo.SelectionChanged += (s, e) =>
+                  {
+                      UpdateComparisonStatus(string.Empty);
+                      ClearBenchmarkSummary();
+                  };
+              }
+              if (_processingPage.SkipUnchangedWritebackCheck != null)
+              {
+                  _processingPage.SkipUnchangedWritebackCheck.Checked += (s, e) =>
+                  {
+                      UpdateComparisonStatus(string.Empty);
+                      ClearBenchmarkSummary();
+                  };
+                  _processingPage.SkipUnchangedWritebackCheck.Unchecked += (s, e) =>
+                  {
+                      UpdateComparisonStatus(string.Empty);
+                      ClearBenchmarkSummary();
+                  };
+              }
+              if (_processingPage.PackWritebackCheck != null)
+              {
+                  _processingPage.PackWritebackCheck.Checked += (s, e) =>
+                  {
+                      UpdateComparisonStatus(string.Empty);
+                      ClearBenchmarkSummary();
+                  };
+                  _processingPage.PackWritebackCheck.Unchecked += (s, e) =>
+                  {
+                      UpdateComparisonStatus(string.Empty);
+                      ClearBenchmarkSummary();
+                  };
+              }
             _processingPage.LiveEstimateToggle.Checked += (s, e) => TriggerLivePreflight();
             _processingPage.LiveEstimateToggle.Unchecked += (s, e) => ResetPreflightUi("Idle");
             _processingPage.AutoPresetToggle.Checked += (s, e) =>
@@ -188,16 +227,26 @@ namespace MicroEng.Navisworks
                 OnPresetChanged();
             };
 
-            _processingPage.TreatPartialCheck.Checked += (s, e) => TriggerLivePreflight();
-            _processingPage.TreatPartialCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            _processingPage.TreatPartialCheck.Checked += (s, e) =>
+            {
+                UpdateFastTraversalUi();
+                TriggerLivePreflight();
+            };
+            _processingPage.TreatPartialCheck.Unchecked += (s, e) =>
+            {
+                UpdateFastTraversalUi();
+                TriggerLivePreflight();
+            };
             _processingPage.TagPartialCheck.Checked += (s, e) =>
             {
                 UpdateZoneBehaviorInputs();
+                UpdateFastTraversalUi();
                 TriggerLivePreflight();
             };
             _processingPage.TagPartialCheck.Unchecked += (s, e) =>
             {
                 UpdateZoneBehaviorInputs();
+                UpdateFastTraversalUi();
                 TriggerLivePreflight();
             };
             _processingPage.EnableMultiZoneCheck.Checked += (s, e) => TriggerLivePreflight();
@@ -209,6 +258,11 @@ namespace MicroEng.Navisworks
             _processingPage.UnitsBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.OffsetModeBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.IndexGranularitySlider.ValueChanged += (s, e) => TriggerLivePreflight();
+            _processingPage.FastTraversalCombo.SelectionChanged += (s, e) =>
+            {
+                UpdateFastTraversalUi();
+                TriggerLivePreflight();
+            };
 
             _zonesPage.ZoneSourceCombo.SelectionChanged += (s, e) =>
             {
@@ -220,33 +274,14 @@ namespace MicroEng.Navisworks
                 UpdateReadinessText();
                 TriggerLivePreflight();
             };
-            _zonesPage.ZoneSetCombo.DropDownOpened += (s, e) => RefreshSelectionSetLists();
-            _zonesPage.ZoneSetCombo.SelectionChanged += (s, e) =>
-            {
-                if (_updatingSetLists) return;
-                if (_zonesPage.ZoneSetCombo.SelectedItem is not SetListItem item) return;
-                if (string.IsNullOrWhiteSpace(item.Name)) return;
-                _zonesPage.ZoneSetBox.Text = item.Name;
-                _zonesPage.ZoneSourceCombo.SelectedItem = item.IsSearch
-                    ? ZoneSourceType.ZoneSearchSet
-                    : ZoneSourceType.ZoneSelectionSet;
-            };
+            _zonesPage.ZoneSetMenu.Opened += (s, e) => RefreshSelectionSetLists();
+            _zonesPage.ZoneSetMenu.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnZoneSetMenuItemClick));
             _zonesPage.RuleTargetDefinitionCombo.SelectionChanged += (s, e) =>
             {
                 UpdateRuleDefinitionInputs(clearText: true, focusSetName: true);
             };
-            _zonesPage.RuleSetCombo.DropDownOpened += (s, e) => RefreshSelectionSetLists();
-            _zonesPage.RuleSetCombo.SelectionChanged += (s, e) =>
-            {
-                if (_updatingSetLists) return;
-                if (_zonesPage.RuleSetCombo.SelectedItem is not SetListItem item) return;
-                if (string.IsNullOrWhiteSpace(item.Name)) return;
-                _zonesPage.RuleSetNameBox.Text = item.Name;
-                _zonesPage.RuleTargetDefinitionCombo.SelectedItem = item.IsSearch
-                    ? SpaceMapperTargetDefinition.SearchSet
-                    : SpaceMapperTargetDefinition.SelectionSet;
-                UpdateRuleDefinitionInputs(clearText: false, focusSetName: false);
-            };
+            _zonesPage.RuleSetMenu.Opened += (s, e) => RefreshSelectionSetLists();
+            _zonesPage.RuleSetMenu.AddHandler(MenuItem.ClickEvent, new RoutedEventHandler(OnRuleSetMenuItemClick));
             _zonesPage.TargetRulesGrid.CellEditEnding += (s, e) =>
             {
                 if (e.Row?.Item is SpaceMapperTargetRule rule)
@@ -309,9 +344,13 @@ namespace MicroEng.Navisworks
                 nameToSelect = _templates.FirstOrDefault()?.Name;
             }
 
-            if (!string.IsNullOrWhiteSpace(nameToSelect))
+            if (!string.IsNullOrWhiteSpace(nameToSelect) && _setupPage.TemplateCombo.Items.Contains(nameToSelect))
             {
                 _setupPage.TemplateCombo.SelectedItem = nameToSelect;
+            }
+            else if (_setupPage.TemplateCombo.Items.Count > 0)
+            {
+                _setupPage.TemplateCombo.SelectedIndex = 0;
             }
         }
 
@@ -761,12 +800,12 @@ namespace MicroEng.Navisworks
                 return;
             }
 
-            var targetDefinition = _zonesPage.RuleTargetDefinitionCombo.SelectedItem is SpaceMapperTargetDefinition rt
+            var targetDefinition = _zonesPage.RuleTargetDefinitionCombo.SelectedValue is SpaceMapperTargetDefinition rt
                 ? rt
                 : SpaceMapperTargetDefinition.EntireModel;
 
             var ruleSetName = _zonesPage.RuleSetNameBox.Text?.Trim();
-            if (UsesSetSearchName(targetDefinition) && string.IsNullOrWhiteSpace(ruleSetName))
+            if (UsesSetSearchName(targetDefinition) && (string.IsNullOrWhiteSpace(ruleSetName) || IsNotApplicable(ruleSetName)))
             {
                 MessageBox.Show("Enter a Set/Search Name for the rule when using Selection/Search Set.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Warning);
                 _zonesPage.RuleSetNameBox.Focus();
@@ -904,6 +943,11 @@ namespace MicroEng.Navisworks
             return definition == SpaceMapperTargetDefinition.SelectionTreeLevel;
         }
 
+        private static bool IsNotApplicable(string value)
+        {
+            return string.Equals(value?.Trim(), NotApplicableText, StringComparison.OrdinalIgnoreCase);
+        }
+
         private void UpdateZoneBehaviorInputs()
         {
             if (_processingPage == null)
@@ -930,8 +974,28 @@ namespace MicroEng.Navisworks
             _updatingSetLists = true;
             try
             {
-                UpdateComboItems(_zonesPage.ZoneSetCombo, lists.Sets);
-                UpdateComboItems(_zonesPage.RuleSetCombo, lists.Sets);
+                var zoneSelectedName = _zonesPage.ZoneSetBox.Text;
+                bool? zoneIsSearch = _zonesPage.ZoneSourceCombo.SelectedItem is ZoneSourceType zoneSource
+                    ? zoneSource switch
+                    {
+                        ZoneSourceType.ZoneSelectionSet => false,
+                        ZoneSourceType.ZoneSearchSet => true,
+                        _ => (bool?)null
+                    }
+                    : null;
+
+                var ruleSelectedName = _zonesPage.RuleSetNameBox.Text;
+                bool? ruleIsSearch = _zonesPage.RuleTargetDefinitionCombo.SelectedValue is SpaceMapperTargetDefinition ruleDef
+                    ? ruleDef switch
+                    {
+                        SpaceMapperTargetDefinition.SearchSet => true,
+                        SpaceMapperTargetDefinition.SelectionSet => (bool?)null,
+                        _ => (bool?)null
+                    }
+                    : null;
+
+                UpdateMenuItems(_zonesPage.ZoneSetMenu, lists.Sets, zoneSelectedName, zoneIsSearch);
+                UpdateMenuItems(_zonesPage.RuleSetMenu, lists.Sets, ruleSelectedName, ruleIsSearch);
             }
             finally
             {
@@ -939,40 +1003,220 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private static void UpdateComboItems(ComboBox combo, List<SetListItem> items)
+        private void ToggleZonePropertyPicker()
         {
-            if (combo == null)
+            if (_mappingPage?.ZonePropertyPickerFlyout == null)
             {
                 return;
             }
 
-            var selected = combo.SelectedItem as SetListItem;
-            combo.ItemsSource = items;
-
-            if (selected == null)
+            if (_mappingPage.ZonePropertyPickerFlyout.IsOpen)
             {
-                combo.SelectedItem = null;
+                _mappingPage.ZonePropertyPickerFlyout.Hide();
                 return;
             }
 
-            var match = items.FirstOrDefault(i =>
-                string.Equals(i.Name, selected.Name, StringComparison.OrdinalIgnoreCase)
-                && i.IsSearch == selected.IsSearch);
-            combo.SelectedItem = match;
+            RefreshZonePropertyTree();
+            _mappingPage.ZonePropertyPickerFlyout.Show();
+        }
+
+        private void RefreshZonePropertyTree()
+        {
+            if (_mappingPage?.ZonePropertyTreeView == null)
+            {
+                return;
+            }
+
+            var profile = GetSelectedScraperProfileName();
+            var session = GetLatestScrapeSession(profile);
+            var items = BuildZonePropertyTree(session);
+
+            _mappingPage.ZonePropertyTreeView.ItemsSource = items;
+
+            if (_mappingPage.ZonePropertyPickerStatusText != null)
+            {
+                if (session?.Properties == null || session.Properties.Count == 0)
+                {
+                    if (DataScraperCache.AllSessions.Count == 0)
+                    {
+                        _mappingPage.ZonePropertyPickerStatusText.Text = "No Data Scraper sessions found.";
+                    }
+                    else
+                    {
+                        var label = string.IsNullOrWhiteSpace(profile) ? "Default" : profile;
+                        _mappingPage.ZonePropertyPickerStatusText.Text = $"No Data Scraper session for '{label}'.";
+                    }
+                }
+                else
+                {
+                    var label = string.IsNullOrWhiteSpace(profile) ? "Default" : profile;
+                    _mappingPage.ZonePropertyPickerStatusText.Text = $"{label} · {session.Properties.Count:N0} properties";
+                }
+            }
+        }
+
+        private void OnZonePropertyTreeSelectionChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+        {
+            if (_mappingPage == null)
+            {
+                return;
+            }
+
+            if (e.NewValue is not ZonePropertyTreeNode node || !node.IsProperty)
+            {
+                return;
+            }
+
+            _mappingPage.ZoneCategoryBox.Text = node.CategoryName;
+            _mappingPage.ZonePropertyBox.Text = node.PropertyName;
+            _mappingPage.ZonePropertyPickerFlyout?.Hide();
+        }
+
+        private static List<ZonePropertyTreeNode> BuildZonePropertyTree(ScrapeSession session)
+        {
+            var nodes = new List<ZonePropertyTreeNode>();
+            if (session?.Properties == null || session.Properties.Count == 0)
+            {
+                return nodes;
+            }
+
+            var groups = session.Properties
+                .Where(p => !string.IsNullOrWhiteSpace(p.Category) && !string.IsNullOrWhiteSpace(p.Name))
+                .GroupBy(p => p.Category, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var group in groups)
+            {
+                var categoryNode = new ZonePropertyTreeNode(group.Key, group.Key, null, isExpanded: false);
+                var props = group.Select(p => p.Name)
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var propName in props)
+                {
+                    categoryNode.Children.Add(new ZonePropertyTreeNode(propName, group.Key, propName));
+                }
+
+                nodes.Add(categoryNode);
+            }
+
+            return nodes;
+        }
+
+        private void OnZoneSetMenuItemClick(object sender, RoutedEventArgs e)
+        {
+            if (_updatingSetLists)
+            {
+                return;
+            }
+
+            if (e.OriginalSource is not MenuItem menuItem)
+            {
+                return;
+            }
+
+            if (menuItem.DataContext is not SetListItem item)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(item.Name))
+            {
+                return;
+            }
+
+            _zonesPage.ZoneSetBox.Text = item.Name;
+            _zonesPage.ZoneSourceCombo.SelectedItem = item.IsSearch
+                ? ZoneSourceType.ZoneSearchSet
+                : ZoneSourceType.ZoneSelectionSet;
+        }
+
+        private void OnRuleSetMenuItemClick(object sender, RoutedEventArgs e)
+        {
+            if (_updatingSetLists)
+            {
+                return;
+            }
+
+            if (e.OriginalSource is not MenuItem menuItem)
+            {
+                return;
+            }
+
+            if (menuItem.DataContext is not SetListItem item)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(item.Name))
+            {
+                return;
+            }
+
+            _zonesPage.RuleSetNameBox.Text = item.Name;
+            _zonesPage.RuleTargetDefinitionCombo.SelectedValue = SpaceMapperTargetDefinition.SelectionSet;
+            UpdateRuleDefinitionInputs(clearText: false, focusSetName: false);
+        }
+
+        private static void UpdateMenuItems(ContextMenu menu, List<SetListItem> items, string selectedName, bool? selectedIsSearch)
+        {
+            if (menu == null)
+            {
+                return;
+            }
+
+            var name = string.IsNullOrWhiteSpace(selectedName) ? null : selectedName.Trim();
+            var hasName = !string.IsNullOrWhiteSpace(name);
+
+            var menuItems = items?
+                .Select(item => item.WithSelection(
+                    hasName
+                    && string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)
+                    && (!selectedIsSearch.HasValue || item.IsSearch == selectedIsSearch.Value)))
+                .ToList()
+                ?? new List<SetListItem>();
+
+            menu.ItemsSource = menuItems;
         }
 
         private sealed class SetListItem
         {
-            public SetListItem(string name, bool isSearch)
+            public SetListItem(string name, bool isSearch, bool isSelected = false)
             {
                 Name = name;
                 IsSearch = isSearch;
+                IsSelected = isSelected;
                 DisplayName = $"{name} ({(isSearch ? "Search" : "Selection")})";
             }
 
             public string Name { get; }
             public bool IsSearch { get; }
+            public bool IsSelected { get; }
             public string DisplayName { get; }
+
+            public SetListItem WithSelection(bool isSelected)
+            {
+                return new SetListItem(Name, IsSearch, isSelected);
+            }
+        }
+
+        private sealed class ZonePropertyTreeNode
+        {
+            public ZonePropertyTreeNode(string name, string categoryName, string propertyName, bool isExpanded = false)
+            {
+                Name = name;
+                CategoryName = categoryName;
+                PropertyName = propertyName;
+                IsExpanded = isExpanded;
+            }
+
+            public string Name { get; }
+            public string CategoryName { get; }
+            public string PropertyName { get; }
+            public bool IsExpanded { get; set; }
+            public bool IsProperty => !string.IsNullOrWhiteSpace(PropertyName);
+            public List<ZonePropertyTreeNode> Children { get; } = new();
         }
 
         private sealed class SelectionSetLists
@@ -1181,7 +1425,7 @@ namespace MicroEng.Navisworks
                 return;
             }
 
-            var definition = _zonesPage.RuleTargetDefinitionCombo.SelectedItem is SpaceMapperTargetDefinition def
+            var definition = _zonesPage.RuleTargetDefinitionCombo.SelectedValue is SpaceMapperTargetDefinition def
                 ? def
                 : SpaceMapperTargetDefinition.EntireModel;
 
@@ -1189,7 +1433,7 @@ namespace MicroEng.Navisworks
             var usesLevels = UsesLevels(definition);
 
             _zonesPage.RuleSetNameBox.IsEnabled = usesSet;
-            _zonesPage.RuleSetCombo.IsEnabled = usesSet;
+            _zonesPage.RuleSetDropDownButton.IsEnabled = usesSet;
             _zonesPage.RuleMinLevelBox.IsEnabled = usesLevels;
             _zonesPage.RuleMaxLevelBox.IsEnabled = usesLevels;
 
@@ -1207,17 +1451,30 @@ namespace MicroEng.Navisworks
             {
                 if (!usesSet)
                 {
+                    _zonesPage.RuleSetNameBox.Text = NotApplicableText;
+                }
+                else if (IsNotApplicable(_zonesPage.RuleSetNameBox.Text))
+                {
                     _zonesPage.RuleSetNameBox.Text = string.Empty;
-                    _zonesPage.RuleSetCombo.SelectedItem = null;
                 }
 
                 if (!usesLevels)
                 {
-                    _zonesPage.RuleMinLevelBox.Text = string.Empty;
-                    _zonesPage.RuleMaxLevelBox.Text = string.Empty;
+                    _zonesPage.RuleMinLevelBox.Text = NotApplicableText;
+                    _zonesPage.RuleMaxLevelBox.Text = NotApplicableText;
                 }
                 else
                 {
+                    if (IsNotApplicable(_zonesPage.RuleMinLevelBox.Text))
+                    {
+                        _zonesPage.RuleMinLevelBox.Text = string.Empty;
+                    }
+
+                    if (IsNotApplicable(_zonesPage.RuleMaxLevelBox.Text))
+                    {
+                        _zonesPage.RuleMaxLevelBox.Text = string.Empty;
+                    }
+
                     if (string.IsNullOrWhiteSpace(_zonesPage.RuleMinLevelBox.Text))
                     {
                         _zonesPage.RuleMinLevelBox.Text = "0";
@@ -1241,6 +1498,11 @@ namespace MicroEng.Navisworks
             if (rule == null)
             {
                 return;
+            }
+
+            if (rule.TargetDefinition == SpaceMapperTargetDefinition.SearchSet)
+            {
+                rule.TargetDefinition = SpaceMapperTargetDefinition.SelectionSet;
             }
 
             if (UsesSetSearchName(rule.TargetDefinition))
@@ -1386,6 +1648,7 @@ namespace MicroEng.Navisworks
 
         private void RunSpaceMapper()
         {
+            DockPaneVisibilitySnapshot paneSnapshot = null;
             try
             {
                 if (!ValidateRunInputs())
@@ -1394,6 +1657,10 @@ namespace MicroEng.Navisworks
                 }
 
                 var request = BuildRequest();
+                if (request?.ProcessingSettings?.CloseDockPanesDuringRun == true)
+                {
+                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes();
+                }
 
                 var service = new SpaceMapperService(MicroEngActions.Log);
                 var cache = _processingPage.ReusePreflightToggle.IsChecked == true ? _preflightService.Cache : null;
@@ -1405,6 +1672,10 @@ namespace MicroEng.Navisworks
             catch (Exception ex)
             {
                 MessageBox.Show($"Space Mapper failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                NavisworksDockPaneManager.RestoreDockPanes(paneSnapshot);
             }
         }
 
@@ -1426,16 +1697,24 @@ namespace MicroEng.Navisworks
                 BatchSize = ParseInt(_processingPage.BatchSizeBox.Text),
                 IndexGranularity = (int)Math.Round(_processingPage.IndexGranularitySlider.Value),
                 PerformancePreset = GetSelectedPreset(),
+                FastTraversalMode = GetSelectedFastTraversalMode(),
                 ZoneBehaviorCategory = _processingPage.ZoneBehaviorCategoryBox.Text?.Trim(),
                 ZoneBehaviorPropertyName = _processingPage.ZoneBehaviorPropertyBox.Text?.Trim(),
                 ZoneBehaviorContainedValue = _processingPage.ZoneBehaviorContainedBox.Text?.Trim(),
-                ZoneBehaviorPartialValue = _processingPage.ZoneBehaviorPartialBox.Text?.Trim()
-            };
-        }
+                  ZoneBehaviorPartialValue = _processingPage.ZoneBehaviorPartialBox.Text?.Trim(),
+                  WritebackStrategy = GetSelectedWritebackStrategy(),
+                  ShowInternalPropertiesDuringWriteback = _processingPage.ShowInternalWritebackCheck?.IsChecked == true,
+                  CloseDockPanesDuringRun = _processingPage.CloseDockPanesCheck?.IsChecked == true,
+                  SkipUnchangedWriteback = _processingPage.SkipUnchangedWritebackCheck?.IsChecked == true,
+                  PackWritebackProperties = _processingPage.PackWritebackCheck?.IsChecked == true
+              };
+          }
 
         private SpaceMapperRequest BuildRequest()
         {
             var settings = BuildSettings();
+            var resolvedPreset = SpaceMapperPresetLogic.ResolvePreset(settings, _lastPreflight, out _);
+            settings.UseOriginPointOnly = resolvedPreset == SpaceMapperPerformancePreset.Fast;
             return new SpaceMapperRequest
             {
                 TemplateName = _setupPage.TemplateCombo.SelectedItem?.ToString(),
@@ -1541,6 +1820,308 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private async Task RunComparisonReportAsync()
+        {
+            DockPaneVisibilitySnapshot paneSnapshot = null;
+            if (_compareCts != null)
+            {
+                _compareCts.Cancel();
+                return;
+            }
+
+            if (!ValidatePreflightInputs(showMessage: true))
+            {
+                UpdateComparisonStatus("Invalid input");
+                return;
+            }
+
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null)
+            {
+                UpdateComparisonStatus("No active document.");
+                return;
+            }
+
+            var request = BuildRequest();
+            var session = SpaceMapperService.GetSession(request.ScraperProfileName);
+            var requiresSession = request.ZoneSource == ZoneSourceType.DataScraperZones;
+            if (requiresSession && session == null)
+            {
+                UpdateComparisonStatus($"No Data Scraper sessions found for profile '{request.ScraperProfileName ?? "Default"}'.");
+                return;
+            }
+
+            _compareCts = new CancellationTokenSource();
+            var token = _compareCts.Token;
+
+            SetComparisonRunning(true);
+            UpdateComparisonStatus("Preparing...");
+            ClearBenchmarkSummary();
+            _processingPage.PreflightProgressBar.IsIndeterminate = true;
+            _processingPage.PreflightProgressBar.Value = 0;
+            _processingPage.PreflightStatusText.Text = "Benchmark";
+
+            var progress = new Progress<SpaceMapperComparisonProgress>(UpdateComparisonProgress);
+
+            try
+            {
+                if (request?.ProcessingSettings?.CloseDockPanesDuringRun == true)
+                {
+                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes();
+                }
+
+                var resolved = SpaceMapperService.ResolveData(request, doc, session);
+                if (!resolved.ZoneModels.Any())
+                {
+                    UpdateComparisonStatus("No zones found.");
+                    return;
+                }
+
+                if (!resolved.TargetModels.Any())
+                {
+                    UpdateComparisonStatus("No targets found for the selected rules.");
+                    return;
+                }
+
+                UpdateComparisonStatus("Building dataset...");
+                var dataset = SpaceMapperService.BuildGeometryData(
+                    resolved,
+                    request.ProcessingSettings,
+                    buildTargetGeometry: true,
+                    token,
+                    forceRequirePlanes: false);
+
+                if (!dataset.Zones.Any())
+                {
+                    UpdateComparisonStatus("No zones with bounding boxes found.");
+                    return;
+                }
+
+                if (!dataset.TargetsForEngine.Any())
+                {
+                    UpdateComparisonStatus("No targets with bounding boxes found.");
+                    return;
+                }
+
+                var input = new SpaceMapperComparisonInput
+                {
+                    Request = request,
+                    Dataset = dataset,
+                    Options = new SpaceMapperComparisonOptions
+                    {
+                        ReusePreflightForRun = _processingPage.ReusePreflightToggle.IsChecked == true,
+                        BenchmarkMode = GetSelectedBenchmarkMode()
+                    },
+                    ModelName = GetModelName(doc)
+                };
+
+                var runner = new SpaceMapperComparisonRunner(MicroEngActions.Log);
+                var output = await Task.Run(() => runner.Run(input, progress, token), token);
+
+                var (mdPath, _) = WriteComparisonReport(output);
+                UpdateComparisonStatus($"Benchmark saved: {mdPath}");
+                MicroEngActions.Log($"SpaceMapper Benchmark: report saved {mdPath}");
+                _processingPage.PreflightStatusText.Text = "Complete";
+                UpdateBenchmarkSummary(output?.Report);
+            }
+            catch (OperationCanceledException)
+            {
+                UpdateComparisonStatus("Benchmark cancelled.");
+                _processingPage.PreflightStatusText.Text = "Cancelled";
+            }
+            catch (Exception ex)
+            {
+                UpdateComparisonStatus("Benchmark failed.");
+                _processingPage.PreflightStatusText.Text = "Failed";
+                MicroEngActions.Log($"SpaceMapper Benchmark: failed - {ex.Message}");
+                MessageBox.Show($"Benchmark failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _compareCts?.Dispose();
+                _compareCts = null;
+                SetComparisonRunning(false);
+                _processingPage.PreflightProgressBar.IsIndeterminate = false;
+                _processingPage.PreflightProgressBar.Value = 0;
+                NavisworksDockPaneManager.RestoreDockPanes(paneSnapshot);
+            }
+        }
+
+        private void UpdateComparisonProgress(SpaceMapperComparisonProgress progress)
+        {
+            if (progress == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(progress.Stage))
+            {
+                _processingPage.PreflightStatusText.Text = progress.Stage;
+            }
+
+            if (progress.Percentage >= 0)
+            {
+                _processingPage.PreflightProgressBar.IsIndeterminate = false;
+                _processingPage.PreflightProgressBar.Value = Math.Min(100, Math.Max(0, progress.Percentage));
+            }
+            else
+            {
+                _processingPage.PreflightProgressBar.IsIndeterminate = true;
+            }
+        }
+
+        private void SetComparisonRunning(bool running)
+        {
+            _processingPage.ComparisonReportButton.Content = running ? "Cancel Benchmark" : "Benchmark";
+            if (_processingPage.BenchmarkModeCombo != null)
+            {
+                _processingPage.BenchmarkModeCombo.IsEnabled = !running;
+            }
+        }
+
+        private void UpdateComparisonStatus(string status)
+        {
+            _processingPage.ComparisonReportStatusText.Text = status ?? string.Empty;
+        }
+
+        private void ClearBenchmarkSummary()
+        {
+            if (_processingPage?.BenchmarkSummaryText != null)
+            {
+                _processingPage.BenchmarkSummaryText.Text = string.Empty;
+            }
+
+            if (_processingPage?.BenchmarkSummaryDetailText != null)
+            {
+                _processingPage.BenchmarkSummaryDetailText.Text = string.Empty;
+            }
+        }
+
+        private void UpdateBenchmarkSummary(SpaceMapperComparisonReport report)
+        {
+            if (_processingPage?.BenchmarkSummaryText == null || _processingPage.BenchmarkSummaryDetailText == null)
+            {
+                return;
+            }
+
+            if (report?.Variants == null || report.Variants.Count == 0)
+            {
+                ClearBenchmarkSummary();
+                return;
+            }
+
+            var completed = report.Variants
+                .Where(v => v != null && !v.Skipped && v.Timings != null)
+                .ToList();
+
+            if (completed.Count == 0)
+            {
+                ClearBenchmarkSummary();
+                return;
+            }
+
+            var fastest = completed
+                .OrderBy(v => v.Timings.TotalMs <= 0 ? double.MaxValue : v.Timings.TotalMs)
+                .FirstOrDefault();
+
+            var fastestName = fastest?.Name ?? "n/a";
+            var fastestMs = fastest?.Timings?.TotalMs ?? 0;
+
+            var bestAgreement = report.Comparisons?
+                .OrderByDescending(c => c.SameZonePercent)
+                .FirstOrDefault();
+
+            var summary = $"Fastest: {fastestName} ({fastestMs:0} ms)";
+            if (bestAgreement != null)
+            {
+                summary += $"; Best agreement: {bestAgreement.VariantName} {bestAgreement.SameZonePercent:0.0}%";
+            }
+
+            var detailParts = new List<string>();
+            var targetsProcessed = fastest?.Workload?.TargetsProcessed ?? 0;
+            if (targetsProcessed > 0)
+            {
+                var unmatched = fastest.Workload.UnmatchedTargets;
+                var coverage = 100.0 * Math.Max(0, targetsProcessed - unmatched) / targetsProcessed;
+                detailParts.Add($"Coverage: {coverage:0.0}%");
+            }
+
+            var writes = fastest?.Workload?.WritesPerformed ?? 0;
+            if (writes > 0)
+            {
+                detailParts.Add($"Writes: {writes:N0}");
+            }
+
+            var mode = fastest?.Settings?.BenchmarkMode;
+            if (!string.IsNullOrWhiteSpace(mode))
+            {
+                detailParts.Add($"Mode: {FormatBenchmarkModeLabel(mode)}");
+            }
+
+            _processingPage.BenchmarkSummaryText.Text = summary;
+            _processingPage.BenchmarkSummaryDetailText.Text = string.Join(" | ", detailParts);
+        }
+
+        private static string FormatBenchmarkModeLabel(string mode)
+        {
+            if (string.Equals(mode, SpaceMapperBenchmarkMode.ComputeOnly.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return "Compute only";
+            }
+
+            if (string.Equals(mode, SpaceMapperBenchmarkMode.SimulateWriteback.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return "Simulate writeback";
+            }
+
+            if (string.Equals(mode, SpaceMapperBenchmarkMode.FullWriteback.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                return "Full writeback";
+            }
+
+            return mode;
+        }
+
+        private static (string MarkdownPath, string JsonPath) WriteComparisonReport(SpaceMapperComparisonOutput output)
+        {
+            var baseDir = Path.GetDirectoryName(typeof(SpaceMapperControl).Assembly.Location)
+                ?? AppDomain.CurrentDomain.BaseDirectory;
+            var reportsDir = Path.Combine(baseDir, "Reports");
+            Directory.CreateDirectory(reportsDir);
+
+            var timestamp = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(output?.Report?.GeneratedUtc)
+                && DateTime.TryParse(output.Report.GeneratedUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
+            {
+                timestamp = parsed.ToUniversalTime();
+            }
+
+            var stamp = timestamp.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
+            var mdPath = Path.Combine(reportsDir, $"SpaceMapper_Compare_{stamp}.md");
+            var jsonPath = Path.Combine(reportsDir, $"SpaceMapper_Compare_{stamp}.json");
+
+            File.WriteAllText(mdPath, output?.Markdown ?? string.Empty);
+            File.WriteAllText(jsonPath, output?.Json ?? string.Empty);
+
+            return (mdPath, jsonPath);
+        }
+
+        private static string GetModelName(Document doc)
+        {
+            if (doc == null)
+            {
+                return string.Empty;
+            }
+
+            var name = doc.FileName;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return "Untitled";
+            }
+
+            return Path.GetFileName(name);
+        }
+
         private void UpdateEstimateUi(SpaceMapperRequest request, SpaceMapperPreflightResult result)
         {
             if (result == null)
@@ -1548,18 +2129,29 @@ namespace MicroEng.Navisworks
                 _processingPage.EstimateRuntimeText.Text = "n/a";
                 _processingPage.EstimateCountsText.Text = "-";
                 _processingPage.EstimatePairsText.Text = "-";
+                _processingPage.EstimateAvgLabelText.Text = "Avg candidates/zone:";
                 _processingPage.EstimateAvgText.Text = "-";
                 _processingPage.EstimateConfidenceText.Text = "Low";
                 _processingPage.EstimateCellSizeText.Text = "-";
                 _processingPage.EstimatePreflightTimeText.Text = "-";
                 UpdateIndexGranularityHint(null);
                 UpdatePresetUi(null);
+                UpdateFastTraversalUi();
                 return;
             }
 
             _processingPage.EstimateCountsText.Text = $"Zones: {result.ZoneCount:N0} Targets: {result.TargetCount:N0}";
             _processingPage.EstimatePairsText.Text = $"{result.CandidatePairs:N0}";
-            _processingPage.EstimateAvgText.Text = $"{result.AvgCandidatesPerZone:N0}";
+            if (result.TraversalUsed == SpaceMapperFastTraversalMode.TargetMajor)
+            {
+                _processingPage.EstimateAvgLabelText.Text = "Avg candidates/target:";
+                _processingPage.EstimateAvgText.Text = $"{result.AvgCandidatesPerTarget:N0}";
+            }
+            else
+            {
+                _processingPage.EstimateAvgLabelText.Text = "Avg candidates/zone:";
+                _processingPage.EstimateAvgText.Text = $"{result.AvgCandidatesPerZone:N0}";
+            }
 
             if (result.ZoneCount == 0 || result.TargetCount == 0)
             {
@@ -1579,6 +2171,7 @@ namespace MicroEng.Navisworks
             _processingPage.EstimatePreflightTimeText.Text = FormatPreflightTimestamp(result.TimestampUtc);
             UpdateIndexGranularityHint(result);
             UpdatePresetUi(result);
+            UpdateFastTraversalUi();
         }
 
         private SpaceMapperPerformancePreset GetSelectedPreset()
@@ -1598,6 +2191,66 @@ namespace MicroEng.Navisworks
             };
         }
 
+        private SpaceMapperFastTraversalMode GetSelectedFastTraversalMode()
+        {
+            if (_processingPage.FastTraversalCombo == null)
+            {
+                return SpaceMapperFastTraversalMode.Auto;
+            }
+
+            return _processingPage.FastTraversalCombo.SelectedIndex switch
+            {
+                1 => SpaceMapperFastTraversalMode.ZoneMajor,
+                2 => SpaceMapperFastTraversalMode.TargetMajor,
+                _ => SpaceMapperFastTraversalMode.Auto
+            };
+        }
+
+        private SpaceMapperBenchmarkMode GetSelectedBenchmarkMode()
+        {
+            if (_processingPage?.BenchmarkModeCombo == null)
+            {
+                return SpaceMapperBenchmarkMode.ComputeOnly;
+            }
+
+            return _processingPage.BenchmarkModeCombo.SelectedIndex switch
+            {
+                1 => SpaceMapperBenchmarkMode.SimulateWriteback,
+                2 => SpaceMapperBenchmarkMode.FullWriteback,
+                _ => SpaceMapperBenchmarkMode.ComputeOnly
+            };
+        }
+
+        private SpaceMapperWritebackStrategy GetSelectedWritebackStrategy()
+        {
+            if (_processingPage?.WritebackStrategyCombo == null)
+            {
+                return SpaceMapperWritebackStrategy.OptimizedSingleCategory;
+            }
+
+            return _processingPage.WritebackStrategyCombo.SelectedIndex switch
+            {
+                0 => SpaceMapperWritebackStrategy.VirtualNoBake,
+                2 => SpaceMapperWritebackStrategy.LegacyPerMapping,
+                _ => SpaceMapperWritebackStrategy.OptimizedSingleCategory
+            };
+        }
+
+        private void ApplyFastTraversalMode(SpaceMapperFastTraversalMode mode)
+        {
+            if (_processingPage.FastTraversalCombo == null)
+            {
+                return;
+            }
+
+            _processingPage.FastTraversalCombo.SelectedIndex = mode switch
+            {
+                SpaceMapperFastTraversalMode.ZoneMajor => 1,
+                SpaceMapperFastTraversalMode.TargetMajor => 2,
+                _ => 0
+            };
+        }
+
         private void UpdatePresetUi(SpaceMapperPreflightResult preflight)
         {
             var selected = GetSelectedPreset();
@@ -1613,9 +2266,87 @@ namespace MicroEng.Navisworks
             _processingPage.PresetResolvedText.Text = string.Empty;
         }
 
+        private void UpdateFastTraversalUi()
+        {
+            if (_processingPage?.FastTraversalCombo == null)
+            {
+                return;
+            }
+
+            var needsPartial = _processingPage.TagPartialCheck.IsChecked == true
+                || _processingPage.TreatPartialCheck.IsChecked == true;
+            var selectedPreset = GetSelectedPreset();
+            var effectivePreset = SpaceMapperPresetLogic.ResolvePreset(selectedPreset, _lastPreflight, out _);
+            var allowTargetMajor = effectivePreset == SpaceMapperPerformancePreset.Fast && !needsPartial;
+
+            if (_processingPage.FastTraversalCombo.Items.Count > 2
+                && _processingPage.FastTraversalCombo.Items[2] is ComboBoxItem targetItem)
+            {
+                targetItem.IsEnabled = allowTargetMajor;
+            }
+
+            if (!allowTargetMajor && _processingPage.FastTraversalCombo.SelectedIndex == 2)
+            {
+                _processingPage.FastTraversalCombo.SelectedIndex = 1;
+            }
+
+            if (_processingPage.FastTraversalHintText != null)
+            {
+                _processingPage.FastTraversalHintText.Text = allowTargetMajor
+                    ? "Target-major is available only when partial options are disabled."
+                    : "Target-major is disabled unless Fast preset is active and partial options are off.";
+            }
+
+            var selectedTraversal = GetSelectedFastTraversalMode();
+            SpaceMapperFastTraversalMode resolved;
+            string reason = null;
+
+            if (!allowTargetMajor)
+            {
+                resolved = SpaceMapperFastTraversalMode.ZoneMajor;
+                if (needsPartial)
+                {
+                    reason = "partials enabled";
+                }
+                else if (effectivePreset != SpaceMapperPerformancePreset.Fast)
+                {
+                    reason = "preset not Fast";
+                }
+            }
+            else if (selectedTraversal == SpaceMapperFastTraversalMode.Auto)
+            {
+                if (_lastPreflight != null && _lastPreflight.TargetCount > _lastPreflight.ZoneCount * 2)
+                {
+                    resolved = SpaceMapperFastTraversalMode.TargetMajor;
+                }
+                else
+                {
+                    resolved = SpaceMapperFastTraversalMode.ZoneMajor;
+                }
+
+                if (_lastPreflight == null)
+                {
+                    reason = "run preflight to auto-resolve";
+                }
+            }
+            else
+            {
+                resolved = selectedTraversal;
+            }
+
+            if (_processingPage.FastTraversalResolvedText != null)
+            {
+                var label = resolved == SpaceMapperFastTraversalMode.TargetMajor ? "Target-major" : "Zone-major";
+                _processingPage.FastTraversalResolvedText.Text = string.IsNullOrWhiteSpace(reason)
+                    ? $"Resolved: {label}"
+                    : $"Resolved: {label} ({reason})";
+            }
+        }
+
         private void OnPresetChanged()
         {
             UpdatePresetUi(_lastPreflight);
+            UpdateFastTraversalUi();
 
             if (_processingPage.LiveEstimateToggle.IsChecked != true)
             {
@@ -2325,7 +3056,34 @@ namespace MicroEng.Navisworks
             _processingPage.ZoneBehaviorContainedBox.Text = settings.ZoneBehaviorContainedValue ?? "Contained";
             _processingPage.ZoneBehaviorPartialBox.Text = settings.ZoneBehaviorPartialValue ?? "Partial";
             UpdateZoneBehaviorInputs();
+            if (_processingPage.WritebackStrategyCombo != null)
+            {
+                _processingPage.WritebackStrategyCombo.SelectedIndex = settings.WritebackStrategy switch
+                {
+                    SpaceMapperWritebackStrategy.VirtualNoBake => 0,
+                    SpaceMapperWritebackStrategy.LegacyPerMapping => 2,
+                    _ => 1
+                };
+            }
+            if (_processingPage.ShowInternalWritebackCheck != null)
+            {
+                _processingPage.ShowInternalWritebackCheck.IsChecked = settings.ShowInternalPropertiesDuringWriteback;
+            }
+            if (_processingPage.SkipUnchangedWritebackCheck != null)
+            {
+                _processingPage.SkipUnchangedWritebackCheck.IsChecked = settings.SkipUnchangedWriteback;
+            }
+            if (_processingPage.PackWritebackCheck != null)
+            {
+                _processingPage.PackWritebackCheck.IsChecked = settings.PackWritebackProperties;
+            }
+            if (_processingPage.CloseDockPanesCheck != null)
+            {
+                _processingPage.CloseDockPanesCheck.IsChecked = settings.CloseDockPanesDuringRun;
+            }
             ApplyPresetSettings(settings.PerformancePreset);
+            ApplyFastTraversalMode(settings.FastTraversalMode);
+            UpdateFastTraversalUi();
         }
 
         private void UpdateIndexGranularityHint(SpaceMapperPreflightResult preflight)

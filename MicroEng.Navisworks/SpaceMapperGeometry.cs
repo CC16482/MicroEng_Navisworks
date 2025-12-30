@@ -148,7 +148,7 @@ namespace MicroEng.Navisworks
         public static List<PlaneEquation> BuildPlanes(IReadOnlyList<Vector3D> vertices, BoundingBox3D bbox)
         {
             var planes = new List<PlaneEquation>();
-            if (vertices != null && vertices.Count >= 3)
+            if (vertices != null && vertices.Count >= 3 && (vertices.Count % 3 == 0))
             {
                 // Use triangle-based planes (one per tri from triplets)
                 for (int i = 0; i + 2 < vertices.Count; i += 3)

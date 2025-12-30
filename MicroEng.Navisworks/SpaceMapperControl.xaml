@@ -18,12 +18,11 @@
                 <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
             </ResourceDictionary.MergedDictionaries>
             <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
-            <x:Array x:Key="TargetDefinitions" Type="{x:Type local:SpaceMapperTargetDefinition}">
-                <local:SpaceMapperTargetDefinition>EntireModel</local:SpaceMapperTargetDefinition>
-                <local:SpaceMapperTargetDefinition>CurrentSelection</local:SpaceMapperTargetDefinition>
-                <local:SpaceMapperTargetDefinition>SelectionSet</local:SpaceMapperTargetDefinition>
-                <local:SpaceMapperTargetDefinition>SearchSet</local:SpaceMapperTargetDefinition>
-                <local:SpaceMapperTargetDefinition>SelectionTreeLevel</local:SpaceMapperTargetDefinition>
+            <x:Array x:Key="TargetDefinitions" Type="{x:Type local:SpaceMapperTargetDefinitionOption}">
+                <local:SpaceMapperTargetDefinitionOption Value="EntireModel" DisplayName="Entire Model" />
+                <local:SpaceMapperTargetDefinitionOption Value="CurrentSelection" DisplayName="Current Selection" />
+                <local:SpaceMapperTargetDefinitionOption Value="SelectionSet" DisplayName="Selection/Search Set" />
+                <local:SpaceMapperTargetDefinitionOption Value="SelectionTreeLevel" DisplayName="Selection Tree Level" />
             </x:Array>
             <x:Array x:Key="MembershipModes" Type="{x:Type local:SpaceMembershipMode}">
                 <local:SpaceMembershipMode>ContainedOnly</local:SpaceMembershipMode>
@@ -111,17 +110,10 @@
                                     Orientation="Horizontal"
                                     VerticalAlignment="Top">
                             <ui:Button x:Name="RunSpaceMapperButtonControl"
-                                       Margin="0,0,8,0"
-                                       ToolTip="Run Space Mapper">
-                                <TextBlock Text="Run Space Mapper" />
-                            </ui:Button>
-                            <ui:Button x:Name="RefreshSetsButtonControl"
-                                       ToolTip="Refresh selection and search set lists">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="ArrowSync20" Margin="0,0,6,0" />
-                                    <TextBlock Text="Refresh Sets" />
-                                </StackPanel>
-                            </ui:Button>
+                                       Content="Run Space Mapper"
+                                       Appearance="Primary"
+                                       Padding="12,6"
+                                       ToolTip="Run Space Mapper" />
                         </StackPanel>
                     </Grid>
                 </ui:Card>

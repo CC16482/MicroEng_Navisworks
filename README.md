@@ -6,11 +6,12 @@
 - WPF-UI is active (4.1.0). Theme is per-root only (no global App.xaml). Defaults: Dark theme, Black/White accent, DataGrid gridlines #C0C0C0.
 - WPF-UI is the primary UI system. If something looks off, fix WPF-UI usage/styles first instead of falling back to non-WPF-UI controls.
 - Settings: open via the gear button in the panel. Theme toggle + accent mode (System, Custom, Black/White) + DataGrid gridline color apply live to all open MicroEng windows.
+- Step 3 Benchmark & Testing: Benchmark button runs multi-preset comparisons (Compute only / Simulate writeback / Full writeback). Options include writeback strategy, skip unchanged (signature), pack outputs, show internal properties, and close Navisworks panes (restore after). Reports save to `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
+- Advanced Performance: Fast Traversal (Auto/Zone-major/Target-major). Target-major is only valid when partial options are off.
 - Log file: `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\MicroEng.log` (fallback: `%TEMP%\MicroEng.log`).
 - If UI is blank or a window fails to open, check the log for XAML resource errors (missing resource keys or Wpf.Ui.dll not found).
 - Known UI issue to verify: some labels/text still render black in Dark mode; fix by removing local `Foreground` overrides or ensuring `MicroEngWpfUiTheme.ApplyTextResources` updates `TextFillColor*` brushes.
 - If the plugin does not load: verify `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks.addin` points to `.\MicroEng.Navisworks\MicroEng.Navisworks.dll`, and that DLL actually exists in `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\`. Do not mix ProgramData and Program Files plugin roots.
-
 ## AI Notes (Context for Codex)
 - Priority #1: WPF-UI is the primary UI system. Do not introduce non-WPF-UI elements as a fallback unless absolutely required for stability; instead, fix/adjust WPF-UI usage to match Gallery patterns when possible.
 - WPF-UI Gallery reference is local: `ReferenceProjects\wpfui-main`. Use patterns from:
@@ -83,7 +84,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 - **Data Mapper (`MicroEng.AppendData`)**: Opens the Data Mapper UI (`AppendIntegrateDialog`). Uses Data Scraper cache for property pickers/type hints; no auto-tagging logic remains.
 - **Data Scraper**: Scans model properties into `DataScraperCache` (profiles, distinct properties, raw entries). Source of truth for Data Matrix/Space Mapper metadata.
 - **Data Matrix** (dock pane `MicroEng.DataMatrix.DockPane`): WPF grid built from the latest ScrapeSession. Supports column chooser (toggle properties on/off), presets per profile, selection sync back to Navisworks, and CSV export (filtered/all).
-- **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata and CPU intersection engine (GPU stubbed for now).
+- **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata and CPU engine (GPU stubs remain). Presets Fast/Normal/Accurate; Fast uses origin-point containment (bbox center in zone AABB). Advanced Performance includes Fast Traversal (Auto/Zone-major/Target-major). Step 3 includes Benchmark & Testing (compute/simulate/full), writeback strategy, skip-unchanged signature, packed writeback option, and optional pane-closing during runs.
 - **MicroEng Panel**: WPF launcher with branding/logo and log textbox that listens to `MicroEngActions.LogMessage`.
 
 ## Notes
@@ -93,7 +94,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 
 ## Known issues / tips
 - Space Mapper UI clipping: keep `SpaceMapperControl.xaml` rooted in a simple Grid (header row + content row) and ensure the dock pane is `[DockPanePlugin(..., FixedSize=false, AutoScroll=true)]` with `ElementHost` docked fill. If the pane looks truncated, delete old plugin copies from `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\` (and any AppData bundle), rebuild, redeploy, then dock the pane before resizing.
- - CPU Normal mode only: Space Mapper currently forces CPU Normal processing. Geometry extraction uses bbox fallback; COM triangle extraction TODO remains for Navis main thread only.
+- Target-major traversal only applies when partial options are off (Fast origin-point mode). When partial tagging is enabled, Fast traversal falls back to Zone-major.
 
 ## Working with Codex
 - Primary entry points live in `MicroEngPlugins.cs`.

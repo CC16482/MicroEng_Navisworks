@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autodesk.Navisworks.Api;
+using MicroEng.Navisworks;
 using MicroEng.Navisworks.SpaceMapper.Geometry;
 
 namespace MicroEng.Navisworks.SpaceMapper.Estimation
@@ -15,10 +16,15 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
     {
         public string Signature { get; set; }
         public SpatialHashGrid Grid { get; set; }
+        public SpatialHashGrid ZoneGrid { get; set; }
         public string[] TargetKeys { get; set; }
         public Aabb[] TargetBounds { get; set; }
+        public Aabb[] ZoneBoundsInflated { get; set; }
+        public int[] ZoneIndexMap { get; set; }
         public Aabb WorldBounds { get; set; }
         public double CellSizeUsed { get; set; }
+        public bool PointIndex { get; set; }
+        public SpaceMapperFastTraversalMode TraversalUsed { get; set; } = SpaceMapperFastTraversalMode.ZoneMajor;
         public SpaceMapperPreflightResult LastResult { get; set; }
     }
 
@@ -67,6 +73,12 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             var zones = SpaceMapperService.ResolveZones(session, request.ZoneSource, request.ZoneSetName, doc).ToList();
             var targetsByRule = new Dictionary<string, List<SpaceMapperTargetRule>>(StringComparer.OrdinalIgnoreCase);
             var targets = SpaceMapperService.ResolveTargets(doc, request.TargetRules, targetsByRule).ToList();
+            var settings = request.ProcessingSettings ?? new SpaceMapperProcessingSettings();
+            var needsPartial = settings.TagPartialSeparately || settings.TreatPartialAsContained;
+            var originOnlyFast = settings.UseOriginPointOnly;
+            var usePointIndex = originOnlyFast && !needsPartial;
+            var traversal = ResolveFastTraversal(settings.FastTraversalMode, originOnlyFast, needsPartial, targets.Count, zones.Count);
+            var usePointIndexForBounds = usePointIndex && traversal != SpaceMapperFastTraversalMode.TargetMajor;
 
             if (zones.Count == 0 || targets.Count == 0)
             {
@@ -74,11 +86,17 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 {
                     ZoneCount = zones.Count,
                     TargetCount = targets.Count,
-                    Signature = signature
+                    Signature = signature,
+                    TraversalUsed = traversal
                 });
             }
 
             var zoneBounds = new Aabb[zones.Count];
+            var validZoneBounds = new List<Aabb>(zones.Count);
+            var zoneIndexMap = traversal == SpaceMapperFastTraversalMode.TargetMajor
+                ? new List<int>(zones.Count)
+                : null;
+
             for (int i = 0; i < zones.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
@@ -88,14 +106,36 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                     zoneBounds[i] = new Aabb(0, 0, 0, 0, 0, 0);
                     continue;
                 }
-                zoneBounds[i] = Inflate(ToAabb(bbox), request.ProcessingSettings);
+
+                var inflated = Inflate(ToAabb(bbox), settings);
+                zoneBounds[i] = inflated;
+                validZoneBounds.Add(inflated);
+                zoneIndexMap?.Add(i);
             }
 
-            var canReuseCache = _cache != null
+            var validZoneBoundsArray = validZoneBounds.ToArray();
+
+            var canReuseTargetGrid = _cache != null
                 && string.Equals(_cache.Signature, signature, StringComparison.OrdinalIgnoreCase)
                 && _cache.Grid != null
                 && _cache.TargetBounds != null
-                && _cache.TargetKeys != null;
+                && _cache.TargetKeys != null
+                && _cache.PointIndex == usePointIndex
+                && _cache.TraversalUsed == SpaceMapperFastTraversalMode.ZoneMajor;
+
+            var canReuseZoneGrid = _cache != null
+                && string.Equals(_cache.Signature, signature, StringComparison.OrdinalIgnoreCase)
+                && _cache.ZoneGrid != null
+                && _cache.ZoneBoundsInflated != null
+                && _cache.ZoneIndexMap != null
+                && _cache.TargetBounds != null
+                && _cache.TargetKeys != null
+                && _cache.PointIndex == usePointIndex
+                && _cache.TraversalUsed == SpaceMapperFastTraversalMode.TargetMajor;
+
+            var canReuseCache = traversal == SpaceMapperFastTraversalMode.TargetMajor
+                ? canReuseZoneGrid
+                : canReuseTargetGrid;
 
             Aabb[] targetBounds;
             string[] targetKeys;
@@ -117,11 +157,18 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 {
                     token.ThrowIfCancellationRequested();
                     var bbox = targets[i].ModelItem?.BoundingBox();
-                    targetBounds[i] = bbox == null ? new Aabb(0, 0, 0, 0, 0, 0) : ToAabb(bbox);
+                    if (bbox == null)
+                    {
+                        targetBounds[i] = new Aabb(0, 0, 0, 0, 0, 0);
+                    }
+                    else
+                    {
+                        targetBounds[i] = usePointIndexForBounds ? ToPointAabb(bbox) : ToAabb(bbox);
+                    }
                     targetKeys[i] = targets[i].ItemKey;
                 }
 
-                worldBounds = ComputeWorldBounds(zoneBounds, targetBounds);
+                worldBounds = ComputeWorldBounds(validZoneBoundsArray, targetBounds);
                 cellSize = SpatialGridSizing.ComputeCellSize(worldBounds, request.ProcessingSettings?.IndexGranularity ?? 0);
             }
 
@@ -129,44 +176,90 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             {
                 token.ThrowIfCancellationRequested();
 
-                progress?.Report(new SpaceMapperPreflightProgress { Stage = "Building index", ZonesProcessed = 0, TotalZones = zoneBounds.Length });
+                var totalWork = traversal == SpaceMapperFastTraversalMode.TargetMajor ? targetBounds.Length : zoneBounds.Length;
+                progress?.Report(new SpaceMapperPreflightProgress { Stage = "Building index", ZonesProcessed = 0, TotalZones = totalWork });
 
-                SpatialHashGrid grid;
+                SpatialHashGrid grid = null;
+                SpatialHashGrid zoneGrid = null;
                 var buildSw = Stopwatch.StartNew();
 
                 if (canReuseCache)
                 {
                     grid = _cache.Grid;
+                    zoneGrid = _cache.ZoneGrid;
                     buildSw.Stop();
                 }
                 else
                 {
-                    grid = new SpatialHashGrid(worldBounds, cellSize, targetBounds);
+                    if (traversal == SpaceMapperFastTraversalMode.TargetMajor)
+                    {
+                        zoneGrid = new SpatialHashGrid(worldBounds, cellSize, validZoneBoundsArray);
+                    }
+                    else
+                    {
+                        grid = new SpatialHashGrid(worldBounds, cellSize, targetBounds);
+                    }
                     buildSw.Stop();
                 }
 
                 var querySw = Stopwatch.StartNew();
                 long candidatePairs = 0;
                 int maxCandidates = 0;
-                var visited = new int[targetBounds.Length];
-                var stamp = 0;
+                double avgCandidatesPerZone = 0;
+                double avgCandidatesPerTarget = 0;
 
-                for (int i = 0; i < zoneBounds.Length; i++)
+                if (traversal == SpaceMapperFastTraversalMode.TargetMajor)
                 {
-                    token.ThrowIfCancellationRequested();
-                    var count = grid.CountCandidates(zoneBounds[i], visited, ref stamp);
-                    candidatePairs += count;
-                    if (count > maxCandidates) maxCandidates = count;
-
-                    if (progress != null && (i % 8 == 0 || i == zoneBounds.Length - 1))
+                    for (int i = 0; i < targetBounds.Length; i++)
                     {
-                        progress.Report(new SpaceMapperPreflightProgress
+                        token.ThrowIfCancellationRequested();
+
+                        var bounds = targetBounds[i];
+                        var cx = (bounds.MinX + bounds.MaxX) * 0.5;
+                        var cy = (bounds.MinY + bounds.MaxY) * 0.5;
+                        var cz = (bounds.MinZ + bounds.MaxZ) * 0.5;
+                        var count = zoneGrid.CountPointCandidates(cx, cy, cz);
+
+                        candidatePairs += count;
+                        if (count > maxCandidates) maxCandidates = count;
+
+                        if (progress != null && (i % 16 == 0 || i == targetBounds.Length - 1))
                         {
-                            Stage = "Querying",
-                            ZonesProcessed = i + 1,
-                            TotalZones = zoneBounds.Length
-                        });
+                            progress.Report(new SpaceMapperPreflightProgress
+                            {
+                                Stage = "Querying",
+                                ZonesProcessed = i + 1,
+                                TotalZones = targetBounds.Length
+                            });
+                        }
                     }
+
+                    avgCandidatesPerTarget = targetBounds.Length == 0 ? 0 : candidatePairs / (double)targetBounds.Length;
+                }
+                else
+                {
+                    var visited = new int[targetBounds.Length];
+                    var stamp = 0;
+
+                    for (int i = 0; i < zoneBounds.Length; i++)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        var count = grid.CountCandidates(zoneBounds[i], visited, ref stamp);
+                        candidatePairs += count;
+                        if (count > maxCandidates) maxCandidates = count;
+
+                        if (progress != null && (i % 8 == 0 || i == zoneBounds.Length - 1))
+                        {
+                            progress.Report(new SpaceMapperPreflightProgress
+                            {
+                                Stage = "Querying",
+                                ZonesProcessed = i + 1,
+                                TotalZones = zoneBounds.Length
+                            });
+                        }
+                    }
+
+                    avgCandidatesPerZone = zoneBounds.Length == 0 ? 0 : candidatePairs / (double)zoneBounds.Length;
                 }
 
                 querySw.Stop();
@@ -176,12 +269,15 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                     ZoneCount = zoneBounds.Length,
                     TargetCount = targetBounds.Length,
                     CandidatePairs = candidatePairs,
-                    MaxCandidatesPerZone = maxCandidates,
-                    AvgCandidatesPerZone = zoneBounds.Length == 0 ? 0 : candidatePairs / (double)zoneBounds.Length,
-                    CellSizeUsed = grid.CellSize,
+                    MaxCandidatesPerZone = traversal == SpaceMapperFastTraversalMode.ZoneMajor ? maxCandidates : 0,
+                    AvgCandidatesPerZone = avgCandidatesPerZone,
+                    MaxCandidatesPerTarget = traversal == SpaceMapperFastTraversalMode.TargetMajor ? maxCandidates : 0,
+                    AvgCandidatesPerTarget = avgCandidatesPerTarget,
+                    CellSizeUsed = (grid ?? zoneGrid).CellSize,
                     BuildIndexTime = buildSw.Elapsed,
                     QueryTime = querySw.Elapsed,
-                    Signature = signature
+                    Signature = signature,
+                    TraversalUsed = traversal
                 };
 
                 if (canReuseCache)
@@ -194,10 +290,15 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                     {
                         Signature = signature,
                         Grid = grid,
+                        ZoneGrid = zoneGrid,
                         TargetBounds = targetBounds,
                         TargetKeys = targetKeys,
+                        ZoneBoundsInflated = traversal == SpaceMapperFastTraversalMode.TargetMajor ? validZoneBoundsArray : null,
+                        ZoneIndexMap = traversal == SpaceMapperFastTraversalMode.TargetMajor ? zoneIndexMap?.ToArray() : null,
                         WorldBounds = worldBounds,
-                        CellSizeUsed = grid.CellSize,
+                        CellSizeUsed = (grid ?? zoneGrid).CellSize,
+                        PointIndex = usePointIndex,
+                        TraversalUsed = traversal,
                         LastResult = result
                     };
                 }
@@ -211,6 +312,24 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             var min = bbox.Min;
             var max = bbox.Max;
             return new Aabb(min.X, min.Y, min.Z, max.X, max.Y, max.Z);
+        }
+
+        private static Aabb ToPointAabb(BoundingBox3D bbox)
+        {
+            var min = bbox.Min;
+            var max = bbox.Max;
+            var cx = (min.X + max.X) * 0.5;
+            var cy = (min.Y + max.Y) * 0.5;
+            var cz = (min.Z + max.Z) * 0.5;
+            return new Aabb(cx, cy, cz, cx, cy, cz);
+        }
+
+        private static Aabb ToPointAabb(in Aabb bbox)
+        {
+            var cx = (bbox.MinX + bbox.MaxX) * 0.5;
+            var cy = (bbox.MinY + bbox.MaxY) * 0.5;
+            var cz = (bbox.MinZ + bbox.MaxZ) * 0.5;
+            return new Aabb(cx, cy, cz, cx, cy, cz);
         }
 
         private static Aabb Inflate(Aabb bbox, SpaceMapperProcessingSettings settings)
@@ -272,6 +391,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             sb.Append(request.ZoneSetName ?? string.Empty).Append('|');
 
             var settings = request.ProcessingSettings ?? new SpaceMapperProcessingSettings();
+            sb.Append(settings.ProcessingMode).Append('|');
             sb.Append(settings.Offset3D.ToString("0.###")).Append('|');
             sb.Append(settings.OffsetTop.ToString("0.###")).Append('|');
             sb.Append(settings.OffsetBottom.ToString("0.###")).Append('|');
@@ -280,6 +400,9 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             sb.Append(settings.TagPartialSeparately ? '1' : '0').Append('|');
             sb.Append(settings.EnableMultipleZones ? '1' : '0').Append('|');
             sb.Append(settings.IndexGranularity).Append('|');
+            sb.Append(settings.PerformancePreset).Append('|');
+            sb.Append(settings.FastTraversalMode).Append('|');
+            sb.Append(settings.UseOriginPointOnly ? '1' : '0').Append('|');
 
             foreach (var rule in request.TargetRules.OrderBy(r => r.Name ?? string.Empty))
             {
@@ -304,6 +427,189 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 }
                 return hex.ToString();
             }
+        }
+
+        internal static SpaceMapperPreflightResult RunForDataset(
+            IReadOnlyList<Aabb> zoneBounds,
+            IReadOnlyList<Aabb> targetBounds,
+            string[] targetKeys,
+            SpaceMapperProcessingSettings settings,
+            CancellationToken token,
+            out SpaceMapperPreflightCache cache,
+            IProgress<SpaceMapperPreflightProgress> progress = null)
+        {
+            cache = null;
+            settings ??= new SpaceMapperProcessingSettings();
+
+            var zoneBoundsArray = zoneBounds?.ToArray() ?? Array.Empty<Aabb>();
+            var targetBoundsArray = targetBounds?.ToArray() ?? Array.Empty<Aabb>();
+
+            if (zoneBoundsArray.Length == 0 || targetBoundsArray.Length == 0)
+            {
+                return new SpaceMapperPreflightResult
+                {
+                    ZoneCount = zoneBoundsArray.Length,
+                    TargetCount = targetBoundsArray.Length,
+                    Signature = string.Empty
+                };
+            }
+
+            var needsPartial = settings.TagPartialSeparately || settings.TreatPartialAsContained;
+            var originOnlyFast = settings.UseOriginPointOnly;
+            var traversal = ResolveFastTraversal(settings.FastTraversalMode, originOnlyFast, needsPartial, targetBoundsArray.Length, zoneBoundsArray.Length);
+            var usePointIndex = originOnlyFast && !needsPartial;
+            var usePointIndexForBounds = usePointIndex && traversal != SpaceMapperFastTraversalMode.TargetMajor;
+
+            if (usePointIndexForBounds)
+            {
+                for (int i = 0; i < targetBoundsArray.Length; i++)
+                {
+                    targetBoundsArray[i] = ToPointAabb(targetBoundsArray[i]);
+                }
+            }
+
+            var totalWork = traversal == SpaceMapperFastTraversalMode.TargetMajor ? targetBoundsArray.Length : zoneBoundsArray.Length;
+            progress?.Report(new SpaceMapperPreflightProgress { Stage = "Building index", ZonesProcessed = 0, TotalZones = totalWork });
+
+            SpatialHashGrid grid = null;
+            SpatialHashGrid zoneGrid = null;
+            var buildSw = Stopwatch.StartNew();
+
+            var worldBounds = ComputeWorldBounds(zoneBoundsArray, targetBoundsArray);
+            var cellSize = SpatialGridSizing.ComputeCellSize(worldBounds, settings.IndexGranularity);
+
+            if (traversal == SpaceMapperFastTraversalMode.TargetMajor)
+            {
+                zoneGrid = new SpatialHashGrid(worldBounds, cellSize, zoneBoundsArray);
+            }
+            else
+            {
+                grid = new SpatialHashGrid(worldBounds, cellSize, targetBoundsArray);
+            }
+
+            buildSw.Stop();
+
+            var querySw = Stopwatch.StartNew();
+            long candidatePairs = 0;
+            int maxCandidates = 0;
+            double avgCandidatesPerZone = 0;
+            double avgCandidatesPerTarget = 0;
+
+            if (traversal == SpaceMapperFastTraversalMode.TargetMajor)
+            {
+                for (int i = 0; i < targetBoundsArray.Length; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var bounds = targetBoundsArray[i];
+                    var cx = (bounds.MinX + bounds.MaxX) * 0.5;
+                    var cy = (bounds.MinY + bounds.MaxY) * 0.5;
+                    var cz = (bounds.MinZ + bounds.MaxZ) * 0.5;
+                    var count = zoneGrid.CountPointCandidates(cx, cy, cz);
+                    candidatePairs += count;
+                    if (count > maxCandidates) maxCandidates = count;
+
+                    if (progress != null && (i % 16 == 0 || i == targetBoundsArray.Length - 1))
+                    {
+                        progress.Report(new SpaceMapperPreflightProgress
+                        {
+                            Stage = "Querying",
+                            ZonesProcessed = i + 1,
+                            TotalZones = targetBoundsArray.Length
+                        });
+                    }
+                }
+
+                avgCandidatesPerTarget = targetBoundsArray.Length == 0 ? 0 : candidatePairs / (double)targetBoundsArray.Length;
+            }
+            else
+            {
+                var visited = new int[targetBoundsArray.Length];
+                var stamp = 0;
+
+                for (int i = 0; i < zoneBoundsArray.Length; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var count = grid.CountCandidates(zoneBoundsArray[i], visited, ref stamp);
+                    candidatePairs += count;
+                    if (count > maxCandidates) maxCandidates = count;
+
+                    if (progress != null && (i % 8 == 0 || i == zoneBoundsArray.Length - 1))
+                    {
+                        progress.Report(new SpaceMapperPreflightProgress
+                        {
+                            Stage = "Querying",
+                            ZonesProcessed = i + 1,
+                            TotalZones = zoneBoundsArray.Length
+                        });
+                    }
+                }
+
+                avgCandidatesPerZone = zoneBoundsArray.Length == 0 ? 0 : candidatePairs / (double)zoneBoundsArray.Length;
+            }
+
+            querySw.Stop();
+
+            var result = new SpaceMapperPreflightResult
+            {
+                ZoneCount = zoneBoundsArray.Length,
+                TargetCount = targetBoundsArray.Length,
+                CandidatePairs = candidatePairs,
+                MaxCandidatesPerZone = traversal == SpaceMapperFastTraversalMode.ZoneMajor ? maxCandidates : 0,
+                AvgCandidatesPerZone = avgCandidatesPerZone,
+                MaxCandidatesPerTarget = traversal == SpaceMapperFastTraversalMode.TargetMajor ? maxCandidates : 0,
+                AvgCandidatesPerTarget = avgCandidatesPerTarget,
+                CellSizeUsed = (grid ?? zoneGrid).CellSize,
+                BuildIndexTime = buildSw.Elapsed,
+                QueryTime = querySw.Elapsed,
+                Signature = string.Empty,
+                TraversalUsed = traversal
+            };
+
+            cache = new SpaceMapperPreflightCache
+            {
+                Signature = string.Empty,
+                Grid = grid,
+                ZoneGrid = zoneGrid,
+                TargetBounds = targetBoundsArray,
+                TargetKeys = targetKeys ?? Array.Empty<string>(),
+                ZoneBoundsInflated = traversal == SpaceMapperFastTraversalMode.TargetMajor ? zoneBoundsArray : null,
+                ZoneIndexMap = traversal == SpaceMapperFastTraversalMode.TargetMajor ? Enumerable.Range(0, zoneBoundsArray.Length).ToArray() : null,
+                WorldBounds = worldBounds,
+                CellSizeUsed = (grid ?? zoneGrid).CellSize,
+                PointIndex = usePointIndex,
+                TraversalUsed = traversal,
+                LastResult = result
+            };
+
+            return result;
+        }
+
+        private static SpaceMapperFastTraversalMode ResolveFastTraversal(
+            SpaceMapperFastTraversalMode requested,
+            bool originOnlyFast,
+            bool needsPartial,
+            int targetCount,
+            int zoneCount)
+        {
+            var allowTargetMajor = originOnlyFast && !needsPartial;
+            if (!allowTargetMajor)
+            {
+                return SpaceMapperFastTraversalMode.ZoneMajor;
+            }
+
+            if (requested == SpaceMapperFastTraversalMode.TargetMajor)
+            {
+                return SpaceMapperFastTraversalMode.TargetMajor;
+            }
+
+            if (requested == SpaceMapperFastTraversalMode.ZoneMajor)
+            {
+                return SpaceMapperFastTraversalMode.ZoneMajor;
+            }
+
+            return targetCount > zoneCount * 2
+                ? SpaceMapperFastTraversalMode.TargetMajor
+                : SpaceMapperFastTraversalMode.ZoneMajor;
         }
     }
 }

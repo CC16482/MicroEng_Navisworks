@@ -1,0 +1,990 @@
+Below is a complete, working Navisworks Manage **Dock Pane** tool that recreates the core “PolyAnimator” workflow in a Navisworks-appropriate way:
+
+* **Select objects → choose ordering (distance / axis / property / random) → choose duration + overlap → generate a Timeliner task sequence**.
+* This is the cleanest analogue to “frames + overlap” in 3ds Max, because **TimeLiner is the native 4D engine** in Navisworks (rather than trying to fake keyframed object transforms in the graphics system).
+
+It will **not** move/rotate/scale objects like 3ds Max (Navisworks Timeliner fundamentally simulates *appearance over time*, not per-object transform keyframes). But it will create a **fast, editable 4D construction sequence** that can be played immediately in TimeLiner.
+
+I’ve also included a **Delete Sequence** function that removes what it created (by name), so the workflow can be iterative.
+
+Key Navisworks API points used:
+
+* **DockPanePlugin** for the pane UI.
+* **TimelinerDocumentExtensions.GetTimeliner(doc)** and **task.Selection.CopyFrom(selection)** patterns.
+* **ModelItem.BoundingBox()** to compute centers for “order by distance/axis”.
+* Navisworks **auto-loads plugins from the install “Plugins” folder**, and you can also load via **-AddPluginAssembly** switch.
+* SDK/.NET API files are installed under the product’s `api` folder.
+
+---
+
+## What I changed vs the 3ds Max PolyAnimator approach (to make it easier)
+
+Your MaxScript does:
+
+* choose ordering (selection order / distance),
+* compute `interval = duration - overlap`,
+* step each object start time,
+* animate.
+
+In Navisworks, the “even easier” way is:
+
+1. **Use selection exactly as you do now**
+2. **Compute ordering the same ways**
+3. **Convert “frames” into “seconds” and generate TimeLiner tasks**:
+
+   * Task i start = `Start + i * (Duration - Overlap)`
+   * Task i end = `TaskStart + Duration`
+4. Play the sequence in **TimeLiner Simulation** (the native 4D viewer)
+
+This gives you: *one-click 4D tasks, editable, schedulable, and reusable*.
+
+---
+
+## Build + Deploy Instructions (use these with Codex or Visual Studio)
+
+### Prerequisites
+
+* Autodesk Navisworks **Manage** installed (Simulate also supports the .NET API; Freedom does not).
+* Visual Studio 2022 (or 2019), .NET Framework dev tools installed.
+* Navisworks SDK assemblies (installed with Navisworks) under the product install `api` folder.
+
+### Step-by-step build
+
+1. Create a new project:
+
+   * **Class Library (.NET Framework)**
+   * Target Framework: **.NET Framework 4.8** (safe default for modern Navisworks)
+
+2. Add references (Browse to your Navisworks install folder):
+
+   * `Autodesk.Navisworks.Api.dll`
+   * `Autodesk.Navisworks.Timeliner.dll`
+   * `System.Windows.Forms`
+   * `System.Drawing`
+
+   Navisworks assemblies are typically found under something like:
+
+   * `C:\Program Files\Autodesk\Navisworks Manage 2025\api\net\` (exact version folder varies)
+
+   Important: set **Copy Local = False** for Autodesk.* references (best practice so you don’t ship Autodesk DLLs).
+
+3. Add the code files below into your project (matching namespaces).
+
+4. Build → you will get `MicroEng.Sequence4D.dll`.
+
+### Deploy (manual “side-load”)
+
+Navisworks auto-loads plugins from the install Plugins folder.
+
+1. Create a folder:
+
+   * `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Sequence4D\`
+2. Copy:
+
+   * `MicroEng.Sequence4D.dll` into that folder
+3. Start Navisworks.
+4. Go to **Add-Ins** ribbon:
+
+   * Click **4D Sequence Tool (MicroEng)** to show/hide the dock pane.
+
+### Alternate deploy (no copying) using command line
+
+If you want to load from any path, start Navisworks with:
+
+* `roamer.exe -AddPluginAssembly "full\path\to\MicroEng.Sequence4D.dll"`
+
+---
+
+## Full Source Code
+
+### 1) `Properties/AssemblyInfo.cs`
+
+```csharp
+using System.Reflection;
+using System.Runtime.InteropServices;
+
+[assembly: AssemblyTitle("MicroEng.Sequence4D")]
+[assembly: AssemblyDescription("MicroEng 4D Sequence Builder for Navisworks Timeliner")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("MicroEng")]
+[assembly: AssemblyProduct("MicroEng.Sequence4D")]
+[assembly: AssemblyCopyright("Copyright © MicroEng")]
+[assembly: AssemblyTrademark("")]
+[assembly: AssemblyCulture("")]
+
+// COM not required
+[assembly: ComVisible(false)]
+
+// Update as needed
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+```
+
+---
+
+### 2) `SequenceOrdering.cs`
+
+```csharp
+namespace MicroEng.Sequence4D
+{
+    public enum SequenceOrdering
+    {
+        SelectionOrder = 0,
+        DistanceToReference = 1,
+        WorldXAscending = 2,
+        WorldYAscending = 3,
+        WorldZAscending = 4,
+        PropertyValue = 5,
+        Random = 6
+    }
+}
+```
+
+---
+
+### 3) `SequenceOptions.cs`
+
+```csharp
+using System;
+using Autodesk.Navisworks.Api;
+
+namespace MicroEng.Sequence4D
+{
+    public sealed class SequenceOptions
+    {
+        public ModelItemCollection SourceItems { get; set; } = new ModelItemCollection();
+
+        // Ordering
+        public SequenceOrdering Ordering { get; set; } = SequenceOrdering.DistanceToReference;
+
+        // Used when Ordering == DistanceToReference
+        public ModelItem ReferenceItem { get; set; }
+
+        // Used when Ordering == PropertyValue. Format: "Category|Property"
+        public string PropertyPath { get; set; } = "Item|Name";
+
+        // Task generation
+        public string SequenceName { get; set; } = "ME 4D Sequence";
+        public string TaskNamePrefix { get; set; } = "Step ";
+
+        public int ItemsPerTask { get; set; } = 1;
+
+        // “Frames” analogue
+        public double DurationSeconds { get; set; } = 10.0;
+        public double OverlapSeconds { get; set; } = 0.0;
+
+        public DateTime StartDateTime { get; set; } = DateTime.Today.AddHours(8);
+
+        // Default Navisworks Timeliner task types often include "Construct", "Demolish", "Temporary"
+        public string SimulationTaskTypeName { get; set; } = "Construct";
+    }
+}
+```
+
+---
+
+### 4) `ModelItemUtils.cs`
+
+```csharp
+using System;
+using Autodesk.Navisworks.Api;
+using Autodesk.Navisworks.Api.Data;
+
+namespace MicroEng.Sequence4D
+{
+    internal static class ModelItemUtils
+    {
+        public static Point3D GetBoundingBoxCenter(ModelItem item)
+        {
+            if (item == null) return new Point3D(0, 0, 0);
+
+            // Calculates bounding box of item and its children. 
+            BoundingBox3D bb = item.BoundingBox();
+
+            if (bb == null || bb.IsEmpty)
+                return new Point3D(0, 0, 0);
+
+            // BoundingBox3D has Min/Max points. 
+            Point3D min = bb.Min;
+            Point3D max = bb.Max;
+
+            return new Point3D(
+                (min.X + max.X) * 0.5,
+                (min.Y + max.Y) * 0.5,
+                (min.Z + max.Z) * 0.5
+            );
+        }
+
+        public static double Distance(Point3D a, Point3D b)
+        {
+            double dx = a.X - b.X;
+            double dy = a.Y - b.Y;
+            double dz = a.Z - b.Z;
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        // PropertyPath format: "Category|Property"
+        public static string GetPropertyValueString(ModelItem item, string propertyPath)
+        {
+            if (item == null) return string.Empty;
+            if (string.IsNullOrWhiteSpace(propertyPath)) return string.Empty;
+
+            string[] parts = propertyPath.Split('|');
+            if (parts.Length != 2) return string.Empty;
+
+            string catName = parts[0].Trim();
+            string propName = parts[1].Trim();
+
+            try
+            {
+                foreach (PropertyCategory cat in item.PropertyCategories)
+                {
+                    if (!string.Equals(cat.DisplayName, catName, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    foreach (DataProperty prop in cat.Properties)
+                    {
+                        if (!string.Equals(prop.DisplayName, propName, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        VariantData v = prop.Value;
+                        return v == null ? string.Empty : v.ToString();
+                    }
+                }
+            }
+            catch
+            {
+                // Some items can have unusual property stacks; treat as empty.
+            }
+
+            return string.Empty;
+        }
+    }
+}
+```
+
+---
+
+### 5) `SequenceGenerator.cs`
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using Autodesk.Navisworks.Api;
+using Autodesk.Navisworks.Api.Timeliner;
+
+namespace MicroEng.Sequence4D
+{
+    internal static class SequenceGenerator
+    {
+        public static int GenerateTimelinerSequence(SequenceOptions options)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+
+            Document doc = Autodesk.Navisworks.Api.Application.ActiveDocument
+                           ?? throw new InvalidOperationException("No active Navisworks document.");
+
+            if (options.SourceItems == null || options.SourceItems.Count == 0)
+                throw new InvalidOperationException("No source items. Capture a selection first.");
+
+            // Get Timeliner for the document. 
+            DocumentTimeliner tl = TimelinerDocumentExtensions.GetTimeliner(doc);
+
+            List<ModelItem> ordered = OrderItems(options);
+
+            int itemsPerTask = Math.Max(1, options.ItemsPerTask);
+
+            double duration = Math.Max(0.1, options.DurationSeconds);
+            double overlap = Math.Max(0.0, options.OverlapSeconds);
+            if (overlap >= duration) overlap = Math.Max(0.0, duration - 0.01);
+
+            double step = duration - overlap;
+
+            int taskCount = (int)Math.Ceiling((double)ordered.Count / itemsPerTask);
+            if (taskCount <= 0) return 0;
+
+            // Build a parent task containing child tasks.
+            TimelinerTask parent = new TimelinerTask
+            {
+                DisplayName = string.IsNullOrWhiteSpace(options.SequenceName) ? "ME 4D Sequence" : options.SequenceName
+            };
+            TrySetTaskTypeName(parent, options.SimulationTaskTypeName);
+
+            DateTime seqStart = options.StartDateTime;
+
+            for (int i = 0; i < taskCount; i++)
+            {
+                var chunk = ordered.Skip(i * itemsPerTask).Take(itemsPerTask).ToList();
+                ModelItemCollection mic = new ModelItemCollection();
+                foreach (var mi in chunk)
+                    mic.Add(mi);
+
+                DateTime start = seqStart.AddSeconds(i * step);
+                DateTime end = start.AddSeconds(duration);
+
+                TimelinerTask child = new TimelinerTask
+                {
+                    DisplayName = BuildStepName(options.TaskNamePrefix, i + 1)
+                };
+
+                TrySetTaskTypeName(child, options.SimulationTaskTypeName);
+                TrySetPlannedDates(child, start, end);
+
+                // Attach explicit selection to the task.
+                Selection sel = BuildSelection(mic);
+                child.Selection.CopyFrom(sel);
+
+                parent.Children.Add(child);
+            }
+
+            // Set parent summary dates (first child start, last child end)
+            TrySetPlannedDates(parent,
+                seqStart,
+                seqStart.AddSeconds((taskCount - 1) * step + duration)
+            );
+
+            // Make summaries consistent (optional but helpful). 
+            try
+            {
+                DocumentTimeliner.TaskSummaryHierarchyRecalculateDates(parent);
+            }
+            catch
+            {
+                // Non-fatal; depends on task writability in some versions.
+            }
+
+            using (Transaction tx = doc.BeginTransaction("MicroEng 4D Sequence: Generate"))
+            {
+                // Prefer adding without rewriting entire task tree.
+                if (!TryTaskAddCopy(tl, parent))
+                {
+                    // Fallback: copy root tasks, append, and write back.
+                    AddByTasksCopyFrom(tl, parent);
+                }
+
+                tx.Commit();
+            }
+
+            return taskCount;
+        }
+
+        public static int DeleteTimelinerSequence(string sequenceName)
+        {
+            if (string.IsNullOrWhiteSpace(sequenceName))
+                throw new ArgumentException("Sequence name is required.", nameof(sequenceName));
+
+            Document doc = Autodesk.Navisworks.Api.Application.ActiveDocument
+                           ?? throw new InvalidOperationException("No active Navisworks document.");
+
+            DocumentTimeliner tl = TimelinerDocumentExtensions.GetTimeliner(doc);
+
+            int removed = 0;
+
+            using (Transaction tx = doc.BeginTransaction("MicroEng 4D Sequence: Delete"))
+            {
+                GroupItem root = tl.TasksRoot; // read-only container
+                // We remove matching ROOT tasks (the parent tasks we created)
+                // Remove from end to start to keep indices stable.
+                for (int i = root.Children.Count - 1; i >= 0; i--)
+                {
+                    if (root.Children[i] is TimelinerTask t)
+                    {
+                        if (string.Equals(t.DisplayName, sequenceName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            if (!TryTaskRemoveAt(tl, root, i))
+                            {
+                                // Fallback: rebuild list without it
+                                RemoveByTasksCopyFrom(tl, sequenceName);
+                            }
+                            removed++;
+                        }
+                    }
+                }
+
+                tx.Commit();
+            }
+
+            return removed;
+        }
+
+        // ---------------------------
+        // Ordering
+        // ---------------------------
+        private static List<ModelItem> OrderItems(SequenceOptions options)
+        {
+            var items = options.SourceItems.Cast<ModelItem>().Where(x => x != null).ToList();
+
+            switch (options.Ordering)
+            {
+                case SequenceOrdering.SelectionOrder:
+                    return items;
+
+                case SequenceOrdering.Random:
+                {
+                    var rng = new Random();
+                    return items.OrderBy(_ => rng.Next()).ToList();
+                }
+
+                case SequenceOrdering.DistanceToReference:
+                {
+                    if (options.ReferenceItem == null)
+                        throw new InvalidOperationException("Distance ordering requires a reference item. Use 'Set Reference'.");
+
+                    Point3D refPt = ModelItemUtils.GetBoundingBoxCenter(options.ReferenceItem);
+                    return items
+                        .Select(mi => new { Item = mi, Dist = ModelItemUtils.Distance(ModelItemUtils.GetBoundingBoxCenter(mi), refPt) })
+                        .OrderBy(x => x.Dist)
+                        .Select(x => x.Item)
+                        .ToList();
+                }
+
+                case SequenceOrdering.WorldXAscending:
+                    return items.OrderBy(mi => ModelItemUtils.GetBoundingBoxCenter(mi).X).ToList();
+
+                case SequenceOrdering.WorldYAscending:
+                    return items.OrderBy(mi => ModelItemUtils.GetBoundingBoxCenter(mi).Y).ToList();
+
+                case SequenceOrdering.WorldZAscending:
+                    return items.OrderBy(mi => ModelItemUtils.GetBoundingBoxCenter(mi).Z).ToList();
+
+                case SequenceOrdering.PropertyValue:
+                {
+                    string path = options.PropertyPath ?? "";
+                    return items
+                        .Select(mi => new { Item = mi, Key = ModelItemUtils.GetPropertyValueString(mi, path) ?? "" })
+                        .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                        .Select(x => x.Item)
+                        .ToList();
+                }
+
+                default:
+                    return items;
+            }
+        }
+
+        private static string BuildStepName(string prefix, int index1)
+        {
+            string p = string.IsNullOrWhiteSpace(prefix) ? "Step " : prefix;
+            return $"{p}{index1:000}";
+        }
+
+        // ---------------------------
+        // Timeliner safe setters (reflection to reduce version fragility)
+        // ---------------------------
+        private static void TrySetPlannedDates(TimelinerTask task, DateTime start, DateTime end)
+        {
+            TrySetProperty(task, new[] { "PlannedStartDate", "PlannedStart", "PlannedStartDateTime" }, start);
+            TrySetProperty(task, new[] { "PlannedEndDate", "PlannedEnd", "PlannedEndDateTime" }, end);
+        }
+
+        private static void TrySetTaskTypeName(TimelinerTask task, string typeName)
+        {
+            if (string.IsNullOrWhiteSpace(typeName)) return;
+
+            TrySetProperty(task, new[] { "SimulationTaskTypeName", "TaskTypeName", "SimulationTaskType" }, typeName);
+        }
+
+        private static void TrySetProperty(object obj, IEnumerable<string> candidateNames, object value)
+        {
+            Type t = obj.GetType();
+            foreach (string name in candidateNames)
+            {
+                PropertyInfo pi = t.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+                if (pi == null || !pi.CanWrite) continue;
+
+                try
+                {
+                    // Handle nullable/convertible types
+                    object v = value;
+                    if (value != null && !pi.PropertyType.IsInstanceOfType(value))
+                    {
+                        v = Convert.ChangeType(value, pi.PropertyType);
+                    }
+
+                    pi.SetValue(obj, v, null);
+                    return;
+                }
+                catch
+                {
+                    // try next
+                }
+            }
+        }
+
+        // ---------------------------
+        // Selection creation (reflection)
+        // ---------------------------
+        private static Selection BuildSelection(ModelItemCollection items)
+        {
+            // Try ctor Selection(ModelItemCollection)
+            var ctor = typeof(Selection).GetConstructor(new[] { typeof(ModelItemCollection) });
+            if (ctor != null)
+                return (Selection)ctor.Invoke(new object[] { items });
+
+            // Try parameterless + CopyFrom(ModelItemCollection)
+            var sel = new Selection();
+            var copyFrom = typeof(Selection).GetMethod("CopyFrom", new[] { typeof(ModelItemCollection) });
+            if (copyFrom != null)
+            {
+                copyFrom.Invoke(sel, new object[] { items });
+                return sel;
+            }
+
+            throw new InvalidOperationException("Unable to construct a Selection from ModelItemCollection on this Navisworks version.");
+        }
+
+        // ---------------------------
+        // Preferred add/remove without rewriting whole task tree
+        // ---------------------------
+        private static bool TryTaskAddCopy(DocumentTimeliner tl, TimelinerTask rootTask)
+        {
+            try
+            {
+                MethodInfo mi = tl.GetType().GetMethod("TaskAddCopy", new[] { typeof(TimelinerTask) });
+                if (mi == null) return false;
+
+                mi.Invoke(tl, new object[] { rootTask });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryTaskRemoveAt(DocumentTimeliner tl, GroupItem parent, int index)
+        {
+            try
+            {
+                // Common pattern per Autodesk forum guidance is TaskRemoveAt / TaskAddCopy / TaskMove. 
+                MethodInfo mi = tl.GetType().GetMethod("TaskRemoveAt", new[] { typeof(GroupItem), typeof(int) });
+                if (mi == null) return false;
+
+                mi.Invoke(tl, new object[] { parent, index });
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // ---------------------------
+        // Fallback methods (rewrite tasks)
+        // ---------------------------
+        private static void AddByTasksCopyFrom(DocumentTimeliner tl, TimelinerTask parentTask)
+        {
+            GroupItem rootCopy = tl.TasksRoot.CreateCopy() as GroupItem;
+            if (rootCopy == null)
+                throw new InvalidOperationException("Could not copy Timeliner TasksRoot.");
+
+            rootCopy.Children.Add(parentTask);
+
+            tl.TasksCopyFrom(rootCopy.Children);
+        }
+
+        private static void RemoveByTasksCopyFrom(DocumentTimeliner tl, string sequenceName)
+        {
+            GroupItem rootCopy = tl.TasksRoot.CreateCopy() as GroupItem;
+            if (rootCopy == null)
+                throw new InvalidOperationException("Could not copy Timeliner TasksRoot.");
+
+            // Remove matching root tasks
+            for (int i = rootCopy.Children.Count - 1; i >= 0; i--)
+            {
+                if (rootCopy.Children[i] is TimelinerTask t &&
+                    string.Equals(t.DisplayName, sequenceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    rootCopy.Children.RemoveAt(i);
+                }
+            }
+
+            tl.TasksCopyFrom(rootCopy.Children);
+        }
+    }
+}
+```
+
+---
+
+### 6) `SequencePaneControl.cs` (WinForms dock UI)
+
+```csharp
+using System;
+using System.Drawing;
+using System.Linq;
+using System.Windows.Forms;
+using Autodesk.Navisworks.Api;
+
+namespace MicroEng.Sequence4D
+{
+    public sealed class SequencePaneControl : UserControl
+    {
+        private Label _lblSelection;
+        private Button _btnCaptureSelection;
+        private Button _btnSetReference;
+        private ComboBox _cmbOrdering;
+        private TextBox _txtPropertyPath;
+
+        private TextBox _txtSequenceName;
+        private TextBox _txtTaskPrefix;
+
+        private NumericUpDown _nudItemsPerTask;
+        private NumericUpDown _nudDuration;
+        private NumericUpDown _nudOverlap;
+
+        private DateTimePicker _dtpStart;
+        private ComboBox _cmbTaskType;
+
+        private Button _btnGenerate;
+        private Button _btnDelete;
+
+        private TextBox _txtLog;
+
+        private ModelItemCollection _captured = new ModelItemCollection();
+        private ModelItem _reference;
+
+        public SequencePaneControl()
+        {
+            BuildUi();
+            UpdateSelectionLabel();
+            Log("Ready. Capture a selection to begin.");
+        }
+
+        private void BuildUi()
+        {
+            Dock = DockStyle.Fill;
+
+            var panel = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                ColumnCount = 2,
+                RowCount = 16,
+                AutoScroll = true
+            };
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60));
+
+            int r = 0;
+
+            panel.Controls.Add(new Label { Text = "Selection", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, 0, r);
+            panel.SetColumnSpan(panel.Controls[panel.Controls.Count - 1], 2);
+            r++;
+
+            _lblSelection = new Label { AutoSize = true };
+            panel.Controls.Add(_lblSelection, 0, r);
+            panel.SetColumnSpan(_lblSelection, 2);
+            r++;
+
+            _btnCaptureSelection = new Button { Text = "Capture Current Selection", Height = 28, Dock = DockStyle.Fill };
+            _btnCaptureSelection.Click += (_, __) => CaptureSelection();
+            panel.Controls.Add(_btnCaptureSelection, 0, r);
+            panel.SetColumnSpan(_btnCaptureSelection, 2);
+            r++;
+
+            _btnSetReference = new Button { Text = "Set Reference (1 item selected)", Height = 28, Dock = DockStyle.Fill };
+            _btnSetReference.Click += (_, __) => SetReference();
+            panel.Controls.Add(_btnSetReference, 0, r);
+            panel.SetColumnSpan(_btnSetReference, 2);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Ordering", AutoSize = true }, 0, r);
+            _cmbOrdering = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+            _cmbOrdering.Items.AddRange(Enum.GetNames(typeof(SequenceOrdering)));
+            _cmbOrdering.SelectedItem = SequenceOrdering.DistanceToReference.ToString();
+            panel.Controls.Add(_cmbOrdering, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Property Path", AutoSize = true }, 0, r);
+            _txtPropertyPath = new TextBox { Text = "Item|Name", Dock = DockStyle.Fill };
+            panel.Controls.Add(_txtPropertyPath, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Sequence Name", AutoSize = true }, 0, r);
+            _txtSequenceName = new TextBox { Text = "ME 4D Sequence", Dock = DockStyle.Fill };
+            panel.Controls.Add(_txtSequenceName, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Task Prefix", AutoSize = true }, 0, r);
+            _txtTaskPrefix = new TextBox { Text = "Step ", Dock = DockStyle.Fill };
+            panel.Controls.Add(_txtTaskPrefix, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Items / Task", AutoSize = true }, 0, r);
+            _nudItemsPerTask = new NumericUpDown { Minimum = 1, Maximum = 100000, Value = 1, Dock = DockStyle.Fill };
+            panel.Controls.Add(_nudItemsPerTask, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Duration (sec)", AutoSize = true }, 0, r);
+            _nudDuration = new NumericUpDown { Minimum = 1, Maximum = 86400, Value = 10, Dock = DockStyle.Fill };
+            panel.Controls.Add(_nudDuration, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Overlap (sec)", AutoSize = true }, 0, r);
+            _nudOverlap = new NumericUpDown { Minimum = 0, Maximum = 86400, Value = 0, Dock = DockStyle.Fill };
+            panel.Controls.Add(_nudOverlap, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Start Date/Time", AutoSize = true }, 0, r);
+            _dtpStart = new DateTimePicker
+            {
+                Format = DateTimePickerFormat.Custom,
+                CustomFormat = "yyyy-MM-dd HH:mm:ss",
+                Value = DateTime.Today.AddHours(8),
+                Dock = DockStyle.Fill
+            };
+            panel.Controls.Add(_dtpStart, 1, r);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Task Type", AutoSize = true }, 0, r);
+            _cmbTaskType = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+            _cmbTaskType.Items.AddRange(new object[] { "Construct", "Demolish", "Temporary" });
+            _cmbTaskType.SelectedItem = "Construct";
+            panel.Controls.Add(_cmbTaskType, 1, r);
+            r++;
+
+            _btnGenerate = new Button { Text = "Generate Timeliner Sequence", Height = 34, Dock = DockStyle.Fill };
+            _btnGenerate.Click += (_, __) => Generate();
+            panel.Controls.Add(_btnGenerate, 0, r);
+            panel.SetColumnSpan(_btnGenerate, 2);
+            r++;
+
+            _btnDelete = new Button { Text = "Delete Sequence (by name)", Height = 28, Dock = DockStyle.Fill };
+            _btnDelete.Click += (_, __) => DeleteSequence();
+            panel.Controls.Add(_btnDelete, 0, r);
+            panel.SetColumnSpan(_btnDelete, 2);
+            r++;
+
+            panel.Controls.Add(new Label { Text = "Log", AutoSize = true, Font = new Font(Font, FontStyle.Bold) }, 0, r);
+            panel.SetColumnSpan(panel.Controls[panel.Controls.Count - 1], 2);
+            r++;
+
+            _txtLog = new TextBox
+            {
+                Multiline = true,
+                ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical,
+                Dock = DockStyle.Fill,
+                Height = 200
+            };
+            panel.Controls.Add(_txtLog, 0, r);
+            panel.SetColumnSpan(_txtLog, 2);
+
+            Controls.Add(panel);
+        }
+
+        private void CaptureSelection()
+        {
+            try
+            {
+                Document doc = Autodesk.Navisworks.Api.Application.ActiveDocument;
+                if (doc == null) throw new InvalidOperationException("No active document.");
+
+                if (doc.CurrentSelection == null || doc.CurrentSelection.IsEmpty)
+                    throw new InvalidOperationException("Selection is empty.");
+
+                var mic = new ModelItemCollection();
+                // Developer Guide pattern: copy the selection into a new ModelItemCollection. 
+                doc.CurrentSelection.SelectedItems.CopyTo(mic);
+
+                _captured = mic;
+
+                UpdateSelectionLabel();
+                Log($"Captured {_captured.Count} item(s).");
+            }
+            catch (Exception ex)
+            {
+                Log("Capture failed: " + ex.Message);
+            }
+        }
+
+        private void SetReference()
+        {
+            try
+            {
+                Document doc = Autodesk.Navisworks.Api.Application.ActiveDocument;
+                if (doc == null) throw new InvalidOperationException("No active document.");
+
+                if (doc.CurrentSelection == null || doc.CurrentSelection.IsEmpty)
+                    throw new InvalidOperationException("Select exactly 1 item to use as the reference.");
+
+                ModelItem refItem = doc.CurrentSelection.SelectedItems.Cast<ModelItem>().FirstOrDefault();
+                if (refItem == null) throw new InvalidOperationException("Could not read selected item as reference.");
+
+                _reference = refItem;
+                Log($"Reference set: {_reference.DisplayName}");
+            }
+            catch (Exception ex)
+            {
+                Log("Set Reference failed: " + ex.Message);
+            }
+        }
+
+        private void Generate()
+        {
+            try
+            {
+                var ordering = (SequenceOrdering)Enum.Parse(typeof(SequenceOrdering), _cmbOrdering.SelectedItem.ToString());
+
+                var opts = new SequenceOptions
+                {
+                    SourceItems = _captured,
+                    ReferenceItem = _reference,
+                    Ordering = ordering,
+                    PropertyPath = _txtPropertyPath.Text?.Trim(),
+                    SequenceName = _txtSequenceName.Text?.Trim(),
+                    TaskNamePrefix = _txtTaskPrefix.Text?.Trim(),
+                    ItemsPerTask = (int)_nudItemsPerTask.Value,
+                    DurationSeconds = (double)_nudDuration.Value,
+                    OverlapSeconds = (double)_nudOverlap.Value,
+                    StartDateTime = _dtpStart.Value,
+                    SimulationTaskTypeName = _cmbTaskType.SelectedItem?.ToString() ?? "Construct"
+                };
+
+                int created = SequenceGenerator.GenerateTimelinerSequence(opts);
+                Log($"Done. Created {created} task(s) under root task \"{opts.SequenceName}\".");
+                Log("Open TimeLiner > Tasks/Simulate to play the sequence.");
+            }
+            catch (Exception ex)
+            {
+                Log("Generate failed: " + ex.Message);
+            }
+        }
+
+        private void DeleteSequence()
+        {
+            try
+            {
+                string name = _txtSequenceName.Text?.Trim();
+                int removed = SequenceGenerator.DeleteTimelinerSequence(name);
+                Log($"Deleted {removed} root sequence task(s) named \"{name}\".");
+            }
+            catch (Exception ex)
+            {
+                Log("Delete failed: " + ex.Message);
+            }
+        }
+
+        private void UpdateSelectionLabel()
+        {
+            int count = _captured?.Count ?? 0;
+            _lblSelection.Text = $"Captured items: {count}";
+        }
+
+        private void Log(string msg)
+        {
+            _txtLog.AppendText($"[{DateTime.Now:HH:mm:ss}] {msg}{Environment.NewLine}");
+        }
+    }
+}
+```
+
+---
+
+### 7) `SequenceDockPanePlugin.cs`
+
+```csharp
+using System.Windows.Forms;
+using Autodesk.Navisworks.Api.Plugins;
+
+namespace MicroEng.Sequence4D
+{
+    // DockPanePlugin base usage. 
+    [Plugin("MicroEng.Sequence4D.SequencePane", "MENG",
+        DisplayName = "MicroEng 4D Sequence Pane",
+        ToolTip = "Build fast 4D sequences (Timeliner tasks) from selection")]
+    [DockPanePlugin(420, 650, FixedSize = false)]
+    public sealed class SequenceDockPanePlugin : DockPanePlugin
+    {
+        public override Control CreateControlPane()
+        {
+            var control = new SequencePaneControl();
+            control.Dock = DockStyle.Fill;
+            control.CreateControl();
+            return control;
+        }
+
+        public override void DestroyControlPane(Control pane)
+        {
+            pane?.Dispose();
+        }
+    }
+}
+```
+
+---
+
+### 8) `ToggleSequencePaneAddin.cs`
+
+```csharp
+using Autodesk.Navisworks.Api;
+using Autodesk.Navisworks.Api.Plugins;
+
+namespace MicroEng.Sequence4D
+{
+    // Standard pattern: AddIn plugin toggles DockPane visibility. 
+    [Plugin("MicroEng.Sequence4D.TogglePane", "MENG",
+        DisplayName = "4D Sequence Tool (MicroEng)",
+        ToolTip = "Show/Hide the MicroEng 4D Sequence dock pane")]
+    [AddInPlugin(AddInLocation.AddIn)]
+    public sealed class ToggleSequencePaneAddin : AddInPlugin
+    {
+        public override int Execute(params string[] parameters)
+        {
+            PluginRecord pr = Application.Plugins.FindPlugin("MicroEng.Sequence4D.SequencePane.MENG");
+
+            if (pr != null && pr is DockPanePluginRecord && pr.IsEnabled)
+            {
+                if (pr.LoadedPlugin == null)
+                    pr.LoadPlugin();
+
+                var dpp = pr.LoadedPlugin as DockPanePlugin;
+                if (dpp != null)
+                    dpp.Visible = !dpp.Visible;
+            }
+
+            return 0;
+        }
+    }
+}
+```
+
+---
+
+## How to use (end-user workflow)
+
+1. In Navisworks, select the items you want to sequence.
+2. Add-Ins → **4D Sequence Tool (MicroEng)** (opens the pane).
+3. Click **Capture Current Selection**.
+4. Optionally select one item and click **Set Reference** (for distance ordering).
+5. Set:
+
+   * Ordering
+   * Duration + Overlap (seconds)
+   * Items/Task (set >1 for large selections)
+6. Click **Generate Timeliner Sequence**.
+7. Open **TimeLiner** and simulate.
+
+---
+
+## If you want it even easier than this (recommended next iteration)
+
+If you want to beat PolyAnimator on speed/usability, the next “upgrade” is:
+
+* Add a **“Preview Steps”** section:
+
+  * Next/Prev buttons that temporarily isolate/hide everything except the current step’s items.
+  * This gives instant validation before committing tasks.
+
+* Add a **“Group by Property”** mode (instead of items-per-task):
+
+  * Example: Group by `Element|Level` or `Item|Layer`, automatically generating one task per group.
+  * This mirrors your “animate by layer” feature, but in a BIM-friendly way.
+
+* Add a **“Regenerate Existing Sequence”** mode:
+
+  * If the sequence exists, delete+recreate in one click (using the same name).
+
+If you want, I can extend the same codebase to include those three features without changing the deployment model.

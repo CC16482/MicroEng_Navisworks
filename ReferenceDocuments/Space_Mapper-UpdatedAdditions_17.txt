@@ -1,0 +1,150 @@
+What you’re trying to export (the “Transform (LCOaTransform)” values you see in the **internal** Properties pane) is *not* the same thing as “the midpoint we use for Space Mapper,” and it’s also not guaranteed to be available as a clean, stable **.NET PropertyCategories** lookup.
+
+### 1) Why Codex keeps getting `Transform: <missing>` in the report
+
+Right now your report writer is attempting to read transform components by searching `ModelItem.PropertyCategories` for a category key matching `"Transform"` and properties like `"Translation.X"`, `"Rotation Angle"`, `"Scale.X"`, etc. (with normalization/aliases). That logic is here: it prints `<missing>` when all those reads return empty. 
+
+Even though the matching logic is reasonably flexible, there are two common reasons it still comes back empty:
+
+1. **Those internal “LCOaTransform” properties are not consistently exposed via `ModelItem.PropertyCategories`.** The UI’s “internal properties” view is effectively surfacing lower-level data; the .NET API does not always mirror it 1:1.
+
+2. **Even when transforms exist, many Navisworks items do not have “one transform.”** A single `ModelItem` can be composed of multiple **fragments**, each with its own local-to-world matrix. In that case, there may not be a single transform that represents the whole item cleanly. This is discussed (with code) in the Navisworks API community: getting the correct transform is commonly done per-fragment using `GetLocalToWorldMatrix()`, and a single `ModelItem.Transform` may be identity or not meaningful when multiple fragments are involved. ([ADN CIS][1])
+
+So: **your report is currently trying to read an internal UI representation via a higher-level API path**, and that’s why it’s unreliable.
+
+---
+
+## 2) The “correct” way to export “known transform” for comparison
+
+If your goal is specifically: **“compare our computed midpoint against Navisworks’ known transform/origin information”**, the most robust reference you can export is:
+
+### A) Export the *world-space bounding box* + your computed midpoint (always valid)
+
+This is the cleanest “truth” for Space Mapper debugging because your midpoint logic is derived from bounds anyway.
+
+For each target include:
+
+* `BBoxMin (world)`
+* `BBoxMax (world)`
+* `BBoxCenter (world)`
+* `ComputedMidpoint (world)` (what your engine actually used)
+
+This avoids confusion about local vs world transforms entirely, and it will immediately tell you if the computed midpoint you *think* you used is actually what got used.
+
+### B) Export the *fragment local-to-world transform matrix* (best “known transform” in practice)
+
+If you also want “known transformation data” in the report, the most defensible approach in Navisworks is:
+
+* Convert the item to a COM selection path
+* Iterate `path.Fragments()`
+* For each fragment, read `fragment.GetLocalToWorldMatrix()`
+
+This pattern is explicitly used in Navisworks API practice for obtaining correct world transforms. ([ADN CIS][1])
+
+**Important nuance:** a ModelItem can have **multiple fragments**, so you should export:
+
+* Fragment count
+* For the first *N* fragments (e.g., 1–5): the full 4×4 matrix (or at least translation components)
+* A summary:
+
+  * “All fragments share same translation: yes/no”
+  * If no: list distinct translations or min/max translation deltas
+
+This will quickly reveal whether you’re dealing with “one stable transform” vs “multi-fragment / multiple transforms,” which is exactly where simplistic exports fall over.
+
+---
+
+## 3) Why your internal Properties screenshot doesn’t necessarily match your midpoint
+
+The screenshot you posted shows internal categories and transform fields like:
+
+* Translation.X/Y/Z
+* Rotation Angle / Rotation Axis
+* Scale.X/Y/Z
+
+Those values are describing **a node’s transform** (often local-to-parent or fragment-based), while your “midpoint” method is using **a point derived from bounds** (center of bounding box, origin point mode, etc.).
+
+So even if you successfully export those transform values, it is *not guaranteed* they should equal your midpoint—and a mismatch does not automatically mean Space Mapper is wrong. It just means you’re comparing two different reference points.
+
+That said: if you choose “Midpoint mode: Bounding box center” in Space Mapper, then the “known reference” that should match is **BBoxCenter**, not “Transform.Translation”.
+
+---
+
+# 4) What to tell Codex to do (high-confidence change request)
+
+Below is a Codex-ready change request that gets you reliable reporting and eliminates the “Transform: <missing>” trap.
+
+---
+
+## Codex Prompt: Fix “known transform” export to use fragment matrices (COM), not PropertyCategories
+
+**Goal**
+Update SpaceMapperRunReportWriter so “Target Transforms & Midpoints” exports reliable, comparable values:
+
+1. Always export world bounding box and the midpoint used by Space Mapper.
+2. Export “known transform” using fragment local-to-world matrices via COM API (`GetLocalToWorldMatrix`) rather than trying to read internal “Transform (LCOaTransform)” via `ModelItem.PropertyCategories`.
+
+**Why**
+Current `ReadPropertyValue(item, "Transform", …)` returns `<missing>` for all targets because internal transform properties are not reliably exposed via `ModelItem.PropertyCategories` and a ModelItem may have multiple fragments with no single transform. The robust source is fragment matrices. ([ADN CIS][1])
+
+**Implementation requirements**
+
+### 1) Add a COM-based transform extractor (report-only, low overhead)
+
+* Implement `TryGetFragmentWorldMatrices(ModelItem item)`:
+
+  * Create COM selection from the ModelItem (`ComApiBridge.ToInwOpSelection(new ModelItemCollection { item })`)
+  * For each `InwOaPath3 path`:
+
+    * Enumerate `path.Fragments()` (cast to `InwOaFragment3`)
+    * For each fragment, call `fragment.GetLocalToWorldMatrix()`
+    * Extract:
+
+      * full 4×4 matrix (double[16]) and/or translation vector
+* Return a list of matrices + a short summary (fragment count, distinct translations).
+
+### 2) Update the report section “Target Transforms & Midpoints”
+
+For each target row, print:
+
+* `ItemKey`
+* `BBoxMin / BBoxMax / BBoxCenter (world)` (from already-cached TargetGeometry bounds if available)
+* `MidpointUsed` (the point Space Mapper used)
+* `Fragments: N`
+* `Fragment[0] Translation` and `Fragment[0] Matrix` (or full matrix)
+* If N > 1:
+
+  * “Distinct fragment translations: …” (or “all same”)
+
+### 3) Keep the existing PropertyCategories lookup only as a *secondary* optional block
+
+* Do **not** rely on it for correctness.
+* If retained, label it as “Internal properties (best effort)” and only show when a debug flag is enabled.
+
+### 4) Add a one-time diagnostic dump if transforms still “look wrong”
+
+If fragment transforms exist but don’t match what users expect:
+
+* Dump the first target’s category/property keys from `ModelItem.PropertyCategories` (names only, no huge values) into the report so we can see what the .NET API actually exposes in that session.
+
+**Acceptance criteria**
+
+* Report no longer shows `Transform: <missing>` for all targets.
+* Report always includes bounding box center and the midpoint used.
+* Report includes fragment transform(s) for targets, with fragment count and at least first translation.
+* Works without requiring “Show internal properties” developer setting.
+
+---
+
+## One last practical recommendation (so you don’t get misled)
+
+When you review the report, treat these as the “gold” comparisons:
+
+* If your midpoint mode is **Bounding box center**: compare against **BBoxCenter**.
+* If your midpoint mode is **Origin point only**: compare against **Fragment translation** (or the transform-origin you compute from the fragment matrix), *but be aware multi-fragment items may not have a single origin*.
+
+---
+
+If you want, paste back one of the generated reports after implementing the fragment-matrix export (even just the “Target Transforms & Midpoints” section). With that, it becomes straightforward to diagnose whether your midpoint calculation is wrong, or whether the target’s transform representation is multi-fragment / non-singular (which is a Navisworks reality, not a Space Mapper bug).
+
+[1]: https://adn-cis.org/forum/index.php?topic=10023.0&utm_source=chatgpt.com "Получение матрицы трансформации в мировые ..."

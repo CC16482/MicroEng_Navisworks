@@ -68,7 +68,8 @@
         <ui:Button x:Name="DataScraperButton" Content="Data Scraper" Appearance="Secondary" Margin="0,0,0,8" Click="DataScraper_Click" />
         <ui:Button x:Name="DataMapperButton" Content="Data Mapper" Appearance="Secondary" Margin="0,0,0,8" Click="AppendData_Click" />
         <ui:Button x:Name="DataMatrixButton" Content="Data Matrix" Appearance="Secondary" Margin="0,0,0,8" Click="DataMatrix_Click" />
-        <ui:Button x:Name="SpaceMapperButton" Content="Space Mapper" Appearance="Secondary" Click="SpaceMapper_Click" />
+        <ui:Button x:Name="SpaceMapperButton" Content="Space Mapper" Appearance="Secondary" Margin="0,0,0,8" Click="SpaceMapper_Click" />
+        <ui:Button x:Name="Sequence4DButton" Content="4D Sequence" Appearance="Secondary" Click="Sequence4D_Click" />
       </StackPanel>
     </ui:Card>
 

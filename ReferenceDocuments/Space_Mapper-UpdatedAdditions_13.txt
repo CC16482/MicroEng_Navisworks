@@ -1,0 +1,115 @@
+Based on the **latest** `SpaceMapperStepProcessingPage.xaml.cs` you uploaded, your Step 3 intent is largely reflected correctly in the implementation:
+
+* You’ve moved to **clean, on-demand guidance** via hover flyouts (you’re wiring hover controllers for offsets, multi‑zone, exclude‑zones, partials, and writeback options).
+* The page has an explicit **UI-state normaliser** (`UpdateProcessingUiState`) that:
+
+  * Detects **Midpoint** target mode and then **hides the partial section**, **shows the “no partial” note**, and **shows the Midpoint mode row**.
+  * When Midpoint is active, it **forces Treat/Tag Partial off and disables them**, which aligns with the “single point ⇒ inside/outside only” model.
+  * Detects **Mesh accurate** mode and updates the UI to clarify that “Zone Bounds” becomes **fallback bounds**, plus shows a mesh-accurate note.
+  * Shows/hides the Zone Behaviour fields based on a checkbox (but see “Fix” below).
+
+So the *direction* is correct: simplified, contextual, and fewer always-on explanations.
+
+## The main UI/UX adjustments I would still make
+
+### 1) Make “what will actually happen” unambiguous (add a 1-line “Effective Method” summary)
+
+Even with your restructuring, users can still struggle to form a correct mental model because multiple controls interact (engine + zone bounds + target bounds + midpoint mode + partials + resolution + multi-zone).
+
+Add a compact line at the bottom of the **Containment Accuracy** card:
+
+> **Effective:** Engine = Mesh accurate (holes/voids) → Test = Target point-in-solid; Fallback = Zone OBB; Resolution = Most specific; Multi-zone = Off; Partials = Disabled (Midpoint)
+
+This makes the tool “self-explaining” and dramatically reduces support burden.
+
+Implementation-wise, you already have enough state to compute this (engine, sliders, checkboxes). Your `UpdateProcessingUiState()` is a good place to also update a `TextBlock` with the effective summary.
+
+---
+
+### 2) Context-sensitive enabling for “Resolution”
+
+You have `ZoneResolutionStrategyComboControl` exposed in the page code-behind, but from a user perspective:
+
+* If **Enable Multiple Zones** is ON, then “resolution strategy” is often **irrelevant** (because you’re not resolving to a single zone). In that case:
+
+  * Disable the Resolution dropdown and show a short hint:
+    “Resolution is only used when assigning a single best zone.”
+* If **Target Bounds = Midpoint**, then any “largest overlap” / “partial-based” resolution strategy is **nonsensical** (no overlap metric, no partial state). Restrict the dropdown to strategies that make sense for point classification (e.g., Most specific / First match).
+
+This prevents “valid-looking” configurations that don’t mean anything.
+
+---
+
+### 3) Rename the bounds sliders to match how users think
+
+Users generally don’t think in “bounds types”; they think in “how you represent zones” and “how you represent targets”.
+
+Recommended wording:
+
+* **Zone Representation (for candidate filtering / fallback):** AABB / OBB / k‑DOP / Hull
+* **Target Representation (for testing):** Midpoint / AABB / OBB / k‑DOP / Hull
+
+And when Mesh accurate is selected, explicitly label the zone slider as you already do:
+
+* **Fallback Bounds** (good change)
+
+The key UX improvement is: “Representation” implies “approximation used for speed,” which is exactly what these are.
+
+---
+
+### 4) Fix a likely logic mismatch: Zone Behaviour fields are currently gated by `TagPartial`
+
+Right now, you do:
+
+```csharp
+var writeBehavior = TagPartialCheckControl?.IsChecked == true;
+ZoneBehaviorFieldsPanelControl.IsEnabled = writeBehavior;
+```
+
+
+
+From a user perspective, **“Tag Partial Separately”** and **“Write Zone Behaviour property”** are not the same decision.
+
+If you truly want a “Write zone behaviour/status” feature, it should be gated by its **own** checkbox (e.g., `WriteZoneBehaviorCheckControl`), not by “Tag Partial”. Otherwise:
+
+* users will turn on “Tag Partial” and unexpectedly reveal a writeback panel, or
+* users will want the behaviour property written without partial tagging, and they can’t.
+
+So I would either:
+
+* **Option A (best):** Add a dedicated checkbox: “Write Behaviour Property” → gates `ZoneBehaviorFieldsPanelControl`.
+* **Option B (acceptable):** If you intentionally repurposed “Tag Partial” to mean “Write Behaviour Property”, rename the label + internal control names so the UI and code match.
+
+---
+
+### 5) Ensure the UI state updates as the user changes inputs (not just on load)
+
+Your page currently only calls `UpdateProcessingUiState()` on `Loaded` (plus hover wiring).
+
+That is fine **only if** you also trigger `UpdateProcessingUiState()` from:
+
+* Target bounds slider `ValueChanged`
+* Zone containment engine dropdown `SelectionChanged`
+* “Enable multiple zones” / “Tag partial” / “Treat partial” checkbox toggles
+* Resolution dropdown change (if you add conditional enabling)
+
+If you *don’t* hook those events (either in XAML or code-behind), users will experience “stale UI” where sections don’t appear/disappear when expected.
+
+Even if you’ve wired some of this in `SpaceMapperControl.xaml.cs`, I still recommend the Step page owns its own state coherence so you don’t end up with duplicated/competing UI rules later.
+
+---
+
+## Final verdict: is your current Step 3 representation “the best way”?
+
+It’s a strong improvement. The big remaining risk is **conceptual overload**: users can make combinations that are technically allowed but don’t make sense (especially around midpoint, resolution, partials, and mesh-accurate fallback). The changes above focus on:
+
+* **Prevent invalid combinations**
+* **Explain the effective behavior**
+* **Keep advanced power without confusing average users**
+
+If you implement only two things next, do:
+
+1. the **Effective Method summary line**, and
+2. the **context-sensitive enable/disable rules** (midpoint + multi-zone + resolution).
+
+If you want, paste your current `SpaceMapperStepProcessingPage.xaml` as text (or upload a `.txt` copy of it) and I can give you very specific layout-level recommendations (exact rows/columns, which sections become `Expander`s, and what should move where).

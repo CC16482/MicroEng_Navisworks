@@ -1,9 +1,13 @@
 {
   "version": 2,
-  "dgSpecHash": "+f/XkOJUb8o=",
+  "dgSpecHash": "x2S+AnEqQCk=",
   "success": true,
   "projectFilePath": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\MicroEng.Navisworks.csproj",
   "expectedPackageFiles": [
+    "C:\\Users\\Chris\\.nuget\\packages\\sharpdx\\4.2.0\\sharpdx.4.2.0.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\sharpdx.d3dcompiler\\4.2.0\\sharpdx.d3dcompiler.4.2.0.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\sharpdx.direct3d11\\4.2.0\\sharpdx.direct3d11.4.2.0.nupkg.sha512",
+    "C:\\Users\\Chris\\.nuget\\packages\\sharpdx.dxgi\\4.2.0\\sharpdx.dxgi.4.2.0.nupkg.sha512",
     "C:\\Users\\Chris\\.nuget\\packages\\system.buffers\\4.6.1\\system.buffers.4.6.1.nupkg.sha512",
     "C:\\Users\\Chris\\.nuget\\packages\\system.memory\\4.6.3\\system.memory.4.6.3.nupkg.sha512",
     "C:\\Users\\Chris\\.nuget\\packages\\system.numerics.vectors\\4.6.1\\system.numerics.vectors.4.6.1.nupkg.sha512",

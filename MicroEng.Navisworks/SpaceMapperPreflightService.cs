@@ -74,11 +74,19 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             var targetsByRule = new Dictionary<string, List<SpaceMapperTargetRule>>(StringComparer.OrdinalIgnoreCase);
             var targets = SpaceMapperService.ResolveTargets(doc, request.TargetRules, targetsByRule).ToList();
             var settings = request.ProcessingSettings ?? new SpaceMapperProcessingSettings();
-            var needsPartial = settings.TagPartialSeparately || settings.TreatPartialAsContained;
-            var originOnlyFast = settings.UseOriginPointOnly;
-            var usePointIndex = originOnlyFast && !needsPartial;
-            var traversal = ResolveFastTraversal(settings.FastTraversalMode, originOnlyFast, needsPartial, targets.Count, zones.Count);
-            var usePointIndexForBounds = usePointIndex && traversal != SpaceMapperFastTraversalMode.TargetMajor;
+            var containmentEngine = ResolveZoneContainmentEngine(settings);
+            var targetBoundsMode = SpaceMapperBoundsResolver.ResolveTargetBoundsMode(settings, containmentEngine);
+            var needsPartial = settings.TagPartialSeparately
+                || settings.TreatPartialAsContained
+                || settings.WriteZoneBehaviorProperty
+                || settings.WriteZoneContainmentPercentProperty;
+            if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+            {
+                needsPartial = false;
+            }
+            var usePointIndex = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
+            var traversal = ResolveFastTraversal(settings.FastTraversalMode, usePointIndex, needsPartial, targets.Count, zones.Count);
+            var usePointIndexForBounds = usePointIndex;
 
             if (zones.Count == 0 || targets.Count == 0)
             {
@@ -163,7 +171,9 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                     }
                     else
                     {
-                        targetBounds[i] = usePointIndexForBounds ? ToPointAabb(bbox) : ToAabb(bbox);
+                        targetBounds[i] = usePointIndexForBounds
+                            ? ToMidpointAabb(bbox, settings.TargetMidpointMode)
+                            : ToAabb(bbox);
                     }
                     targetKeys[i] = targets[i].ItemKey;
                 }
@@ -314,21 +324,25 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             return new Aabb(min.X, min.Y, min.Z, max.X, max.Y, max.Z);
         }
 
-        private static Aabb ToPointAabb(BoundingBox3D bbox)
+        private static Aabb ToMidpointAabb(BoundingBox3D bbox, SpaceMapperMidpointMode mode)
         {
             var min = bbox.Min;
             var max = bbox.Max;
             var cx = (min.X + max.X) * 0.5;
             var cy = (min.Y + max.Y) * 0.5;
-            var cz = (min.Z + max.Z) * 0.5;
+            var cz = mode == SpaceMapperMidpointMode.BoundingBoxBottomCenter
+                ? min.Z
+                : (min.Z + max.Z) * 0.5;
             return new Aabb(cx, cy, cz, cx, cy, cz);
         }
 
-        private static Aabb ToPointAabb(in Aabb bbox)
+        private static Aabb ToMidpointAabb(in Aabb bbox, SpaceMapperMidpointMode mode)
         {
             var cx = (bbox.MinX + bbox.MaxX) * 0.5;
             var cy = (bbox.MinY + bbox.MaxY) * 0.5;
-            var cz = (bbox.MinZ + bbox.MaxZ) * 0.5;
+            var cz = mode == SpaceMapperMidpointMode.BoundingBoxBottomCenter
+                ? bbox.MinZ
+                : (bbox.MinZ + bbox.MaxZ) * 0.5;
             return new Aabb(cx, cy, cz, cx, cy, cz);
         }
 
@@ -351,6 +365,16 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 bbox.MaxX + offset + offsetSides,
                 bbox.MaxY + offset + offsetSides,
                 bbox.MaxZ + offset + top);
+        }
+
+        private static SpaceMapperZoneContainmentEngine ResolveZoneContainmentEngine(SpaceMapperProcessingSettings settings)
+        {
+            if (settings == null)
+            {
+                return SpaceMapperZoneContainmentEngine.BoundsFast;
+            }
+
+            return settings.ZoneContainmentEngine;
         }
 
         private static Aabb ComputeWorldBounds(Aabb[] zones, Aabb[] targets)
@@ -392,17 +416,29 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
 
             var settings = request.ProcessingSettings ?? new SpaceMapperProcessingSettings();
             sb.Append(settings.ProcessingMode).Append('|');
+            sb.Append(settings.GpuRayCount).Append('|');
             sb.Append(settings.Offset3D.ToString("0.###")).Append('|');
             sb.Append(settings.OffsetTop.ToString("0.###")).Append('|');
             sb.Append(settings.OffsetBottom.ToString("0.###")).Append('|');
             sb.Append(settings.OffsetSides.ToString("0.###")).Append('|');
             sb.Append(settings.TreatPartialAsContained ? '1' : '0').Append('|');
             sb.Append(settings.TagPartialSeparately ? '1' : '0').Append('|');
+            sb.Append(settings.WriteZoneBehaviorProperty ? '1' : '0').Append('|');
+            sb.Append(settings.WriteZoneContainmentPercentProperty ? '1' : '0').Append('|');
+            sb.Append(settings.ContainmentCalculationMode).Append('|');
             sb.Append(settings.EnableMultipleZones ? '1' : '0').Append('|');
             sb.Append(settings.IndexGranularity).Append('|');
             sb.Append(settings.PerformancePreset).Append('|');
             sb.Append(settings.FastTraversalMode).Append('|');
             sb.Append(settings.UseOriginPointOnly ? '1' : '0').Append('|');
+            sb.Append(settings.ZoneBoundsMode).Append('|');
+            sb.Append(settings.ZoneKDopVariant).Append('|');
+            sb.Append(settings.TargetBoundsMode).Append('|');
+            sb.Append(settings.TargetKDopVariant).Append('|');
+            sb.Append(settings.TargetMidpointMode).Append('|');
+            sb.Append(settings.ZoneContainmentEngine).Append('|');
+            sb.Append(settings.ZoneResolutionStrategy).Append('|');
+            sb.Append(settings.ExcludeZonesFromTargets ? '1' : '0').Append('|');
 
             foreach (var rule in request.TargetRules.OrderBy(r => r.Name ?? string.Empty))
             {
@@ -454,17 +490,25 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 };
             }
 
-            var needsPartial = settings.TagPartialSeparately || settings.TreatPartialAsContained;
-            var originOnlyFast = settings.UseOriginPointOnly;
-            var traversal = ResolveFastTraversal(settings.FastTraversalMode, originOnlyFast, needsPartial, targetBoundsArray.Length, zoneBoundsArray.Length);
-            var usePointIndex = originOnlyFast && !needsPartial;
-            var usePointIndexForBounds = usePointIndex && traversal != SpaceMapperFastTraversalMode.TargetMajor;
+            var containmentEngine = ResolveZoneContainmentEngine(settings);
+            var targetBoundsMode = SpaceMapperBoundsResolver.ResolveTargetBoundsMode(settings, containmentEngine);
+            var needsPartial = settings.TagPartialSeparately
+                || settings.TreatPartialAsContained
+                || settings.WriteZoneBehaviorProperty
+                || settings.WriteZoneContainmentPercentProperty;
+            if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+            {
+                needsPartial = false;
+            }
+            var usePointIndex = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
+            var traversal = ResolveFastTraversal(settings.FastTraversalMode, usePointIndex, needsPartial, targetBoundsArray.Length, zoneBoundsArray.Length);
+            var usePointIndexForBounds = usePointIndex;
 
             if (usePointIndexForBounds)
             {
                 for (int i = 0; i < targetBoundsArray.Length; i++)
                 {
-                    targetBoundsArray[i] = ToPointAabb(targetBoundsArray[i]);
+                    targetBoundsArray[i] = ToMidpointAabb(targetBoundsArray[i], settings.TargetMidpointMode);
                 }
             }
 
@@ -586,12 +630,12 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
 
         private static SpaceMapperFastTraversalMode ResolveFastTraversal(
             SpaceMapperFastTraversalMode requested,
-            bool originOnlyFast,
+            bool targetIsPoint,
             bool needsPartial,
             int targetCount,
             int zoneCount)
         {
-            var allowTargetMajor = originOnlyFast && !needsPartial;
+            var allowTargetMajor = targetIsPoint && !needsPartial;
             if (!allowTargetMajor)
             {
                 return SpaceMapperFastTraversalMode.ZoneMajor;

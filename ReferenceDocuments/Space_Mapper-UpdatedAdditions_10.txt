@@ -1,0 +1,356 @@
+You’re thinking about this the right way: **OBB / k‑DOP / Convex Hull are not “processing modes” by themselves** — they are **alternate bounding representations** that can be computed for **either the zones or the targets** (or both), and then used by your narrow‑phase “is this inside?” logic.
+
+Below is a concrete, Codex-ready implementation approach that:
+
+* Adds **separate Zone vs Target accuracy selectors**
+* Adds **Target Midpoint** as a first-class mode (and correctly disables partial logic)
+* Keeps your existing pipeline (preflight, spatial grid, candidate diagnostics) intact
+* Implements the **shape modes in a way that won’t tank performance** and is compatible with the reality that *your current vertex extraction is stubbed* (important note below)
+
+---
+
+## 1) First: clarify “is this applied to zones or targets?”
+
+**Answer: both — by design.**
+
+* **Zone bounds mode** determines *how we represent the “container volume”* we test against:
+
+  * AABB: very fast, coarse
+  * OBB: rotated box, tighter for rotated spaces (only meaningful if we have vertices or orientation)
+  * k‑DOP: tighter than OBB usually, still convex & fast to test (plane tests)
+  * Hull: best (true convex container), but needs planes/triangles or a hull builder
+
+* **Target bounds mode** determines *how we represent each element being tested*:
+
+  * Midpoint: single point classification (fastest), **no partial**
+  * AABB/OBB/k‑DOP/Hull: increasingly accurate ways of deciding contained/partial
+
+In practice:
+
+* **Zones** benefit more from Hull/k‑DOP (because the “room volume” is what matters).
+* **Targets** often benefit most from **Midpoint** for speed, and AABB for safety.
+
+---
+
+## 2) Critical reality check: will OBB/k‑DOP/Hull be “more accurate” today?
+
+Right now, based on your uploaded `SpaceMapperGeometry.cs`, you have:
+
+* `ExtractVertices(...)` returns **empty** → you fall back to **BBox vertices**
+* Your plane generation is therefore effectively driven by the bounding box too
+
+That means:
+
+* **OBB computed from BBox corners == AABB** (no benefit)
+* **k‑DOP computed from BBox corners behaves like AABB-ish** (minimal benefit)
+* **Hull (if derived from box planes) == AABB**
+
+So: you can absolutely implement the modes now (good UX + future-proof + benchmarking), but **real accuracy gains require real vertex/triangle extraction** later.
+
+This does *not* stop you implementing the UI + settings + engine plumbing now — it just explains why you won’t see big “accuracy improvements” until geometry extraction is upgraded.
+
+---
+
+## 3) UX recommendation: replace “Performance Preset” with two sliders + conditional options
+
+### Step 3 Processing: recommended “Bounds & Accuracy” section
+
+**Zone Bounds** (slider):
+
+* AABB → OBB → k‑DOP → Hull
+
+**Target Bounds** (slider):
+
+* Midpoint → AABB → OBB → k‑DOP → Hull
+
+Conditional UI:
+
+* If **Target = Midpoint**:
+
+  * disable and uncheck:
+
+    * Treat Partial as Contained
+    * Tag Partial Separately
+* If **Zone = k‑DOP** show a “k variant” dropdown (8/14/18)
+* If **Target = k‑DOP** show “k variant”
+* If **Target = Midpoint** show “Midpoint mode” dropdown:
+
+  * BoundingBox Center (default)
+  * BoundingBox Bottom Center (useful for floor-based assets)
+
+This keeps the UX clean and matches your requirement.
+
+---
+
+## 4) Model changes (settings) — what to add
+
+### Add new enums in `SpaceMapperModels.cs`
+
+```csharp
+internal enum SpaceMapperZoneBoundsMode
+{
+    Aabb = 0,
+    Obb = 1,
+    KDop = 2,
+    Hull = 3
+}
+
+internal enum SpaceMapperTargetBoundsMode
+{
+    Midpoint = 0,
+    Aabb = 1,
+    Obb = 2,
+    KDop = 3,
+    Hull = 4
+}
+
+internal enum SpaceMapperMidpointMode
+{
+    BoundingBoxCenter = 0,
+    BoundingBoxBottomCenter = 1
+}
+
+internal enum SpaceMapperKDopVariant
+{
+    KDop8 = 8,
+    KDop14 = 14,
+    KDop18 = 18
+}
+```
+
+### Add DataMembers to `SpaceMapperProcessingSettings`
+
+Do **not** delete your existing `PerformancePreset` yet — keep it for backward compatibility and older templates. Add new fields *after* your current highest Order.
+
+Example (adjust the Order numbers to match your current file; you’re at 17 in the upload):
+
+```csharp
+[DataMember(Order = 18)]
+public SpaceMapperZoneBoundsMode ZoneBoundsMode { get; set; } = SpaceMapperZoneBoundsMode.Aabb;
+
+[DataMember(Order = 19)]
+public SpaceMapperKDopVariant ZoneKDopVariant { get; set; } = SpaceMapperKDopVariant.KDop14;
+
+[DataMember(Order = 20)]
+public SpaceMapperTargetBoundsMode TargetBoundsMode { get; set; } = SpaceMapperTargetBoundsMode.Aabb;
+
+[DataMember(Order = 21)]
+public SpaceMapperKDopVariant TargetKDopVariant { get; set; } = SpaceMapperKDopVariant.KDop14;
+
+[DataMember(Order = 22)]
+public SpaceMapperMidpointMode TargetMidpointMode { get; set; } = SpaceMapperMidpointMode.BoundingBoxCenter;
+```
+
+---
+
+## 5) Engine behavior rules (this is what you implement)
+
+### Rule A — Midpoint disables partial
+
+If `TargetBoundsMode == Midpoint`:
+
+* `IsPartial = false` always
+* `IsContained = ZoneContainsPoint(point)`
+* UI forces:
+
+  * `TreatPartialAsContained = false`
+  * `TagPartialSeparately = false`
+
+### Rule B — Zone mode controls containment test
+
+Zone containment test (for a point) becomes:
+
+* AABB: compare against `GetZoneQueryBounds(...)` (already includes offsets)
+* Hull: use `zone.Planes` (if present); otherwise fallback to AABB
+* OBB/kDOP: compute from points if you have them; otherwise fallback to AABB
+
+### Rule C — Target mode controls what we test
+
+If target isn’t midpoint:
+
+* AABB: use your existing AABB / plane logic (keep fast path)
+* OBB/kDOP/Hull: (initial v1) **use point sampling**:
+
+  * Generate sample points (corners or sampled vertices)
+  * `Contained` if all sample points inside zone
+  * `Partial` if mix of inside/outside and partial is enabled
+  * This is “good enough” until you do true face/face intersection
+
+---
+
+## 6) Preflight/Cache correctness: you MUST include these settings in the signature
+
+Right now your `BuildSignature(...)` in `SpaceMapperPreflightService.cs` includes offsets and index granularity etc — but not these new modes.
+
+You must add:
+
+* ZoneBoundsMode + ZoneKDopVariant
+* TargetBoundsMode + TargetKDopVariant
+* TargetMidpointMode
+
+Also: preflight target bounds generation must respect Midpoint mode, otherwise cache reuse will be wrong.
+
+### Preflight target bounds rule:
+
+* If TargetBoundsMode == Midpoint: store **a point AABB** (min=max point) in the bounds array.
+* Else: store normal AABB.
+
+This gives you a real speed win immediately because the spatial grid insertion becomes much cheaper.
+
+---
+
+## 7) Your requested “next speed step”: point-based index when in Fast modes
+
+You specifically want:
+
+> build a point-based spatial index (index each target into exactly one cell based on center point) when preset resolves to Fast
+
+With the new system, “Fast” is basically:
+
+* TargetBoundsMode = Midpoint (or “Center-cell indexing”)
+
+So implement:
+
+* If TargetBoundsMode == Midpoint → targetBounds are points → the existing AABB-grid insertion will naturally place each target in one cell.
+* If you also want “fast traversal mode” **even when TargetBoundsMode != Midpoint**, add a checkbox:
+
+**“Fast target indexing (center-cell)”**
+
+* When enabled: for each target, index only its bbox center point into one cell (do not span multiple cells)
+* Candidate counts will increase slightly, but index build cost drops a lot for huge models.
+
+This is optional and can be your “next level” performance toggle.
+
+---
+
+## 8) Codex-ready change request (paste this)
+
+Below is a Codex prompt that matches your project style (WPF page controls exposed by code-behind, BuildSettings in `SpaceMapperControl.xaml.cs`, preflight signature reuse, CPU engine).
+
+### ✅ Codex Prompt: “Separate Zone/Target Bounds Modes + Midpoint Mode + Partial Disable”
+
+**Paste this into Codex:**
+
+---
+
+**Goal:** Replace Space Mapper “Performance Preset” behavior with explicit Zone/Target bounds modes. Add new modes: Zone AABB/OBB/k‑DOP/Hull and Target Midpoint/AABB/OBB/k‑DOP/Hull. Ensure Target Midpoint disables partial flags. Ensure Preflight signature and cache reuse are correct. Keep old PerformancePreset field for backward compatibility but make engine logic use the new bounds-mode settings.
+
+**Files to modify:**
+
+* `SpaceMapperModels.cs`
+* `SpaceMapperStepProcessingPage.xaml` and `SpaceMapperStepProcessingPage.xaml.cs`
+* `SpaceMapperControl.xaml` and `SpaceMapperControl.xaml.cs`
+* `SpaceMapperPreflightService.cs`
+* `SpaceMapperEngines.cs`
+* (Add) `SpaceMapperAdvancedBounds.cs` in `MicroEng.Navisworks.SpaceMapper.Geometry` if needed.
+
+### 1) Models
+
+In `SpaceMapperModels.cs`:
+
+* Add enums:
+
+  * `SpaceMapperZoneBoundsMode { Aabb, Obb, KDop, Hull }`
+  * `SpaceMapperTargetBoundsMode { Midpoint, Aabb, Obb, KDop, Hull }`
+  * `SpaceMapperMidpointMode { BoundingBoxCenter, BoundingBoxBottomCenter }`
+  * `SpaceMapperKDopVariant { KDop8=8, KDop14=14, KDop18=18 }`
+* Add DataMembers to `SpaceMapperProcessingSettings` using new Orders after the existing highest:
+
+  * `ZoneBoundsMode`, `ZoneKDopVariant`
+  * `TargetBoundsMode`, `TargetKDopVariant`, `TargetMidpointMode`
+* Do NOT delete `PerformancePreset`; leave it for old templates.
+
+### 2) UI (Step 3 Processing Page)
+
+In `SpaceMapperStepProcessingPage.xaml`:
+
+* Remove or hide the existing “Performance Preset” slider and Auto toggle.
+* Add a “Bounds & Accuracy” card section with:
+
+  * Zone Bounds slider (0..3 ticks): AABB / OBB / k‑DOP / Hull
+  * Target Bounds slider (0..4 ticks): Midpoint / AABB / OBB / k‑DOP / Hull
+  * ComboBox for k‑DOP variant (8/14/18) shown only when the relevant slider is on k‑DOP
+  * ComboBox for Midpoint mode shown only when Target slider = Midpoint (BBox Center / BBox Bottom Center)
+* When Target=Midpoint:
+
+  * disable and uncheck TreatPartialAsContained and TagPartialSeparately controls (and keep them off in settings)
+
+In `SpaceMapperStepProcessingPage.xaml.cs`:
+
+* Expose internal properties for new controls similarly to existing ones.
+
+### 3) Wiring (SpaceMapperControl.xaml.cs)
+
+* Add event handlers for the new sliders/combos to call a new method `OnBoundsModesChanged()`
+* `OnBoundsModesChanged()` must:
+
+  * update UI visibility/enabled states (k‑DOP combo visibility, midpoint combo visibility, disable partial checkboxes)
+  * call existing debounced live preflight trigger if Live Estimate is enabled
+  * refresh any description text
+* Update `BuildSettings()` to read:
+
+  * ZoneBoundsMode, ZoneKDopVariant
+  * TargetBoundsMode, TargetKDopVariant, TargetMidpointMode
+* If TargetBoundsMode == Midpoint:
+
+  * force `TreatPartialAsContained=false` and `TagPartialSeparately=false` in settings returned by BuildSettings.
+
+### 4) Preflight correctness
+
+In `SpaceMapperPreflightService.cs`:
+
+* Update `BuildSignature(...)` to include:
+
+  * ZoneBoundsMode + ZoneKDopVariant
+  * TargetBoundsMode + TargetKDopVariant
+  * TargetMidpointMode
+* When building `targetBounds[]`, if TargetBoundsMode==Midpoint:
+
+  * compute point = bbox center or bbox bottom-center based on TargetMidpointMode
+  * store point aabb: min=max=point
+    This ensures cache reuse is correct and candidate counts change when target mode changes.
+
+### 5) Engine logic
+
+In `SpaceMapperEngines.cs`:
+
+* Update target bounds build when preflight cache is not provided so it matches preflight behavior (Midpoint makes point-aabb).
+* Replace use of `preset==Fast` as the driver for “AABB-only” vs “plane-based”. Use:
+
+  * If ZoneBoundsMode == Hull and zone.Planes exist => use plane-based containment (existing `ClassifyPlanes` or point-in-planes for midpoint).
+  * Else use AABB classification (existing `ClassifyAabbOnly`).
+* Add midpoint classification path:
+
+  * For a point target: IsContained = ZoneContainsPoint(...) ; IsPartial=false
+  * Return null if not contained.
+* If Hull selected but planes missing: fallback to AABB (do not skip zone).
+* Keep diagnostics stable.
+
+### 6) Optional “Fast traversal mode”
+
+Add a checkbox “Fast target indexing (center-cell)” (optional for later):
+
+* If enabled, in preflight/grid build index each target by center point only even when not Midpoint.
+* This reduces index build work; may increase candidates.
+
+### Acceptance criteria
+
+* Build succeeds.
+* Changing Zone/Target bounds modes triggers live estimate changes (signature changes).
+* Target Midpoint disables partial flags and engine never marks partial for midpoint.
+* Preflight cache reuse remains correct and does not reuse across different bounds modes.
+
+---
+
+## 9) What I would do next (after this is in)
+
+Once the UI + settings plumbing is done, the next “real accuracy” step is:
+
+* Implement **real vertex/triangle extraction** in `ExtractVertices(...)` so OBB/k‑DOP/Hull actually differ from AABB.
+* Add an “Accuracy cost warning” in UI when user chooses Hull on large models.
+
+If you want, I can specify a staged approach for extracting triangles/vertices from Navisworks without destabilizing performance (still CPU, with caching, and only for zones).
+
+---
+
+If you paste that Codex request, it should be able to implement the complete feature end-to-end with minimal disruption to your existing preflight + benchmarking work.

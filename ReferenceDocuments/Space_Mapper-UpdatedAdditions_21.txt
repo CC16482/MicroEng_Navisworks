@@ -1,0 +1,612 @@
+According to a document from 2026-01-03, your current stack already has (a) a “Partial” concept driven by multi-sample classification in **MeshAccurate** (Tier B), and (b) the settings/writeback infrastructure to add one more writeback property in the “Assignment & Writeback” section. In particular, `needsPartial` is already computed from settings and disabled when `TargetBoundsMode == Midpoint`, and the MeshAccurate classifier already evaluates multiple sample points (8 corners + center + extra samples for KDop/Hull).
+
+Below is an implementation that adds **one new tickbox**:
+**“Write containment % property”** → writes `Zone Containment %` (0–100) alongside your assignment outputs.
+
+It is **reasonably accurate** because:
+
+* **MeshAccurate**: percent is computed as `insideSamples / totalSamples` using the *same sample set* you already use to decide partial/contained (so it tracks the Tier B geometry choice).
+* **Bounds engines**: percent is an approximation from `OverlapVolume / TargetVolume` (AABB overlap ratio), which is fast and consistent but less geometrically faithful than MeshAccurate.
+
+---
+
+## 1) Model changes (persist the setting + store the computed percent)
+
+### A. `SpaceMapperModels.cs` — add a new processing setting
+
+Locate `SpaceMapperProcessingSettings` where `WriteZoneBehaviorProperty` is currently the last member (Order 33) and append:
+
+```csharp
+// SpaceMapperModels.cs
+
+[DataMember(Order = 34)]
+public bool WriteZoneContainmentPercentProperty { get; set; }
+```
+
+### B. `SpaceMapperModels.cs` — store the result per intersection
+
+Locate `ZoneTargetIntersection` (currently has `OverlapVolume` at `Order = 4`) and add:
+
+```csharp
+// SpaceMapperModels.cs
+
+[DataMember(Order = 5, EmitDefaultValue = false)]
+public double? ContainmentFraction { get; set; } // 0..1
+```
+
+Notes:
+
+* Use `double?` so old results/templates deserialize cleanly and so you can omit it when the feature is off.
+
+---
+
+## 2) UI changes (one new tickbox in “Assignment & Writeback”)
+
+### A. `SpaceMapperStepProcessingPage.xaml` — add the checkbox
+
+Add a `CheckBox` in the *Assignment & Writeback* section near the other writeback toggles (next to `WriteZoneBehaviorCheckControl` / partial controls).
+
+Example (adapt style names to your existing XAML):
+
+```xml
+<CheckBox x:Name="WriteContainmentPercentCheckControl"
+          Content="Write containment % property"
+          Margin="0,4,0,0"
+          ToolTip="Writes a 'Zone Containment %' property (0–100). Mesh Accurate uses the same sample points used for Partial detection; bounds engines use an AABB overlap approximation." />
+```
+
+### B. `SpaceMapperStepProcessingPage.xaml.cs` — expose control + disable in Midpoint
+
+In the internal control list, add:
+
+```csharp
+// SpaceMapperStepProcessingPage.xaml.cs
+internal CheckBox WriteContainmentPercentCheck => WriteContainmentPercentCheckControl;
+```
+
+Then in `UpdateProcessingUiState()`, mirror the existing “midpoint disables partial” behavior (you already hide `PartialSectionControl` for midpoint):
+
+```csharp
+// SpaceMapperStepProcessingPage.xaml.cs
+internal void UpdateProcessingUiState()
+{
+    var isMeshAccurate = ZoneContainmentEngineComboControl?.SelectedIndex == 1;
+    var isMidpoint = TargetBoundsSliderControl != null
+        && (int)Math.Round(TargetBoundsSliderControl.Value) == 0;
+
+    if (PartialSectionControl != null)
+    {
+        PartialSectionControl.Visibility = isMidpoint ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    if (TreatPartialCheckControl != null)
+    {
+        TreatPartialCheckControl.IsEnabled = !isMidpoint;
+        if (isMidpoint) TreatPartialCheckControl.IsChecked = false;
+    }
+
+    if (TagPartialCheckControl != null)
+    {
+        TagPartialCheckControl.IsEnabled = !isMidpoint;
+        if (isMidpoint) TagPartialCheckControl.IsChecked = false;
+    }
+
+    // NEW:
+    if (WriteContainmentPercentCheckControl != null)
+    {
+        WriteContainmentPercentCheckControl.IsEnabled = !isMidpoint;
+        if (isMidpoint) WriteContainmentPercentCheckControl.IsChecked = false;
+    }
+
+    // Keep existing hint text / engine hints logic unchanged...
+}
+```
+
+(If you also want to restrict this checkbox to MeshAccurate only, change `IsEnabled = !isMidpoint && isMeshAccurate;` — I’m not doing that by default because the bounds-engine overlap ratio is still useful.)
+
+---
+
+## 3) Wiring settings <-> UI
+
+### A. `SpaceMapperControl.xaml.cs` — ApplySettings to UI
+
+In `ApplySettings(SpaceMapperProcessingSettings settings)` (where you already set treat/tag/writeBehavior/etc) add:
+
+```csharp
+// SpaceMapperControl.xaml.cs
+if (_processingPage.WriteContainmentPercentCheck != null)
+{
+    _processingPage.WriteContainmentPercentCheck.IsChecked = settings.WriteZoneContainmentPercentProperty;
+}
+```
+
+Place it near the other writeback toggles (e.g., after `WriteZoneBehaviorCheck` is set).
+
+### B. `SpaceMapperControl.xaml.cs` — BuildSettings from UI
+
+In `BuildSettings()`, read the checkbox and force it off for midpoint (same pattern you already use for treat/tag partial):
+
+```csharp
+// SpaceMapperControl.xaml.cs (inside BuildSettings)
+var writeContainmentPercent = _processingPage.WriteContainmentPercentCheck?.IsChecked == true;
+
+// Tier A/B: user controls target representation even when MeshAccurate is selected.
+if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+{
+    treatPartial = false;
+    tagPartial = false;
+    writeContainmentPercent = false; // NEW
+}
+
+return new SpaceMapperProcessingSettings
+{
+    ...
+    WriteZoneContainmentPercentProperty = writeContainmentPercent, // NEW
+    ...
+};
+```
+
+### C. `SpaceMapperControl.xaml.cs` — hook change events (so preflight/fast traversal updates)
+
+Where you wire checkbox change events (near TreatPartial/TagPartial/WriteZoneBehavior), add:
+
+```csharp
+if (_processingPage.WriteContainmentPercentCheck != null)
+{
+    _processingPage.WriteContainmentPercentCheck.Checked += (s, e) =>
+    {
+        UpdateFastTraversalUi();
+        TriggerLivePreflight();
+    };
+    _processingPage.WriteContainmentPercentCheck.Unchecked += (s, e) =>
+    {
+        UpdateFastTraversalUi();
+        TriggerLivePreflight();
+    };
+}
+```
+
+---
+
+## 4) Engine changes (compute the fraction)
+
+### A. `SpaceMapperEngines.cs` — include the new setting in `needsPartial`
+
+Locate the existing:
+
+```csharp
+var needsPartial = settings != null
+    && (settings.TagPartialSeparately || settings.TreatPartialAsContained || settings.WriteZoneBehaviorProperty);
+
+if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+{
+    needsPartial = false;
+}
+```
+
+(as seen in your current file) and change to:
+
+```csharp
+var computeContainmentFraction = settings?.WriteZoneContainmentPercentProperty == true;
+
+var needsPartial = settings != null
+    && (
+        settings.TagPartialSeparately
+        || settings.TreatPartialAsContained
+        || settings.WriteZoneBehaviorProperty
+        || computeContainmentFraction // NEW
+    );
+
+if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+{
+    needsPartial = false;
+    computeContainmentFraction = false; // NEW
+}
+```
+
+### B. `SpaceMapperEngines.cs` — pass `computeContainmentFraction` into classification
+
+Update `ClassifyPair(...)` signature to include `bool computeContainmentFraction`, and pass it from the call site(s).
+
+Example shape:
+
+```csharp
+var intersection = ClassifyPair(
+    zone,
+    zoneQueryBounds,
+    targetBoundsLocal,
+    targetKey,
+    zoneBoundsMode,
+    containmentEngine,
+    diagnostics,
+    targetBoundsMode,
+    computeContainmentFraction, // NEW
+    needsPartial,
+    treatPartialAsContained);
+```
+
+Then update the method signature accordingly.
+
+### C. `SpaceMapperEngines.cs` — helper for overlap-based fraction (bounds engines)
+
+Add this helper near other helpers in the same class:
+
+```csharp
+private static double? ComputeFractionFromOverlap(double overlapVolume, in Aabb targetBounds)
+{
+    var targetVolume = targetBounds.Volume;
+    if (targetVolume <= 0)
+    {
+        return null;
+    }
+
+    var f = overlapVolume / targetVolume;
+    if (double.IsNaN(f) || double.IsInfinity(f))
+    {
+        return null;
+    }
+
+    if (f < 0) return 0;
+    if (f > 1) return 1;
+    return f;
+}
+```
+
+### D. `ClassifyPointTarget(...)` — set 100% when enabled
+
+Update:
+
+```csharp
+private static ZoneTargetIntersection ClassifyPointTarget(
+    ZoneGeometry zone,
+    string targetKey,
+    double overlapVolume,
+    bool computeContainmentFraction)
+{
+    return new ZoneTargetIntersection
+    {
+        ZoneId = zone.ZoneId,
+        TargetItemKey = targetKey,
+        IsContained = true,
+        IsPartial = false,
+        OverlapVolume = overlapVolume,
+        ContainmentFraction = computeContainmentFraction ? 1.0 : null
+    };
+}
+```
+
+(Adjust signature/callers accordingly.)
+
+### E. `ClassifyByAabbOnly(...)` and `ClassifyByPlanes(...)` — set approximate percent from overlap ratio
+
+In their respective `BuildResult(...)`, after you compute:
+
+```csharp
+var overlap = EstimateOverlap(zoneBounds, targetBounds);
+```
+
+compute:
+
+```csharp
+double? frac = null;
+if (computeContainmentFraction)
+{
+    frac = contained ? 1.0 : ComputeFractionFromOverlap(overlap, targetBounds);
+}
+```
+
+And include:
+
+```csharp
+ContainmentFraction = frac,
+```
+
+in the returned `ZoneTargetIntersection`.
+
+### F. `ClassifyByMeshAccurateSamples(...)` — compute percent from sample ratio (the “reasonably accurate” part)
+
+This function currently samples many points and *early-outs as soon as partial is detected*. When we need a percentage, we must **not early-out**; we need all samples.
+
+Update signature:
+
+```csharp
+private static ZoneTargetIntersection ClassifyByMeshAccurateSamples(
+    ZoneGeometry zone,
+    in Aabb zoneBounds,
+    in Aabb targetBounds,
+    string targetKey,
+    SpaceMapperEngineDiagnostics diagnostics,
+    SpaceMapperTargetBoundsMode targetBoundsMode,
+    bool computeContainmentFraction, // NEW
+    bool needsPartial,
+    bool treatPartialAsContained)
+```
+
+Inside, add counters:
+
+```csharp
+var anyInside = false;
+var anyOutside = false;
+
+var sampleCount = 0;
+var insideCount = 0;
+```
+
+Then update `Sample(...)` to count and to only early-out when percent is NOT requested:
+
+```csharp
+bool Sample(double x, double y, double z)
+{
+    sampleCount++;
+
+    var inside = ZoneContainsPoint(zone, x, y, z, diagnostics);
+
+    if (inside)
+    {
+        anyInside = true;
+        insideCount++;
+    }
+    else
+    {
+        anyOutside = true;
+    }
+
+    if (!computeContainmentFraction)
+    {
+        // Keep existing perf short-circuits when we don't need a percentage.
+        if (!needsPartial && anyOutside)
+        {
+            return false;
+        }
+
+        if (anyInside && anyOutside)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+```
+
+Finally in `BuildResult(...)`, compute the fraction:
+
+```csharp
+ZoneTargetIntersection BuildResult(bool isPartial)
+{
+    var overlap = EstimateOverlap(zoneBounds, targetBounds);
+    var contained = treatPartialAsContained || !isPartial;
+
+    if (isPartial && !needsPartial)
+    {
+        return null;
+    }
+
+    double? frac = null;
+    if (computeContainmentFraction && sampleCount > 0)
+    {
+        frac = insideCount / (double)sampleCount;
+        if (frac < 0) frac = 0;
+        else if (frac > 1) frac = 1;
+    }
+
+    return new ZoneTargetIntersection
+    {
+        ZoneId = zone.ZoneId,
+        TargetItemKey = targetKey,
+        IsContained = contained,
+        IsPartial = isPartial,
+        OverlapVolume = overlap,
+        ContainmentFraction = frac
+    };
+}
+```
+
+This keeps your existing sampling pattern (corners + center + KDop/Hull extras) intact, and only expands runtime when the new tickbox is enabled.
+
+---
+
+## 5) Writeback changes (add one new property)
+
+### A. `SpaceMapperService.cs` — write `Zone Containment %` when enabled
+
+`BuildWritebackEntries(...)` already writes zone behavior property(s) and then mapping properties. Add a new block **after** the existing zone behavior property block and **before** the mapping loop:
+
+Add at top of file:
+
+```csharp
+using System.Globalization;
+```
+
+Add constant near other constants:
+
+```csharp
+private const string ZoneContainmentPercentPropertyName = "Zone Containment %";
+```
+
+Add helper:
+
+```csharp
+private static string FormatPercent(double? fraction)
+{
+    if (!fraction.HasValue) return null;
+
+    var f = fraction.Value;
+    if (double.IsNaN(f) || double.IsInfinity(f)) return null;
+
+    if (f < 0) f = 0;
+    if (f > 1) f = 1;
+
+    var pct = f * 100.0;
+    return pct.ToString("0.##", CultureInfo.InvariantCulture);
+}
+```
+
+Then inside `BuildWritebackEntries(...)`:
+
+```csharp
+if (settings?.WriteZoneContainmentPercentProperty == true && relevant != null && relevant.Count > 0)
+{
+    var category = string.IsNullOrWhiteSpace(settings.ZoneBehaviorCategory)
+        ? "ME_SpaceInfo"
+        : settings.ZoneBehaviorCategory;
+
+    if (ShouldSequenceBehaviour(settings, mappings, relevant.Count))
+    {
+        var count = Math.Min(relevant.Count, MaxSequenceOutputsPerMapping);
+        for (var i = 0; i < count; i++)
+        {
+            var value = FormatPercent(relevant[i]?.ContainmentFraction);
+            if (string.IsNullOrWhiteSpace(value)) continue;
+
+            entries.Add(new WritebackEntry
+            {
+                CategoryName = category,
+                PropertyName = SequencedPropertyName(ZoneContainmentPercentPropertyName, i),
+                Value = value,
+                Mode = WriteMode.Overwrite,
+                AppendSeparator = string.Empty
+            });
+        }
+    }
+    else
+    {
+        // Single-zone or non-sequenced multi-zone: write one property (concatenate if multiple).
+        var values = relevant
+            .Select(r => FormatPercent(r?.ContainmentFraction))
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .ToList();
+
+        if (values.Count > 0)
+        {
+            var combined = values.Count == 1 ? values[0] : string.Join(", ", values);
+
+            entries.Add(new WritebackEntry
+            {
+                CategoryName = category,
+                PropertyName = ZoneContainmentPercentPropertyName,
+                Value = combined,
+                Mode = WriteMode.Overwrite,
+                AppendSeparator = string.Empty
+            });
+        }
+    }
+}
+```
+
+This respects your existing “sequence outputs only if mappings are sequenced” behavior via `ShouldSequenceBehaviour(...)`.
+
+---
+
+## 6) Preflight + comparison runner compatibility
+
+### A. `SpaceMapperPreflightService.cs`
+
+Update `needsPartial` the same way as engines (include the new setting) and add the new setting into the signature string (so cache invalidates correctly):
+
+* `needsPartial = ... || settings.WriteZoneContainmentPercentProperty`
+* In `BuildSignature(...)`, append something like `|ContainmentPct={settings.WriteZoneContainmentPercentProperty}`.
+
+### B. `SpaceMapperComparisonRunner.cs`
+
+1. When cloning settings for comparisons, include the new field (pattern matches other copied settings):
+
+```csharp
+WriteZoneContainmentPercentProperty = baseSettings.WriteZoneContainmentPercentProperty,
+```
+
+2. When copying intersections during membership filtering, preserve the value:
+
+```csharp
+ContainmentFraction = i.ContainmentFraction,
+```
+
+(otherwise you’ll lose it before writeback).
+
+---
+
+## 7) Optional: run report writer (so the report reflects the new tickbox)
+
+In `SpaceMapperRunReportWriter.cs`, where you list processing settings (near zone behavior writeback info), add one line:
+
+* `Write containment % property: True/False`
+* `Containment % property name: Zone Containment %` (optional)
+
+This isn’t required for correctness but helps users understand output.
+
+---
+
+## Codex instructions (paste this as your Codex task)
+
+```text
+Goal: Add “partial containment percentage” writeback support as a single new checkbox in the Processing step (“Assignment & Writeback”). When enabled, write a new target property “Zone Containment %” (0–100) for the assigned zone(s).
+
+Scope/files:
+- SpaceMapperModels.cs
+- SpaceMapperStepProcessingPage.xaml
+- SpaceMapperStepProcessingPage.xaml.cs
+- SpaceMapperControl.xaml.cs
+- SpaceMapperEngines.cs
+- SpaceMapperService.cs
+- SpaceMapperPreflightService.cs
+- SpaceMapperComparisonRunner.cs
+- SpaceMapperRunReportWriter.cs (optional but recommended)
+
+Requirements:
+1) Models
+   - Add SpaceMapperProcessingSettings bool:
+     - WriteZoneContainmentPercentProperty (DataMember Order next after WriteZoneBehaviorProperty).
+   - Add ZoneTargetIntersection nullable double:
+     - ContainmentFraction (0..1), DataMember after OverlapVolume.
+
+2) UI
+   - Add one checkbox in Processing/Assignment & Writeback section:
+     - x:Name="WriteContainmentPercentCheckControl"
+     - label: “Write containment % property”
+     - tooltip: explain MeshAccurate uses sampling; bounds uses AABB overlap approximation.
+   - In StepProcessingPage.xaml.cs expose internal CheckBox WriteContainmentPercentCheck.
+   - Disable & auto-uncheck this checkbox when TargetBoundsMode == Midpoint (match existing “partial” behavior).
+
+3) Settings wiring
+   - SpaceMapperControl.ApplySettings: set checkbox from settings.
+   - SpaceMapperControl.BuildSettings: read checkbox into settings.WriteZoneContainmentPercentProperty and force false when target bounds mode is Midpoint.
+   - Wire checkbox checked/unchecked events to UpdateFastTraversalUi + TriggerLivePreflight (same pattern as other processing toggles).
+
+4) Engine computation (SpaceMapperEngines.cs)
+   - Introduce local bool computeContainmentFraction = settings?.WriteZoneContainmentPercentProperty == true.
+   - Ensure needsPartial includes computeContainmentFraction, and force both off for Midpoint.
+   - Propagate computeContainmentFraction into classification methods.
+   - For MeshAccurate classifier:
+     - Track sampleCount and insideCount using the same sample points already used for partial detection (corners/center + KDop/Hull points).
+     - When computeContainmentFraction is true, do NOT early-out on detecting partial; evaluate all samples.
+     - Set intersection.ContainmentFraction = insideCount / sampleCount (clamp 0..1).
+   - For bounds classifiers (AABB / planes):
+     - Set ContainmentFraction = 1.0 for contained.
+     - For partial, approximate with overlapVolume / targetBounds.Volume (clamp 0..1).
+   - For point-only containment hits, set ContainmentFraction = 1.0 when enabled.
+
+5) Writeback (SpaceMapperService.cs)
+   - When settings.WriteZoneContainmentPercentProperty == true and there is an assignment, write:
+     - Category: settings.ZoneBehaviorCategory (fallback “ME_SpaceInfo”)
+     - PropertyName: “Zone Containment %”
+     - Value: formatted percent string (fraction*100) with invariant culture and up to 2 decimals.
+   - Multi-zone behavior:
+     - If ShouldSequenceBehaviour(settings, mappings, relevant.Count) is true, write sequenced properties:
+       “Zone Containment %”, “Zone Containment %(1)”, etc (use SequencedPropertyName).
+     - Else, write one property; if multiple zones, concatenate values with “, ”.
+
+6) Preflight/Comparison compatibility
+   - Preflight signature includes WriteZoneContainmentPercentProperty so caches invalidate correctly.
+   - Comparison runner clones the new setting and preserves ContainmentFraction when copying intersections.
+
+Acceptance checks:
+- UI shows the new checkbox in Processing step.
+- Checkbox is disabled & unchecked in Midpoint mode.
+- When enabled and MeshAccurate + Hull/KDop is used, partial intersections produce non-100 values that vary with geometry.
+- New property “Zone Containment %” appears in writeback for assigned targets (and sequenced when appropriate).
+- No regression when the checkbox is off (no extra sampling/overhead beyond existing behavior).
+```
+
+---
+
+If you want, I can also give you a smaller “diff-only” version of the engine + service changes (the two most code-heavy files) so you can paste them directly into a PR description.

@@ -28,7 +28,7 @@
 ## Overview
 - Navisworks 2025 automation toolkit written in C# targeting .NET Framework 4.8 (`net48`).
 - Main assembly: `MicroEng.Navisworks.dll` with WPF UI (`UseWPF` + `UseWindowsForms` for ElementHost).
-- Dockable MicroEng panel (`MicroEng.DockPane`) hosts buttons for Data Scraper, Data Mapper (Append Data), Data Matrix, and Space Mapper. Reconstruct / Zone Finder remain add-in stubs only.
+- Dockable MicroEng panel (`MicroEng.DockPane`) hosts buttons for Data Scraper, Data Mapper (Append Data), Data Matrix, Space Mapper, and 4D Sequence. Reconstruct / Zone Finder remain add-in stubs only.
 - Data Matrix and Space Mapper are WPF dock panes; Data Scraper opens its own window; the panel log captures messages raised via `MicroEngActions.Log`.
 - Branding/colours come from `MICROENG_THEME_GUIDE.md` and the `Logos` folder (`microeng_logotray.png`, `microeng-logo2.png`).
 
@@ -76,6 +76,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
    - MicroEng Data Mapper (Append Data)
    - MicroEng Data Matrix (dockable)
    - MicroEng Space Mapper (dockable)
+   - MicroEng 4D Sequence (dockable)
    - MicroEng Data Scraper
    - MicroEng Panel (toggles the docked launcher/log)
 4. Reconstruct and Zone Finder are add-in placeholders only; they are not shown on the panel.
@@ -85,6 +86,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 - **Data Scraper**: Scans model properties into `DataScraperCache` (profiles, distinct properties, raw entries). Source of truth for Data Matrix/Space Mapper metadata.
 - **Data Matrix** (dock pane `MicroEng.DataMatrix.DockPane`): WPF grid built from the latest ScrapeSession. Supports column chooser (toggle properties on/off), presets per profile, selection sync back to Navisworks, and CSV export (filtered/all).
 - **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata and CPU engine (GPU stubs remain). Presets Fast/Normal/Accurate; Fast uses origin-point containment (bbox center in zone AABB). Advanced Performance includes Fast Traversal (Auto/Zone-major/Target-major). Step 3 includes Benchmark & Testing (compute/simulate/full), writeback strategy, skip-unchanged signature, packed writeback option, and optional pane-closing during runs.
+- **4D Sequence** (dock pane `MicroEng.Sequence4D.DockPane`): WPF UI that captures selection, orders targets, and generates Timeliner task sequences; includes delete-by-name for regeneration.
 - **MicroEng Panel**: WPF launcher with branding/logo and log textbox that listens to `MicroEngActions.LogMessage`.
 
 ## Notes

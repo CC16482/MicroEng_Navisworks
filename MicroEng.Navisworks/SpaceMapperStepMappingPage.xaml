@@ -32,6 +32,7 @@
         <local:MultiZoneCombineMode>Min</local:MultiZoneCombineMode>
         <local:MultiZoneCombineMode>Max</local:MultiZoneCombineMode>
         <local:MultiZoneCombineMode>Average</local:MultiZoneCombineMode>
+        <local:MultiZoneCombineMode>Sequence</local:MultiZoneCombineMode>
       </x:Array>
       <Style x:Key="HelpToggleButtonStyle" TargetType="Button">
         <Setter Property="Width" Value="18" />

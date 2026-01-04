@@ -1,0 +1,316 @@
+Below is a **Codex-ready change request** plus **reference XAML + code-behind patterns** to implement the UI restructuring on **Step 3 – Processing** so it’s much less confusing, while keeping your existing logic intact.
+
+The key is: **do not delete or rename your existing named controls** (sliders/combos/checkboxes). Instead, **move them into clearer sections**, and add a small amount of show/hide logic so irrelevant options **disappear** (not just grey out).
+
+---
+
+# 1) Target UX outcome (what the user should experience)
+
+Step 3 should read top-to-bottom as:
+
+1. **Containment Accuracy** (how we decide inside/outside)
+2. **Assignment & Partial Handling** (what to do when multiple/partial)
+3. **Writeback Output** (what gets written)
+4. **Performance & Optimization** (advanced – collapsed)
+5. **Zone Offsets** (kept as you have)
+
+And with dependency rules:
+
+* If **Target = Midpoint** → hide partial controls entirely and show “inside/outside only”.
+* If **Engine = Mesh accurate (holes/voids)** → show a clear note: *bounds are fallback/culling* and optionally force target mode to midpoint (or at least disable target OBB/k‑DOP/Hull if not supported yet).
+
+---
+
+# 2) Codex prompt (copy/paste)
+
+Paste this into Codex. It is intentionally explicit and “don’t break existing wiring” focused.
+
+```text
+Implement UI restructuring for Space Mapper Step 3 – Processing page to reduce user confusion via clearer sections and progressive disclosure.
+
+GOALS
+- Keep existing named controls and bindings (do NOT rename existing sliders/combos/checkboxes), but reorganize them into clearer Cards/sections.
+- Add minimal code-behind logic to show/hide irrelevant controls and prevent invalid combos (e.g., Midpoint disables partial).
+- Move advanced writeback/performance toggles into an Expander collapsed by default.
+
+FILES
+- SpaceMapperStepProcessingPage.xaml
+- SpaceMapperStepProcessingPage.xaml.cs
+- (only if necessary) SpaceMapperControl.xaml.cs to update references if any names change (avoid this by keeping names unchanged).
+
+UI STRUCTURE (XAML)
+Replace the current two-column “Bounds & Accuracy / Behavior / Writeback” layout with a vertical Stack of Cards:
+
+Card 1: "Containment Accuracy"
+- Engine dropdown (existing control) near the top.
+- If Engine == Bounds/Fast: show Zone Bounds slider + Target Bounds slider + Midpoint mode combo (shown only when midpoint).
+- If Engine == Mesh accurate: show a short help TextBlock that says bounds are used for culling/fallback; optionally show a “Fallback Bounds” row (zone slider) inside a small Expander.
+
+Card 2: "Assignment"
+- Resolution dropdown + Enable Multiple Zones checkbox (existing controls).
+- Partial handling controls grouped together:
+  - Treat Partial as Contained
+  - Tag Partial Separately
+  This whole partial section must be Collapsed when TargetBounds == Midpoint.
+
+Card 3: "Writeback Output"
+- Writeback strategy dropdown (existing).
+- Optional “Write Zone Behaviour property” checkbox + its category/property/value textboxes in a panel that is enabled/visible only when the checkbox is checked.
+
+Card 4: "Performance & Optimization" (Expander, collapsed by default)
+- Skip unchanged targets (signature)
+- Pack outputs into a single property
+- Show internal properties during writeback
+- Close other Navisworks panes during run
+Keep help tip text here.
+
+Card 5: "Zone Offsets"
+- Keep your existing offsets UI unchanged.
+
+STATE LOGIC (Code-behind)
+In SpaceMapperStepProcessingPage.xaml.cs add:
+- UpdateProcessingUiState() method called on:
+  - Loaded
+  - Engine dropdown selection change
+  - Zone/Target bounds slider ValueChanged
+  - “Write Zone Behaviour property” checkbox toggle
+
+Rules:
+1) Midpoint handling:
+   isMidpoint = (TargetBoundsSlider.Value corresponds to Midpoint)
+   - Midpoint mode row Visible only when isMidpoint.
+   - Partial section Collapsed when isMidpoint.
+   - TreatPartialAsContained and TagPartialSeparately must be unchecked and disabled when isMidpoint.
+
+2) Mesh accurate engine messaging:
+   isMesh = Engine dropdown selected == Mesh accurate
+   - Show a TextBlock “Mesh accurate uses zone solids; bounds are used for candidate filtering and fallback.”
+   - If isMesh and we do NOT actually support target OBB/kDOP/Hull in code: force target bounds to Midpoint and disable the target bounds slider (to avoid misleading settings).
+   - Relabel “Zone Bounds” header to “Fallback Bounds” when isMesh, otherwise “Zone Bounds”.
+
+3) Write behaviour fields:
+   if WriteBehaviourCheckbox unchecked:
+     - disable/collapse the Behaviour fields panel
+   else enable/visible.
+
+IMPLEMENTATION NOTES
+- Do not change any processing logic in engines/services; this task is UI-only.
+- Keep all existing control names so SpaceMapperControl.xaml.cs does not break.
+
+ACCEPTANCE
+- Page reads clearly: Accuracy -> Assignment -> Writeback -> Advanced -> Offsets
+- Midpoint hides partial controls and disables them.
+- Mesh accurate shows correct explanatory note and prevents misleading target mode choices if not supported.
+- Build succeeds.
+```
+
+---
+
+# 3) Reference XAML pattern (you can give Codex this as a scaffold)
+
+This is a *structure template*. Codex should **reuse your existing controls** (names and bindings) and move them into these containers.
+
+```xml
+<ScrollViewer VerticalScrollBarVisibility="Auto">
+  <StackPanel Margin="12" Orientation="Vertical">
+
+    <!-- Card 1: Containment Accuracy -->
+    <ui:Card Margin="0,0,0,12">
+      <StackPanel>
+        <TextBlock Text="Containment Accuracy" FontWeight="SemiBold" FontSize="14"/>
+        <TextBlock Text="Choose how zones are evaluated (speed vs correctness)." Opacity="0.75" Margin="0,4,0,10"/>
+
+        <!-- Engine row (existing ComboBox) -->
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="160"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <TextBlock Grid.Column="0" Text="Engine:" VerticalAlignment="Center"/>
+          <!-- EXISTING Engine control goes here -->
+          <!-- e.g. <ComboBox x:Name="EngineComboBox" ... /> -->
+        </Grid>
+
+        <!-- Mesh accurate note -->
+        <TextBlock x:Name="MeshAccurateNoteText"
+                   Margin="0,8,0,0"
+                   Text="Mesh accurate uses zone solids for holes/voids. Bounds are used for candidate filtering and fallback."
+                   TextWrapping="Wrap"
+                   Opacity="0.75"
+                   Visibility="Collapsed"/>
+
+        <!-- Bounds sliders panel -->
+        <StackPanel x:Name="BoundsSlidersPanel" Margin="0,10,0,0">
+          <TextBlock x:Name="ZoneBoundsHeaderText" Text="Zone Bounds" Margin="0,0,0,4"/>
+
+          <!-- EXISTING Zone Bounds slider here -->
+
+          <TextBlock Text="Target Bounds" Margin="0,10,0,4"/>
+          <!-- EXISTING Target Bounds slider here -->
+
+          <StackPanel x:Name="MidpointModeRow" Margin="0,10,0,0" Visibility="Collapsed">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="160"/>
+                <ColumnDefinition Width="*"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock Grid.Column="0" Text="Midpoint mode:" VerticalAlignment="Center"/>
+              <!-- EXISTING midpoint ComboBox here -->
+            </Grid>
+          </StackPanel>
+        </StackPanel>
+
+        <!-- Optional: fallback bounds expander for mesh mode -->
+        <Expander x:Name="FallbackBoundsExpander" Header="Fallback bounds (advanced)"
+                  Margin="0,10,0,0" Visibility="Collapsed" IsExpanded="False">
+          <TextBlock Text="Used when a zone solid is unavailable; also used for broad-phase filtering." Opacity="0.75"/>
+          <!-- (Optionally place zone bounds slider here instead when mesh is selected) -->
+        </Expander>
+
+      </StackPanel>
+    </ui:Card>
+
+    <!-- Card 2: Assignment -->
+    <ui:Card Margin="0,0,0,12">
+      <StackPanel>
+        <TextBlock Text="Assignment" FontWeight="SemiBold" FontSize="14"/>
+        <TextBlock Text="How to resolve multiple matching zones and partial results." Opacity="0.75" Margin="0,4,0,10"/>
+
+        <!-- Resolution + Multi-zone -->
+        <!-- EXISTING Resolution dropdown + Enable Multiple Zones checkbox -->
+
+        <!-- Partial section -->
+        <StackPanel x:Name="PartialSection" Margin="0,10,0,0">
+          <TextBlock Text="Partial handling" FontWeight="SemiBold" Margin="0,0,0,6"/>
+          <!-- EXISTING TreatPartialAsContained checkbox -->
+          <!-- EXISTING TagPartialSeparately checkbox -->
+        </StackPanel>
+
+        <TextBlock x:Name="MidpointNoPartialNote"
+                   Margin="0,10,0,0"
+                   Text="Midpoint target mode is inside/outside only (no partial state)."
+                   Opacity="0.75"
+                   Visibility="Collapsed"/>
+      </StackPanel>
+    </ui:Card>
+
+    <!-- Card 3: Writeback Output -->
+    <ui:Card Margin="0,0,0,12">
+      <StackPanel>
+        <TextBlock Text="Writeback Output" FontWeight="SemiBold" FontSize="14"/>
+        <TextBlock Text="Choose what properties get written to the model." Opacity="0.75" Margin="0,4,0,10"/>
+
+        <!-- EXISTING Writeback strategy dropdown -->
+
+        <!-- Optional behaviour write -->
+        <!-- EXISTING WriteZoneBehaviourProperty checkbox -->
+
+        <StackPanel x:Name="BehaviourFieldsPanel" Margin="0,8,0,0" IsEnabled="False" Visibility="Collapsed">
+          <!-- EXISTING category/property/value fields -->
+        </StackPanel>
+      </StackPanel>
+    </ui:Card>
+
+    <!-- Card 4: Performance & Optimization (collapsed) -->
+    <Expander Header="Performance & Optimization (advanced)" IsExpanded="False" Margin="0,0,0,12">
+      <ui:Card>
+        <StackPanel>
+          <!-- EXISTING: Skip unchanged targets -->
+          <!-- EXISTING: Pack outputs into single property -->
+          <!-- EXISTING: Show internal properties -->
+          <!-- EXISTING: Close panes during run -->
+          <TextBlock Text="Tip: Close Properties/Find Items windows for fastest writes." Opacity="0.75" Margin="0,8,0,0"/>
+        </StackPanel>
+      </ui:Card>
+    </Expander>
+
+    <!-- Card 5: Zone Offsets -->
+    <ui:Card>
+      <!-- KEEP your existing offset UI unchanged -->
+    </ui:Card>
+
+  </StackPanel>
+</ScrollViewer>
+```
+
+---
+
+# 4) Reference code-behind logic (the minimum you need)
+
+Codex should implement something like this in `SpaceMapperStepProcessingPage.xaml.cs` (or in whatever class currently manages these controls), and call it from relevant events.
+
+```csharp
+private void UpdateProcessingUiState()
+{
+    // 1) Determine state
+    bool isMeshAccurate = /* Engine selection == Mesh accurate */;
+    bool isMidpoint = /* Target bounds slider == Midpoint */;
+
+    // 2) Midpoint rules: no partial
+    PartialSection.Visibility = isMidpoint ? Visibility.Collapsed : Visibility.Visible;
+    MidpointNoPartialNote.Visibility = isMidpoint ? Visibility.Visible : Visibility.Collapsed;
+    MidpointModeRow.Visibility = isMidpoint ? Visibility.Visible : Visibility.Collapsed;
+
+    if (isMidpoint)
+    {
+        TreatPartialAsContainedCheckBox.IsChecked = false;
+        TagPartialSeparatelyCheckBox.IsChecked = false;
+
+        TreatPartialAsContainedCheckBox.IsEnabled = false;
+        TagPartialSeparatelyCheckBox.IsEnabled = false;
+    }
+    else
+    {
+        TreatPartialAsContainedCheckBox.IsEnabled = true;
+        TagPartialSeparatelyCheckBox.IsEnabled = true;
+    }
+
+    // 3) Mesh accurate messaging + bounds labeling
+    MeshAccurateNoteText.Visibility = isMeshAccurate ? Visibility.Visible : Visibility.Collapsed;
+
+    ZoneBoundsHeaderText.Text = isMeshAccurate ? "Fallback Bounds" : "Zone Bounds";
+
+    // Optional: in mesh accurate, bounds sliders are less central
+    // If you want: show fallback expander, or force midpoint
+    if (isMeshAccurate)
+    {
+        // If mesh accurate engine currently ONLY supports point containment:
+        TargetBoundsSlider.Value = /* Midpoint value */;
+        TargetBoundsSlider.IsEnabled = false;
+
+        FallbackBoundsExpander.Visibility = Visibility.Visible;
+        // Optionally: move zone bounds slider into fallback expander in XAML
+    }
+    else
+    {
+        TargetBoundsSlider.IsEnabled = true;
+        FallbackBoundsExpander.Visibility = Visibility.Collapsed;
+    }
+
+    // 4) Behaviour write fields enablement
+    bool writeBehaviour = WriteZoneBehaviourPropertyCheckBox.IsChecked == true;
+    BehaviourFieldsPanel.IsEnabled = writeBehaviour;
+    BehaviourFieldsPanel.Visibility = writeBehaviour ? Visibility.Visible : Visibility.Collapsed;
+}
+```
+
+Events to hook:
+
+* Page Loaded
+* Engine combo SelectionChanged
+* Target bounds slider ValueChanged
+* WriteBehaviour checkbox Checked/Unchecked
+
+If your current architecture wires events in `SpaceMapperControl.xaml.cs`, Codex can keep doing that; otherwise put handlers in the page code-behind.
+
+---
+
+# 5) Implementation guidance (so Codex doesn’t break your build)
+
+* **Do not rename existing XAML element names** used by `SpaceMapperControl.xaml.cs` / `BuildSettings()`.
+* If you introduce *new container elements* (`PartialSection`, `MeshAccurateNoteText`, etc.), you only need to add references in the page class.
+* Keep “Offsets” as-is to avoid regression risk.
+
+---
+
+If you want, I can tailor the Codex prompt to your exact control names (Engine dropdown name, ZoneBounds slider name, etc.) if you paste a short snippet of your existing `SpaceMapperStepProcessingPage.xaml` showing the named controls. That would let the prompt be 100% copy/paste with minimal Codex guesswork.

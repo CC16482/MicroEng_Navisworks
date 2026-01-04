@@ -1,0 +1,171 @@
+I reviewed the Tier A/B changes end-to-end across the files you listed (UI → settings → preflight → intersection engine → comparison → report), plus the CS1628 build fix. The overall approach is sound, and the *intended* Tier behavior is implemented correctly **as long as the “force Midpoint for MeshAccurate” logic is fully removed everywhere**.
+
+Below is what’s correct, what to double-check, and the exact “gotchas” I still see patterns for.
+
+---
+
+## 1) Tier A vs Tier B behavior in the engine is correct
+
+### Tier A
+
+When **TargetBoundsMode = Midpoint**, the engine uses **single-point containment** and disables partial semantics (no partial classification). You can see this in the logic that disables partial when the effective target bounds mode is midpoint.
+
+### Tier B
+
+When **TargetBoundsMode != Midpoint** and **ZoneContainmentEngine = MeshAccurate**, the engine correctly routes to **mesh-accurate multi-sample classification** (and can therefore produce partials). The `ClassifyIntersection` branch explicitly calls `ClassifyByMeshAccurateSamples(...)` when `containmentEngine == MeshAccurate`.
+
+The sampling strategy is consistent and matches the Tier reporting:
+
+* **AABB**: 8 corners
+* **OBB**: 8 corners + center = 9
+* **k‑DOP**: + face centers = 15
+* **Hull**: + edge midpoints = 27
+
+Also important: **partial vs contained** is preserved correctly without losing information:
+
+* `IsPartial` is set when inside/outside samples are mixed
+* `IsContained` becomes true for partial only when `TreatPartialAsContained` is enabled
+  So you can both “treat as contained” *and* still tag/report partial status.
+
+---
+
+## 2) The CS1628 build fix is correct
+
+Your build error was caused by referencing an `in` parameter (`zoneBounds` / `targetBounds`) inside a local function, which C# disallows (CS1628). The fix—copying them into locals first—addresses it correctly.
+
+---
+
+## 3) UI/settings path is correct **if** you are on the “Tier A/B” version of the file
+
+The **correct** `SpaceMapperControl.xaml.cs` behavior is:
+
+* Do **not** override TargetBoundsMode when MeshAccurate is selected
+* Derive `UseOriginPointOnly` from **TargetBoundsMode == Midpoint**
+* Disable partial-related settings when Midpoint is selected
+
+That is exactly what the Tier A/B version does.
+
+And the processing page logic hides partial UI when midpoint is selected (so users aren’t offered partial controls that can’t work in Tier A).
+
+---
+
+## 4) Preflight logic is correct **if** you are on the updated ResolveTargetBoundsMode
+
+Preflight must not “silently” force Midpoint when MeshAccurate, otherwise Tier B can never happen.
+
+The **updated** `SpaceMapperPreflightService` contains the correct Tier A/B rule:
+
+> “do not force Midpoint when MeshAccurate is selected”
+
+And the index strategy is driven by `targetBoundsMode == Midpoint` (point-index only for Tier A).
+
+---
+
+## 5) Comparison runner behavior is correct **if** MeshAccurate no longer forces point mode
+
+The updated comparison runner sets:
+
+* `UseOriginPointOnly = (TargetBoundsMode == Midpoint)`
+* partial settings disabled only for Midpoint
+* **no forced “point mode” just because MeshAccurate is selected**
+
+This is required so compare runs can actually exercise Tier B variants under MeshAccurate.
+
+---
+
+## 6) Run report Tier section is implemented correctly
+
+The report writer now emits a Mesh Accurate Tier section and shows the implied sample count per target.
+
+---
+
+## 7) The one thing I would NOT “assume is fine”: verify you removed *all* remaining forced-midpoint logic
+
+In the material you provided, I can still see **older patterns** that would break Tier B if they still exist in your working tree.
+
+### A) UI layer “force midpoint” block
+
+There is a version of `SpaceMapperControl.xaml.cs` that still does this:
+
+```csharp
+if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate)
+{
+    targetBoundsMode = SpaceMapperTargetBoundsMode.Midpoint;
+}
+```
+
+If that exists anywhere in your repo, Tier B will never be selectable.
+
+### B) Service layer forcing midpoint point-selection for MeshAccurate
+
+There is also a version of `SpaceMapperService.TryGetTargetPoint(...)` that forces “midpoint semantics” whenever MeshAccurate is selected:
+
+```csharp
+var useMidpoint = containmentEngine == MeshAccurate
+    || settings.TargetBoundsMode == Midpoint
+    || settings.UseOriginPointOnly == true;
+```
+
+That undermines “full control” expectations and should be the updated form that **does not** key off containment engine.
+
+The corrected version is:
+
+```csharp
+// Tier A/B: MeshAccurate should not force midpoint-only behavior; user controls target bounds mode.
+_ = containmentEngine;
+var useMidpoint = settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint
+    || settings.UseOriginPointOnly == true;
+```
+
+### C) Preflight ResolveTargetBoundsMode forcing midpoint for MeshAccurate
+
+Likewise, make sure **Preflight** is using the updated ResolveTargetBoundsMode (no MeshAccurate → Midpoint coercion).
+
+### What to do (practical)
+
+In your repo, search for these strings and ensure they do *not* exist anymore:
+
+* `containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate` near any assignment to `TargetBoundsMode = Midpoint`
+* `useMidpoint = containmentEngine ==` (in `TryGetTargetPoint`)
+* any `ResolveTargetBoundsMode` implementation that returns Midpoint specifically because MeshAccurate is selected
+
+If your current working tree matches the “Tier A/B:” commented versions, you’re fine; if any of the older blocks remain, Tier B will be partially or fully disabled.
+
+---
+
+## 8) Answer to your original question: can MeshAccurate use target modes other than midpoint?
+
+Yes—with this Tier A/B implementation, **MeshAccurate + AABB/OBB/k‑DOP/Hull is supported** and is exactly Tier B: mesh-accurate point-in-zone tests across multiple sample points, which enables partial classification.
+
+---
+
+## Recommended verification checklist (fast and conclusive)
+
+1. **Build**
+
+* `dotnet clean; dotnet build` (you already had CS1628; this confirms the fix is fully integrated).
+
+2. **Run Tier A**
+
+* Engine: MeshAccurate
+* Target bounds: Midpoint
+  Expected in report:
+* “Tier A”
+* Samples per target: 1
+* Partial controls disabled in UI
+
+3. **Run Tier B**
+
+* Engine: MeshAccurate
+* Target bounds: Hull (or KDop)
+* Enable “Write zone behavior property” and/or partial settings
+  Expected:
+* “Tier B”
+* Samples per target: 27 (Hull) or 15 (k‑DOP)
+* Some targets can now be `IsPartial = true` when they straddle boundaries
+
+If those three pass, the Tier A/B implementation is correct and complete.
+
+---
+
+If you want one small hardening improvement: **delete/avoid duplicate ResolveTargetBoundsMode implementations** (engine vs preflight) and route both through a single shared method to prevent drift (the exact drift you hit before). That’s optional, but it prevents “Tier B silently breaking” in the future.

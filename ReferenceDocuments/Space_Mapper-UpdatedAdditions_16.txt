@@ -1,0 +1,272 @@
+I reviewed the **latest uploaded files** (`SpaceMapperService.cs`, `SpaceMapperEngines.cs`, `SpaceMapperGeometry.cs`, `SpaceMapperModels.cs`, `SpaceMapperRunReportWriter.cs`, `SpaceMapperControl.xaml.cs`). Based on what’s in those files **right now**, “Mesh accurate / Hull / OBB / k‑DOP” cannot be behaving as your UI implies, and the “door gets the zone even though midpoint is outside” outcome is consistent with the current implementation.
+
+Below is what’s happening, what’s missing, and the exact change request you should hand to Codex to make “mesh accurate” behave correctly with a clean fallback story.
+
+---
+
+## 1) Why “mesh accurate / hull” is not working with the current code
+
+### A. `ExtractVertices()` is still a stub in your active `SpaceMapperGeometry.cs`
+
+In the `GeometryExtractor` you uploaded, this function is literally:
+
+* `ExtractVertices(ModelItem item)` → `// TODO: Extract triangle vertices via ComApi` → returns an **empty list**.
+
+So the zone “mesh” is never actually extracted, which means:
+
+* Anything that depends on real triangles (mesh accurate, hull, etc.) cannot work.
+* Your zone geometry collapses to the fallback behavior.
+
+### B. Your fallback isn’t falling back safely — it’s producing **invalid plane sets**
+
+When `ExtractVertices()` returns empty, your code sets:
+
+* `vertices = BoundingBoxToVertices(box)` → **8 points** (bbox corners)
+
+Then `GeometryMath.BuildPlanes(vertices, box)` does this:
+
+* It assumes the vertices are a triangle list and iterates `i += 3`,
+* So for 8 bbox vertices it produces only **2 planes** (from the first 6 points),
+* And because `planes.Count > 0`, it **does not** hit the “fallback to AABB planes” block.
+
+Net effect:
+
+* Your “zone planes” become an *under‑constrained* half-space set (2 planes), which can classify lots of points as “inside” even when they are not.
+* This can easily cause false positives like the door example.
+
+This is a correctness bug independent of mesh accurate.
+
+### C. The CPU engine you uploaded is **convex-plane containment**, not mesh containment
+
+In `SpaceMapperEngines.cs`, your `ClassifyByPlanes` logic uses:
+
+* `GeometryMath.IsInside(zone.Planes, point)` for corners of the target’s AABB.
+
+That method is a **convex polyhedron half-space test**.
+
+It cannot represent:
+
+* concave rooms,
+* holes/voids,
+* donut shapes (big room with inner void containing sub-rooms),
+
+…unless you switch to a **point-in-mesh** test (ray casting / winding number) and use **real triangle meshes**.
+
+So even after you implement triangle extraction, *using “triangle planes” for all triangles as half-space constraints is not a valid “mesh accurate with holes” approach.* Triangles in a concave mesh do not define a single convex half-space intersection volume.
+
+### D. Your codebase is currently inconsistent about “new settings”
+
+Your `SpaceMapperRunReportWriter.cs` references many fields that do **not exist** in the `SpaceMapperModels.cs` you uploaded (examples: `ZoneContainmentEngine`, `ZoneBoundsMode`, `TargetBoundsMode`, `TargetMidpointMode`, etc.).
+
+That means one of these is true in your working folder:
+
+* you uploaded an older `SpaceMapperModels.cs`, or
+* the project currently does not compile as-is, or
+* you have parallel/duplicated definitions.
+
+Either way: Codex needs to reconcile this first, because “mesh accurate” as a selectable engine must be represented in `SpaceMapperProcessingSettings` and then actually used by `GeometryExtractor` + `CpuIntersectionEngine`.
+
+---
+
+## 2) What “Mesh accurate” needs to mean (so it matches the UI promise)
+
+You want:
+
+1. **Best geometric method**: true zone solid/mesh containment (handles holes/voids)
+2. **Best practical method**: point containment + “most specific wins”
+
+To make that real, you need **two distinct narrow-phase strategies**:
+
+### Strategy 1: Bounds-based containment (fast, convex)
+
+* Zone representation: AABB / OBB / k‑DOP / convex hull planes
+* Test: half-space `IsInside(planes, point)` on target sample points
+* Produces: contained/partial
+
+This is what your current engine is built for (but must be fixed so fallback planes are correct).
+
+### Strategy 2: Mesh-accurate containment (correct with holes/voids)
+
+* Zone representation: triangle mesh (watertight or at least “good enough” for ray casting)
+* Test: **point-in-mesh** (ray intersections odd/even) for target sample points
+* Produces: inside/outside; partial requires multiple points
+
+This is the only approach that can correctly handle “big room with a hole containing other rooms”.
+
+**Important:** Mesh-accurate *can still use AABB* — but only as a **broad-phase** culling bound. The final inside/outside must be mesh-based.
+
+---
+
+## 3) The fallback rules you want (clear + testable)
+
+Implement this exact decision tree:
+
+### Zone containment engine = MeshAccurate
+
+For each zone:
+
+1. Try to extract zone triangles (COM geometry).
+2. If triangles available and non-empty:
+
+   * use point-in-mesh for containment tests
+3. If triangles missing/unavailable/fail extraction:
+
+   * fallback to **bounds-based** using selected `ZoneBoundsMode` (Hull/OBB/k‑DOP/AABB)
+4. If bounds mode data also unavailable:
+
+   * fallback to AABB planes
+
+### Target bounds mode = Midpoint
+
+* Only one point is tested.
+* Partial is impossible → force `IsPartial=false`
+* UI should disable partial-related toggles **or** logic should ignore them.
+
+---
+
+## 4) Immediate fixes required even before “real mesh accurate”
+
+These two fixes should be done first because they remove false positives and stabilize the engine:
+
+### Fix #1 — Make bbox fallback planes always valid
+
+Update `BuildPlanes(vertices, bbox)` so it **only** builds triangle planes when it’s actually a triangle list:
+
+* If `vertices.Count % 3 != 0` → treat as “not triangles”
+* return AABB planes (6 planes) when `bbox` exists
+
+This prevents the “2 random planes from bbox corners” bug.
+
+### Fix #2 — Stop pretending triangles define a convex volume
+
+Even after triangle extraction exists, you must not use “all triangle planes” as a convex half-space set for mesh accurate.
+
+* Use **ray casting** (point-in-mesh) for MeshAccurate.
+* Reserve plane sets for convex bounds modes (AABB/OBB/k‑DOP/hull).
+
+---
+
+## 5) Codex-ready change request (paste this verbatim)
+
+Here is the prompt to paste into Codex. It’s written as an implementation task with acceptance criteria.
+
+---
+
+### CODEx PROMPT: “Make Space Mapper Mesh Accurate actually work (triangles + point-in-mesh + correct fallback)”
+
+You are working in the MicroEng Navisworks plugin, Space Mapper. The UI exposes a “Mesh accurate (holes/voids)” zone containment option and higher-order bounds types (Hull/OBB/k‑DOP), but current runtime behavior still tags elements as if zones were AABB because triangle extraction / containment isn’t implemented or isn’t wired correctly.
+
+Goal: Implement true mesh-based point containment for zones (handles holes), with robust fallbacks to bounds-based methods, and ensure target “Midpoint” mode behaves as inside/outside only.
+
+Work in these files (and add new ones if needed):
+
+* SpaceMapperGeometry.cs
+* SpaceMapperEngines.cs
+* SpaceMapperService.cs
+* SpaceMapperModels.cs (must be consistent with SpaceMapperRunReportWriter.cs fields)
+* SpaceMapperRunReportWriter.cs (add diagnostics if helpful)
+
+Tasks:
+
+1. Fix invalid fallback planes:
+
+* In GeometryMath.BuildPlanes(vertices, bbox):
+
+  * Only treat `vertices` as triangles if `vertices.Count % 3 == 0`.
+  * Otherwise, return AABB planes from bbox (6 planes).
+  * Never build “triangle planes” from bbox corner lists.
+
+2. Implement real zone triangle extraction (COM):
+
+* Implement GeometryExtractor.ExtractVertices(ModelItem item) using Navisworks COM geometry (GenerateSimplePrimitives callback).
+* Must return a flat list of Vector3D triangle vertices where every 3 vertices = 1 triangle.
+* If extraction fails, return empty list and log once per zone.
+
+Threading:
+
+* COM geometry extraction must run on the Navisworks main/UI thread. Implement a UI-thread invoke mechanism (Dispatcher/SynchronizationContext captured from SpaceMapperControl) so ExtractZoneGeometry can safely call COM extraction.
+* Extract triangles only for zones when ZoneContainmentEngine == MeshAccurate (do NOT extract triangles for every target in normal runs).
+
+Caching:
+
+* Geometry cache keys must include the “geometry mode” so switching from Bounds->MeshAccurate does not reuse cached bbox-only geometry.
+* Add GeometryExtractor.ClearCache() and call it when processing settings that affect geometry mode change.
+
+3. Add mesh data to ZoneGeometry:
+
+* Extend ZoneGeometry to include:
+
+  * `List<Vector3D> TriangleVertices` (or triangle structs)
+  * `bool HasTriangleMesh`
+  * optionally triangle count
+* Keep existing BoundingBox and Planes for bounds-based modes.
+
+4. Implement MeshAccurate containment:
+
+* Add a point-in-mesh test function (ray casting odd/even) using triangle vertices:
+
+  * Use Möller–Trumbore ray-triangle intersection.
+  * Use epsilon handling to avoid edge/vertex double counts (jitter ray direction slightly if needed).
+* For performance, build a simple per-zone triangle BVH/AABB tree (optional but preferred). If not implemented immediately, at least cull triangles using the zone AABB before testing.
+* “MeshAccurate” should:
+
+  * use point-in-mesh for each target sample point
+  * support holes/voids correctly
+  * fallback to bounds-based test if `HasTriangleMesh == false`
+
+5. Target midpoint mode:
+
+* When TargetBoundsMode == Midpoint:
+
+  * sample exactly one point (BoundingBox center OR chosen midpoint mode)
+  * classification returns only contained/not-contained; partial must be false
+  * ensure downstream code does not treat this as partial
+* Make sure the door example scenario is correct: midpoint outside zone mesh => not tagged.
+
+6. Ensure service + engine wiring:
+
+* SpaceMapperService must construct dataset zones with both:
+
+  * bounds representation (AABB planes/hull planes, etc)
+  * mesh representation (triangles) when requested
+* CpuIntersectionEngine must choose narrow-phase algorithm based on settings.ZoneContainmentEngine and bounds modes.
+
+7. Add diagnostics to the run report:
+
+* In SpaceMapperRunReportWriter, include:
+
+  * Zones with triangles count
+  * Zones fallback-to-bounds count
+  * Targets evaluated by mesh vs bounds
+  * Any errors encountered during extraction
+    This is critical for verifying correctness and for AI debugging from a single report.
+
+Acceptance criteria:
+
+* Selecting “Mesh accurate (holes/voids)” causes zones to be tested by mesh point containment when triangles exist.
+* If triangles don’t exist, the run clearly reports fallback to bounds and behaves like bounds mode.
+* Bounding-box vertices never produce “2-plane” invalid plane sets.
+* With Target=Midpoint mode enabled, partial tagging is impossible and midpoint-outside does not get assigned a zone.
+
+Deliver:
+
+* Working implementation, builds clean.
+* Update or reconcile SpaceMapperModels so it matches the fields referenced by SpaceMapperRunReportWriter and the Step 3 UI.
+* Include notes in code comments about any Navisworks COM/thread constraints.
+
+---
+
+## 6) What I’d expect after this change (your door case)
+
+Once triangle extraction + point-in-mesh is really used for zones:
+
+* A door whose midpoint lies inside the *zone’s AABB* but outside the *zone’s true mesh* will **not** be tagged when:
+
+  * ZoneContainmentEngine = MeshAccurate
+  * TargetBoundsMode = Midpoint
+
+If it still tags, the report should immediately show whether you fell back to bounds (e.g., “Triangles missing, fallback to AABB”).
+
+---
+
+If you want, paste back the next comparison report (`SpaceMapper_Run_*.md`) after Codex implements the above, and I’ll sanity-check the diagnostics (mesh usage counts, fallback counts, and whether the mode actually switched).

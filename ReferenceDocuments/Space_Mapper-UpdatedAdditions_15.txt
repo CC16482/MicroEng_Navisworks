@@ -1,0 +1,250 @@
+According to a document from **2026-01-02**, your **UI is behaving as coded**, but the **backend math is not doing what the UI labels imply**, so “Mesh accurate (holes/voids)” is currently *functionally falling back to AABB* in the scenario you showed.
+
+## Why the door is still getting the zone name (confirmed in your latest files)
+
+### 1) “Mesh accurate” currently does **not** switch containment to a real mesh test
+
+In the latest `SpaceMapperEngines.cs`, the point containment path ultimately calls `ZoneContainsPoint(...)`, and that method **only chooses between “planes” vs “AABB”** based on `zoneBoundsMode`—it does **not** consider `ZoneContainmentEngine` at all. 
+
+So even when the UI says *Mesh accurate*, the containment test still resolves to:
+
+* “Planes” if `zoneBoundsMode != Aabb` **and** `zone.Planes` exists
+* Otherwise **AABB** containment
+
+That is the exact behavior you’re observing: the target midpoint can be outside the visible zone mesh but still inside the **zone bounding box**, so it gets tagged.
+
+### 2) Your zone “planes” are currently just **bbox planes**, because vertex extraction is still a stub
+
+In `SpaceMapperGeometry.cs`, `GeometryExtractor.ExtractVertices(...)` is literally a TODO stub returning an empty list , and `BuildPlanes(...)` explicitly falls back to **axis-aligned bbox planes** when it doesn’t receive triangle vertices.
+
+So selecting “Hull” (or OBB/k‑DOP) does **not** currently yield any non-AABB containment planes, because there is no real mesh/triangle input.
+
+### 3) The UI already forces midpoint + disables partial (good), but the zone test is still AABB
+
+Your latest `SpaceMapperControl.xaml.cs` correctly:
+
+* forces `TargetBoundsMode = Midpoint` when engine is MeshAccurate 
+* forces `TreatPartialAsContained=false` and `TagPartialSeparately=false` when midpoint is used 
+* disables the target slider and partial toggles in UI state transitions 
+
+And your hint text claims:
+
+> “Mesh accurate uses target point containment and falls back to bounds when solids are unavailable.”
+
+That intent is correct—but the mesh/solid containment is not implemented in the engine yet.
+
+## Answer to “does mesh accurate work on AABB?”
+
+Conceptually, **yes**: “Mesh accurate” can (and should) still use **AABB as a broad-phase/culling and fallback**, while the **final containment** is done via the mesh.
+
+But in your current codebase, *because*:
+
+* mesh extraction is stubbed 
+* mesh accurate doesn’t select a mesh containment algorithm 
+
+…it effectively behaves like **AABB-only** in many cases.
+
+## What to tell Codex to implement so the UI works as intended
+
+You asked for instructions/prompt for Codex to make the interface true to its labels. The key is:
+
+1. **Extract real triangle mesh data** for zones (and optionally targets)
+2. Add a **real point-in-mesh containment test** for MeshAccurate
+3. Wire `ZoneContainmentEngine.MeshAccurate` into the engine’s decision path
+4. Keep your existing fallback behavior for when mesh isn’t available
+
+Below is a Codex-ready implementation brief.
+
+---
+
+# Codex prompt: Implement true mesh containment for MeshAccurate and real mesh extraction
+
+## Goal / acceptance criteria
+
+When **Zone Containment Engine = Mesh accurate (holes/voids)**:
+
+* Use **target point containment** (midpoint/bottom midpoint per UI) against the **actual zone triangle mesh**.
+* Correctly handle **holes/voids** (i.e., do not treat a donut-shaped zone as filled).
+* If a zone mesh cannot be extracted or is invalid, **fallback to bounds containment** (existing planes/AABB behavior).
+* The “door midpoint outside zone” case should no longer be assigned that zone.
+
+## Files to change
+
+* `SpaceMapperGeometry.cs`
+* `SpaceMapperModels.cs` (ZoneGeometry/CachedGeometry additions)
+* `SpaceMapperEngines.cs` (wire MeshAccurate into ZoneContainsPoint/classification)
+* (Optional) `SpaceMapperComparisonRunner.cs` (add diagnostics counters)
+
+---
+
+## Step 1 — Extend geometry models to carry mesh triangles
+
+### In `SpaceMapperModels.cs`:
+
+Add mesh fields to `ZoneGeometry` and cache type:
+
+* In `CachedGeometry` add:
+
+  * `List<Vector3D> TriangleVertices` (flattened triplets: v0,v1,v2 …)
+  * `int TriangleCount`
+  * `bool HasTriangleMesh`
+
+* In `ZoneGeometry` add:
+
+  * `IReadOnlyList<Vector3D> TriangleVertices`
+  * `int TriangleCount`
+  * `bool HasTriangleMesh`
+
+Keep existing `Vertices` if you still want it for future OBB/kDOP/hull work, but **do not rely on plane-halfspace tests for “mesh accurate holes/voids”.**
+
+---
+
+## Step 2 — Implement real triangle extraction in `GeometryExtractor.ExtractVertices`
+
+### In `SpaceMapperGeometry.cs`:
+
+Replace the stub `ExtractVertices(ModelItem)`  with a working implementation using Navisworks COM geometry:
+
+* Use COM fragment iteration and `GenerateSimplePrimitives` to collect triangle vertices.
+* Convert fragment-local coords to world coords using `frag.GetLocalToWorldMatrix()` (critical).
+
+Implementation approach (pattern taken from known Navisworks COM geometry extraction samples using `InwOaPath3 -> InwOaFragment3 -> GenerateSimplePrimitives`).
+
+### Required constraints
+
+* This extraction must run on the **Navisworks UI thread** (COM + fragments are not safe to call from worker threads).
+* Return vertices as **world coordinates**.
+
+### Minimal extraction outline
+
+* Build a COM selection for the item:
+
+  * `var selection = ComApiBridge.ToInwOpSelection(new ModelItemCollection { item });`
+* For each `path` in `selection.Paths()`
+* For each `frag` in `path.Fragments()`
+
+  * get `localToWorld = frag.GetLocalToWorldMatrix()`
+  * call `frag.GenerateSimplePrimitives(nwEVertexProperty.eNORMAL, callback)`
+  * callback `Triangle(v1,v2,v3)` => transform coords => append to list
+
+Store the result in `CachedGeometry.TriangleVertices` and set `HasTriangleMesh`.
+
+### Update `BuildGeometry(...)`
+
+Currently `BuildGeometry` uses `ExtractVertices` and then `BuildPlanes(...)` fallback. 
+Update it so:
+
+* If triangle vertices exist (`count >= 3` and `count % 3 == 0`), store them and mark `HasTriangleMesh = true`.
+* Keep planes generation for **bounds modes** (fast containment). But don’t pretend those planes represent holes/voids.
+
+---
+
+## Step 3 — Add true “point in closed mesh” containment for MeshAccurate
+
+### In `SpaceMapperGeometry.cs` inside `GeometryMath`
+
+Add:
+
+* `static bool IsInsideMesh(IReadOnlyList<Vector3D> triVerts, Vector3D p)`
+
+  * Use ray casting (even/odd rule) with a robust ray-triangle intersection (Möller–Trumbore).
+  * For performance:
+
+    * Early reject with mesh AABB
+    * Optionally build an AABB tree later (but start with brute force correctness)
+
+This is the essential piece that actually handles holes properly (ray parity will flip when entering/exiting solids).
+
+Fallback conditions:
+
+* If mesh is empty, not divisible by 3, or fails validity checks → return “unknown” and let caller fallback to bounds.
+
+---
+
+## Step 4 — Wire containment engine into the CPU engine classification
+
+### In `SpaceMapperEngines.cs`
+
+You already resolve:
+
+* `containmentEngine = ResolveZoneContainmentEngine(settings)` 
+* force midpoint mode when MeshAccurate 
+
+But containment currently ignores `containmentEngine`. Fix this by:
+
+1. Update `ZoneContainsPoint(...)` signature to accept `SpaceMapperZoneContainmentEngine containmentEngine`.
+
+2. In `ZoneContainsPoint`, implement:
+
+* If `containmentEngine == MeshAccurate` AND `zone.HasTriangleMesh`:
+
+  * return `GeometryMath.IsInsideMesh(zone.TriangleVertices, new Vector3D(x,y,z))`
+* else:
+
+  * existing logic:
+
+    * planes if zoneBoundsMode != Aabb and planes exist
+    * else AABB
+
+This will make MeshAccurate do what the UI promises.
+
+3. Thread `containmentEngine` into call sites:
+
+* Wherever `ZoneContainsPoint(...)` is called (point-based classification), pass the resolved engine.
+
+---
+
+## Step 5 — (Optional but recommended) Make “Most specific wins” use mesh volume when available
+
+Right now “most specific” compares `candidate.Volume`, which is derived from AABB volume in the engine’s bookkeeping. 
+
+For true correctness with holes, compute a mesh volume (if the mesh is closed) and store it on `ZoneGeometry`. Then prefer:
+
+* `ZoneGeometry.MeshVolume` when valid
+* else AABB volume
+
+This improves the tie-breaker in the “room with holes / nested rooms” scenario.
+
+---
+
+## Step 6 — Add diagnostics so your compare report proves it’s working
+
+Update `SpaceMapperComparisonRunner` to include:
+
+* `ZonesWithMesh / TotalZones`
+* `AvgTrianglesPerZone`
+* `MeshFallbackCount` (how many times MeshAccurate had to fallback to bounds)
+* Timing for:
+
+  * mesh extraction stage
+  * mesh containment stage
+
+This will help you (and me/AI) validate that “MeshAccurate” is truly active and not silently falling back.
+
+---
+
+## Threading requirement (do not skip)
+
+Because COM fragment geometry extraction must run on the UI thread, implement either:
+
+**Option A (simplest):**
+Pre-extract all zone meshes on the UI thread before starting the parallel classification loops, while showing your progress UI.
+
+**Option B (more complex):**
+Allow background run, but marshal only the extraction calls to the Dispatcher and cache results; avoid interleaving heavy COM calls while threads are running.
+
+Given your new run progress host exists already (good) , Option A is usually the best first implementation.
+
+---
+
+## One important reality check
+
+Even after you implement triangle extraction, **do not** try to represent “holes/voids” via the existing plane-halfspace `IsInside(planes, point)` logic. That plane test is fundamentally a convex halfspace intersection approach; it will not correctly represent general concave solids with voids. Your UI text specifically promises holes/voids correctness , so you need a mesh containment test (ray cast / winding number / voxelization).
+
+---
+
+If you want, paste back (or upload) your Codex diff after it implements the above and I’ll sanity-check:
+
+* whether the mesh vertices are world-correct (transform applied),
+* whether the engine is truly using `MeshAccurate`,
+* and whether any remaining “wrong tags” are now coming from **mesh quality issues** (open meshes, non-manifold solids) vs your algorithm.

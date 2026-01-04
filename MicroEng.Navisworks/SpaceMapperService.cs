@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Globalization;
 using System.Threading;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using Autodesk.Navisworks.Api;
 using MicroEng.Navisworks.SpaceMapper.Estimation;
+using MicroEng.Navisworks.SpaceMapper.Geometry;
 using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
 using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
 
@@ -29,6 +31,7 @@ namespace MicroEng.Navisworks
         public SpaceMapperRunStats Stats { get; set; } = new();
         public List<ZoneTargetIntersection> Intersections { get; set; } = new();
         public string Message { get; set; }
+        public string ReportPath { get; set; }
     }
 
     internal sealed class SpaceMapperWritebackResult
@@ -66,6 +69,9 @@ namespace MicroEng.Navisworks
         public Dictionary<string, List<SpaceMapperTargetRule>> TargetsByRule { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public TimeSpan ResolveTime { get; set; }
         public TimeSpan BuildGeometryTime { get; set; }
+        public int ZonesWithMesh { get; set; }
+        public int ZonesMeshFallback { get; set; }
+        public int MeshExtractionErrors { get; set; }
     }
 
     internal class SpaceMapperService
@@ -73,120 +79,333 @@ namespace MicroEng.Navisworks
         private readonly Action<string> _log;
         private const string PackedWritebackPropertyName = "SpaceMapperPacked";
         private const string WritebackSignaturePropertyName = "SpaceMapperSignature";
+        private const int MaxSequenceOutputsPerMapping = 8;
+        private const string ZoneContainmentPercentPropertyName = "Zone Containment %";
+        private const double ContainmentFullTolerance = 1e-6;
 
         public SpaceMapperService(Action<string> log)
         {
             _log = log;
         }
 
-        public SpaceMapperRunResult Run(SpaceMapperRequest request, SpaceMapperPreflightCache preflightCache = null, CancellationToken token = default)
+        public SpaceMapperRunResult RunWithProgress(
+            SpaceMapperRequest request,
+            SpaceMapperPreflightCache preflightCache,
+            SpaceMapperRunProgressState runProgress,
+            CancellationToken token = default)
         {
+            return RunInternal(request, preflightCache, token, runProgress);
+        }
+
+        public SpaceMapperRunResult Run(
+            SpaceMapperRequest request,
+            SpaceMapperPreflightCache preflightCache = null,
+            CancellationToken token = default)
+        {
+            return RunInternal(request, preflightCache, token, null);
+        }
+
+        private SpaceMapperRunResult RunInternal(
+            SpaceMapperRequest request,
+            SpaceMapperPreflightCache preflightCache,
+            CancellationToken token,
+            SpaceMapperRunProgressState runProgress)
+        {
+            runProgress?.Start();
+            runProgress?.SetStage(SpaceMapperRunStage.ResolvingInputs, "Resolving zones and targets...");
+
             var sw = Stopwatch.StartNew();
             var result = new SpaceMapperRunResult();
             var stats = new SpaceMapperRunStats();
-            var doc = Application.ActiveDocument;
-            if (doc == null)
-            {
-                result.Message = "No active document.";
-                return result;
-            }
-
-            var session = GetSession(request.ScraperProfileName);
-            var requiresSession = request.ZoneSource == ZoneSourceType.DataScraperZones;
-            if (requiresSession && session == null)
-            {
-                result.Message = $"No Data Scraper sessions found for profile '{request.ScraperProfileName ?? "Default"}'.";
-                return result;
-            }
-
-            if (session != null)
-            {
-                DataScraperCache.LastSession = session;
-            }
-
-            var resolved = ResolveData(request, doc, session);
-            stats.ResolveTime = resolved.ResolveTime;
-
-            if (!resolved.ZoneModels.Any())
-            {
-                result.Message = "No zones found.";
-                return result;
-            }
-
-            if (!resolved.TargetModels.Any())
-            {
-                result.Message = "No targets found for the selected rules.";
-                return result;
-            }
-
-            var cacheToUse = TryGetReusablePreflightCache(request, preflightCache, resolved.TargetModels);
-            var dataset = BuildGeometryData(resolved, request.ProcessingSettings, buildTargetGeometry: cacheToUse == null, token);
-            stats.BuildGeometryTime = dataset.BuildGeometryTime;
-
-            if (!dataset.Zones.Any())
-            {
-                result.Message = "No zones found.";
-                return result;
-            }
-
-            if (cacheToUse == null && !dataset.TargetsForEngine.Any())
-            {
-                result.Message = "No targets with bounding boxes found.";
-                return result;
-            }
-
-            var engine = SpaceMapperEngineFactory.Create(request.ProcessingSettings.ProcessingMode);
-            var diagnostics = new SpaceMapperEngineDiagnostics();
-            var intersections = engine.ComputeIntersections(dataset.Zones, dataset.TargetsForEngine, request.ProcessingSettings, cacheToUse, diagnostics, null, token)
-                ?? new List<ZoneTargetIntersection>();
-            result.Intersections = intersections.ToList();
-
-            stats.ZonesProcessed = dataset.Zones.Count;
-            stats.TargetsProcessed = cacheToUse?.TargetKeys?.Length ?? dataset.TargetsForEngine.Count;
-            stats.ModeUsed = engine.Mode.ToString();
-            stats.PresetUsed = diagnostics.PresetUsed;
-            stats.TraversalUsed = diagnostics.TraversalUsed;
-            stats.CandidatePairs = diagnostics.CandidatePairs;
-            stats.AvgCandidatesPerZone = diagnostics.AvgCandidatesPerZone;
-            stats.MaxCandidatesPerZone = diagnostics.MaxCandidatesPerZone;
-            stats.AvgCandidatesPerTarget = diagnostics.AvgCandidatesPerTarget;
-            stats.MaxCandidatesPerTarget = diagnostics.MaxCandidatesPerTarget;
-            stats.UsedPreflightIndex = diagnostics.UsedPreflightIndex;
-            stats.BuildIndexTime = diagnostics.BuildIndexTime;
-            stats.CandidateQueryTime = diagnostics.CandidateQueryTime;
-            stats.NarrowPhaseTime = diagnostics.NarrowPhaseTime;
-
-            var writeback = ExecuteWriteback(
-                dataset,
-                request.ProcessingSettings,
-                request.Mappings,
-                session,
-                intersections,
-                writeToModel: true,
-                token);
-
-            stats.ContainedTagged = writeback.ContainedTagged;
-            stats.PartialTagged = writeback.PartialTagged;
-            stats.MultiZoneTagged = writeback.MultiZoneTagged;
-            stats.Skipped = writeback.Skipped;
-            stats.SkippedUnchanged = writeback.SkippedUnchanged;
-            stats.WritesPerformed = writeback.WritesPerformed;
-            stats.WritebackTargetsWritten = writeback.TargetsWritten;
-            stats.WritebackCategoriesWritten = writeback.CategoriesWritten;
-            stats.WritebackPropertiesWritten = writeback.PropertiesWritten;
-            stats.AvgMsPerCategoryWrite = writeback.AvgMsPerCategoryWrite;
-            stats.AvgMsPerTargetWrite = writeback.AvgMsPerTargetWrite;
-            stats.WritebackStrategy = writeback.StrategyUsed;
-            stats.WriteBackTime = writeback.Elapsed;
-            stats.ZoneSummaries = writeback.ZoneSummaries;
-
             result.Stats = stats;
-            sw.Stop();
-            result.Stats.Elapsed = sw.Elapsed;
-            result.Message = $"Space Mapper: {stats.ZonesProcessed} zones, {stats.TargetsProcessed} targets, {stats.ContainedTagged} contained, {stats.PartialTagged} partial. Mode={stats.ModeUsed}.";
-            _log?.Invoke(result.Message);
-            _log?.Invoke($"SpaceMapper Timings: resolve {stats.ResolveTime.TotalMilliseconds:0}ms, build {stats.BuildGeometryTime.TotalMilliseconds:0}ms, index {stats.BuildIndexTime.TotalMilliseconds:0}ms, candidates {stats.CandidateQueryTime.TotalMilliseconds:0}ms, narrow {stats.NarrowPhaseTime.TotalMilliseconds:0}ms, write {stats.WriteBackTime.TotalMilliseconds:0}ms");
-            return result;
+            SpaceMapperResolvedData resolved = null;
+            SpaceMapperComputeDataset dataset = null;
+            SpaceMapperRunReportWriter.SpaceMapperLiveReportCache liveReport = null;
+            Timer liveTimer = null;
+            var liveInterval = TimeSpan.FromSeconds(10);
+            var liveWriteGate = 0;
+
+            void WriteLiveReportSnapshot()
+            {
+                if (liveReport == null)
+                {
+                    return;
+                }
+
+                if (Interlocked.Exchange(ref liveWriteGate, 1) == 1)
+                {
+                    return;
+                }
+
+                try
+                {
+                    SpaceMapperRunReportWriter.TryWriteLiveReport(
+                        liveReport,
+                        request,
+                        resolved,
+                        dataset,
+                        result,
+                        runProgress);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref liveWriteGate, 0);
+                }
+            }
+
+            try
+            {
+                if (runProgress != null)
+                {
+                    liveReport = SpaceMapperRunReportWriter.CreateLiveReportCache(request);
+                    if (!string.IsNullOrWhiteSpace(liveReport?.ReportPath))
+                    {
+                        _log?.Invoke($"SpaceMapper live report: {liveReport.ReportPath}");
+                    }
+                    WriteLiveReportSnapshot();
+                    liveTimer = new Timer(_ => WriteLiveReportSnapshot(), null, liveInterval, liveInterval);
+                }
+
+                var doc = Application.ActiveDocument;
+                if (doc == null)
+                {
+                    result.Message = "No active document.";
+                    runProgress?.MarkFailed(new InvalidOperationException(result.Message));
+                    return result;
+                }
+
+                var session = GetSession(request.ScraperProfileName);
+                var requiresSession = request.ZoneSource == ZoneSourceType.DataScraperZones;
+                if (requiresSession && session == null)
+                {
+                    result.Message = $"No Data Scraper sessions found for profile '{request.ScraperProfileName ?? "Default"}'.";
+                    runProgress?.MarkFailed(new InvalidOperationException(result.Message));
+                    return result;
+                }
+
+                if (session != null)
+                {
+                    DataScraperCache.LastSession = session;
+                }
+
+                resolved = ResolveData(request, doc, session);
+                stats.ResolveTime = resolved.ResolveTime;
+                runProgress?.SetTotals(resolved.ZoneModels.Count, resolved.TargetModels.Count);
+
+                if (!resolved.ZoneModels.Any())
+                {
+                    result.Message = "No zones found.";
+                    runProgress?.MarkFailed(new InvalidOperationException(result.Message));
+                    return result;
+                }
+
+                if (!resolved.TargetModels.Any())
+                {
+                    result.Message = "No targets found for the selected rules.";
+                    runProgress?.MarkFailed(new InvalidOperationException(result.Message));
+                    return result;
+                }
+
+                runProgress?.SetStage(SpaceMapperRunStage.ExtractingGeometry, "Preparing geometry...");
+
+                var cacheToUse = TryGetReusablePreflightCache(request, preflightCache, resolved.TargetModels);
+                dataset = BuildGeometryData(
+                    resolved,
+                    request.ProcessingSettings,
+                    buildTargetGeometry: cacheToUse == null,
+                    token,
+                    runProgress);
+                stats.BuildGeometryTime = dataset.BuildGeometryTime;
+
+                if (!dataset.Zones.Any())
+                {
+                    result.Message = "No zones found.";
+                    runProgress?.MarkFailed(new InvalidOperationException(result.Message));
+                    return result;
+                }
+
+                if (cacheToUse == null && !dataset.TargetsForEngine.Any())
+                {
+                    result.Message = "No targets with bounding boxes found.";
+                    runProgress?.MarkFailed(new InvalidOperationException(result.Message));
+                    return result;
+                }
+
+                runProgress?.SetStage(SpaceMapperRunStage.BuildingIndex, "Building spatial index...");
+
+                var engine = SpaceMapperEngineFactory.Create(request.ProcessingSettings.ProcessingMode);
+                var diagnostics = new SpaceMapperEngineDiagnostics();
+                var intersections = engine.ComputeIntersections(
+                        dataset.Zones,
+                        dataset.TargetsForEngine,
+                        request.ProcessingSettings,
+                        cacheToUse,
+                        diagnostics,
+                        null,
+                        token,
+                        runProgress)
+                    ?? new List<ZoneTargetIntersection>();
+                result.Intersections = intersections.ToList();
+
+                stats.ZonesProcessed = dataset.Zones.Count;
+                stats.TargetsProcessed = cacheToUse?.TargetKeys?.Length ?? dataset.TargetsForEngine.Count;
+                stats.ZonesWithMesh = dataset.ZonesWithMesh;
+                stats.ZonesMeshFallback = dataset.ZonesMeshFallback;
+                stats.MeshExtractionErrors = dataset.MeshExtractionErrors;
+                stats.ModeUsed = engine.Mode.ToString();
+                stats.PresetUsed = diagnostics.PresetUsed;
+                stats.TraversalUsed = diagnostics.TraversalUsed;
+                stats.CandidatePairs = diagnostics.CandidatePairs;
+                stats.AvgCandidatesPerZone = diagnostics.AvgCandidatesPerZone;
+                stats.MaxCandidatesPerZone = diagnostics.MaxCandidatesPerZone;
+                stats.AvgCandidatesPerTarget = diagnostics.AvgCandidatesPerTarget;
+                stats.MaxCandidatesPerTarget = diagnostics.MaxCandidatesPerTarget;
+                stats.MeshPointTests = diagnostics.MeshPointTests;
+                stats.BoundsPointTests = diagnostics.BoundsPointTests;
+                stats.MeshFallbackPointTests = diagnostics.MeshFallbackPointTests;
+                stats.GpuBackend = diagnostics.GpuBackend;
+                stats.GpuInitFailureReason = diagnostics.GpuInitFailureReason;
+                stats.GpuZonesProcessed = diagnostics.GpuZonesProcessed;
+                stats.GpuPointsTested = diagnostics.GpuPointsTested;
+                stats.GpuTrianglesTested = diagnostics.GpuTrianglesTested;
+                stats.GpuDispatchTime = diagnostics.GpuDispatchTime;
+                stats.GpuReadbackTime = diagnostics.GpuReadbackTime;
+                stats.GpuAdapterName = diagnostics.GpuAdapterName;
+                stats.GpuAdapterLuid = diagnostics.GpuAdapterLuid;
+                stats.GpuVendorId = diagnostics.GpuVendorId;
+                stats.GpuDeviceId = diagnostics.GpuDeviceId;
+                stats.GpuSubSysId = diagnostics.GpuSubSysId;
+                stats.GpuRevision = diagnostics.GpuRevision;
+                stats.GpuDedicatedVideoMemory = diagnostics.GpuDedicatedVideoMemory;
+                stats.GpuDedicatedSystemMemory = diagnostics.GpuDedicatedSystemMemory;
+                stats.GpuSharedSystemMemory = diagnostics.GpuSharedSystemMemory;
+                stats.GpuFeatureLevel = diagnostics.GpuFeatureLevel;
+                stats.GpuPointThreshold = diagnostics.GpuPointThreshold;
+                stats.GpuSamplePointsPerTarget = diagnostics.GpuSamplePointsPerTarget;
+                stats.GpuZonesEligible = diagnostics.GpuZonesEligible;
+                stats.GpuZonesSkippedNoMesh = diagnostics.GpuZonesSkippedNoMesh;
+                stats.GpuZonesSkippedMissingTriangles = diagnostics.GpuZonesSkippedMissingTriangles;
+                stats.GpuZonesSkippedOpenMesh = diagnostics.GpuZonesSkippedOpenMesh;
+                stats.GpuZonesSkippedLowPoints = diagnostics.GpuZonesSkippedLowPoints;
+                stats.GpuUncertainPoints = diagnostics.GpuUncertainPoints;
+                stats.GpuMaxTrianglesPerZone = diagnostics.GpuMaxTrianglesPerZone;
+                stats.GpuMaxPointsPerZone = diagnostics.GpuMaxPointsPerZone;
+                stats.GpuOpenMeshZonesEligible = diagnostics.GpuOpenMeshZonesEligible;
+                stats.GpuOpenMeshZonesProcessed = diagnostics.GpuOpenMeshZonesProcessed;
+                stats.GpuOpenMeshBoundaryEdgeLimit = diagnostics.GpuOpenMeshBoundaryEdgeLimit;
+                stats.GpuOpenMeshNonManifoldEdgeLimit = diagnostics.GpuOpenMeshNonManifoldEdgeLimit;
+                stats.GpuOpenMeshOutsideTolerance = diagnostics.GpuOpenMeshOutsideTolerance;
+                stats.GpuOpenMeshNudge = diagnostics.GpuOpenMeshNudge;
+                stats.GpuBatchDispatchCount = diagnostics.GpuBatchDispatchCount;
+                stats.GpuBatchMaxZones = diagnostics.GpuBatchMaxZones;
+                stats.GpuBatchMaxPoints = diagnostics.GpuBatchMaxPoints;
+                stats.GpuBatchMaxTriangles = diagnostics.GpuBatchMaxTriangles;
+                stats.GpuBatchAvgZonesPerDispatch = diagnostics.GpuBatchAvgZonesPerDispatch;
+                stats.GpuZoneDiagnostics = diagnostics.GpuZoneDiagnostics ?? new List<SpaceMapperGpuZoneDiagnostic>();
+                stats.SlowZoneThresholdSeconds = diagnostics.SlowZoneThresholdSeconds;
+                stats.SlowZones = diagnostics.SlowZones ?? new List<SpaceMapperSlowZoneInfo>();
+                stats.UsedPreflightIndex = diagnostics.UsedPreflightIndex;
+                stats.BuildIndexTime = diagnostics.BuildIndexTime;
+                stats.CandidateQueryTime = diagnostics.CandidateQueryTime;
+                stats.NarrowPhaseTime = diagnostics.NarrowPhaseTime;
+
+                runProgress?.SetStage(SpaceMapperRunStage.ResolvingAssignments, "Resolving assignments...");
+
+                var writeback = ExecuteWriteback(
+                    dataset,
+                    request.ProcessingSettings,
+                    request.Mappings,
+                    session,
+                    intersections,
+                    writeToModel: true,
+                    token,
+                    runProgress);
+
+                stats.ContainedTagged = writeback.ContainedTagged;
+                stats.PartialTagged = writeback.PartialTagged;
+                stats.MultiZoneTagged = writeback.MultiZoneTagged;
+                stats.Skipped = writeback.Skipped;
+                stats.SkippedUnchanged = writeback.SkippedUnchanged;
+                stats.WritesPerformed = writeback.WritesPerformed;
+                stats.WritebackTargetsWritten = writeback.TargetsWritten;
+                stats.WritebackCategoriesWritten = writeback.CategoriesWritten;
+                stats.WritebackPropertiesWritten = writeback.PropertiesWritten;
+                stats.AvgMsPerCategoryWrite = writeback.AvgMsPerCategoryWrite;
+                stats.AvgMsPerTargetWrite = writeback.AvgMsPerTargetWrite;
+                stats.WritebackStrategy = writeback.StrategyUsed;
+                stats.WriteBackTime = writeback.Elapsed;
+                stats.ZoneSummaries = writeback.ZoneSummaries;
+
+                result.Stats = stats;
+                sw.Stop();
+                result.Stats.Elapsed = sw.Elapsed;
+                result.Message = $"Space Mapper: {stats.ZonesProcessed} zones, {stats.TargetsProcessed} targets, {stats.ContainedTagged} contained, {stats.PartialTagged} partial. Mode={stats.ModeUsed}.";
+                _log?.Invoke(result.Message);
+                _log?.Invoke($"SpaceMapper Timings: resolve {stats.ResolveTime.TotalMilliseconds:0}ms, build {stats.BuildGeometryTime.TotalMilliseconds:0}ms, index {stats.BuildIndexTime.TotalMilliseconds:0}ms, candidates {stats.CandidateQueryTime.TotalMilliseconds:0}ms, narrow {stats.NarrowPhaseTime.TotalMilliseconds:0}ms, write {stats.WriteBackTime.TotalMilliseconds:0}ms");
+
+                result.ReportPath = SpaceMapperRunReportWriter.TryWriteReport(request, resolved, dataset, result, runProgress);
+                if (!string.IsNullOrWhiteSpace(result.ReportPath))
+                {
+                    _log?.Invoke($"SpaceMapper report saved: {result.ReportPath}");
+                }
+
+                runProgress?.SetStage(SpaceMapperRunStage.Finalizing, "Finalizing...");
+                runProgress?.MarkCompleted();
+
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                runProgress?.MarkCancelled();
+                if (runProgress != null)
+                {
+                    stats.ZonesProcessed = Math.Max(stats.ZonesProcessed, runProgress.ZonesProcessed);
+                    stats.TargetsProcessed = Math.Max(stats.TargetsProcessed, runProgress.TargetsProcessed);
+                    stats.WritebackTargetsWritten = Math.Max(stats.WritebackTargetsWritten, runProgress.WriteTargetsProcessed);
+                    stats.CandidatePairs = Math.Max(stats.CandidatePairs, runProgress.CandidatePairs);
+                }
+                result.Stats = stats;
+                sw.Stop();
+                result.Stats.Elapsed = sw.Elapsed;
+                result.Message = "Space Mapper cancelled.";
+                result.ReportPath = SpaceMapperRunReportWriter.TryWriteReport(request, resolved, dataset, result, runProgress);
+                if (!string.IsNullOrWhiteSpace(result.ReportPath))
+                {
+                    _log?.Invoke($"SpaceMapper report saved: {result.ReportPath}");
+                }
+                throw;
+            }
+            catch (Exception ex)
+            {
+                runProgress?.MarkFailed(ex);
+                if (runProgress != null)
+                {
+                    stats.ZonesProcessed = Math.Max(stats.ZonesProcessed, runProgress.ZonesProcessed);
+                    stats.TargetsProcessed = Math.Max(stats.TargetsProcessed, runProgress.TargetsProcessed);
+                    stats.WritebackTargetsWritten = Math.Max(stats.WritebackTargetsWritten, runProgress.WriteTargetsProcessed);
+                    stats.CandidatePairs = Math.Max(stats.CandidatePairs, runProgress.CandidatePairs);
+                }
+                result.Stats = stats;
+                sw.Stop();
+                result.Stats.Elapsed = sw.Elapsed;
+                result.Message = $"Space Mapper failed: {ex.Message}";
+                result.ReportPath = SpaceMapperRunReportWriter.TryWriteReport(request, resolved, dataset, result, runProgress);
+                if (!string.IsNullOrWhiteSpace(result.ReportPath))
+                {
+                    _log?.Invoke($"SpaceMapper report saved: {result.ReportPath}");
+                }
+                throw;
+            }
+            finally
+            {
+                if (liveTimer != null)
+                {
+                    liveTimer.Dispose();
+                    liveTimer = null;
+                }
+
+                WriteLiveReportSnapshot();
+            }
         }
 
         internal static SpaceMapperWritebackResult ExecuteWriteback(
@@ -196,7 +415,8 @@ namespace MicroEng.Navisworks
             ScrapeSession session,
             IEnumerable<ZoneTargetIntersection> intersections,
             bool writeToModel,
-            CancellationToken token)
+            CancellationToken token,
+            SpaceMapperRunProgressState runProgress = null)
         {
             var result = new SpaceMapperWritebackResult();
             if (dataset == null || intersections == null)
@@ -213,16 +433,35 @@ namespace MicroEng.Navisworks
             result.StrategyUsed = strategy;
 
             var zoneLookup = dataset.Zones.ToDictionary(z => z.ZoneId, z => z);
+            var zoneOrderLookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < dataset.Zones.Count; i++)
+            {
+                var zoneId = dataset.Zones[i]?.ZoneId;
+                if (!string.IsNullOrWhiteSpace(zoneId) && !zoneOrderLookup.ContainsKey(zoneId))
+                {
+                    zoneOrderLookup[zoneId] = i;
+                }
+            }
             var targetLookup = dataset.TargetModels.ToDictionary(t => t.ItemKey, t => t);
             var ruleMembership = BuildRuleMembership(dataset.TargetsByRule);
             var zoneValueLookup = new ZoneValueLookup(session);
             var summaryLookup = new Dictionary<string, ZoneSummary>(StringComparer.OrdinalIgnoreCase);
 
+            var intersectionList = intersections as IList<ZoneTargetIntersection> ?? intersections.ToList();
+            var groupedTargets = intersectionList
+                .GroupBy(i => i.TargetItemKey, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            runProgress?.SetStage(SpaceMapperRunStage.WritingProperties, "Writing properties...");
+            runProgress?.SetWriteTotals(groupedTargets.Count);
+
             var sw = Stopwatch.StartNew();
-            foreach (var group in intersections.GroupBy(i => i.TargetItemKey, StringComparer.OrdinalIgnoreCase))
+            foreach (var group in groupedTargets)
             {
                 token.ThrowIfCancellationRequested();
 
+                try
+                {
                 if (!targetLookup.TryGetValue(group.Key, out var tgt)) continue;
                 var rulesForTarget = ruleMembership.TryGetValue(group.Key, out var list) ? list : new List<SpaceMapperTargetRule>();
                 if (!rulesForTarget.Any()) continue;
@@ -236,7 +475,7 @@ namespace MicroEng.Navisworks
 
                 if (!settings.EnableMultipleZones)
                 {
-                    var best = SelectBestIntersection(relevant);
+                    var best = SelectBestIntersection(relevant, settings, zoneLookup, zoneOrderLookup, tgt);
                     relevant = best != null ? new List<ZoneTargetIntersection> { best } : new List<ZoneTargetIntersection>();
                 }
 
@@ -409,6 +648,14 @@ namespace MicroEng.Navisworks
                 {
                     result.TargetsWritten++;
                 }
+                }
+                finally
+                {
+                    if (runProgress != null)
+                    {
+                        runProgress.IncrementWriteProcessed();
+                    }
+                }
             }
 
             sw.Stop();
@@ -448,6 +695,41 @@ namespace MicroEng.Navisworks
             public string Value { get; }
         }
 
+        private static string SequencedPropertyName(string baseName, int index)
+        {
+            return index <= 0 ? baseName : $"{baseName}({index})";
+        }
+
+        private static bool ShouldSequenceBehaviour(
+            IReadOnlyList<ZoneTargetIntersection> relevant,
+            IEnumerable<SpaceMapperMappingDefinition> mappings,
+            SpaceMapperProcessingSettings settings)
+        {
+            if (settings?.EnableMultipleZones != true) return false;
+            if (relevant == null || relevant.Count <= 1) return false;
+
+            return mappings != null && mappings.Any(m => m != null && m.MultiZoneCombineMode == MultiZoneCombineMode.Sequence);
+        }
+
+        private static string FormatPercent(double? fraction)
+        {
+            if (!fraction.HasValue)
+            {
+                return null;
+            }
+
+            var value = fraction.Value;
+            if (double.IsNaN(value) || double.IsInfinity(value))
+            {
+                return null;
+            }
+
+            if (value < 0) value = 0;
+            if (value > 1) value = 1;
+
+            return (value * 100.0).ToString("0.##", CultureInfo.InvariantCulture);
+        }
+
         private static List<WritebackEntry> BuildWritebackEntries(
             IReadOnlyList<ZoneTargetIntersection> relevant,
             IReadOnlyList<SpaceMapperMappingDefinition> mappings,
@@ -457,7 +739,7 @@ namespace MicroEng.Navisworks
         {
             var entries = new List<WritebackEntry>();
 
-            if (settings?.TagPartialSeparately == true)
+            if (settings?.WriteZoneBehaviorProperty == true)
             {
                 var behaviorCategory = settings.ZoneBehaviorCategory;
                 var behaviorProperty = settings.ZoneBehaviorPropertyName;
@@ -467,15 +749,89 @@ namespace MicroEng.Navisworks
                 if (!string.IsNullOrWhiteSpace(behaviorCategory)
                     && !string.IsNullOrWhiteSpace(behaviorProperty))
                 {
-                    var hasPartial = relevant.Any(r => r.IsPartial);
-                    var behaviorValue = hasPartial ? partialValue : containedValue;
-                    if (!string.IsNullOrWhiteSpace(behaviorValue))
+                    if (ShouldSequenceBehaviour(relevant, mappings, settings))
                     {
+                        var count = Math.Min(relevant.Count, MaxSequenceOutputsPerMapping);
+                        for (var i = 0; i < count; i++)
+                        {
+                            var inter = relevant[i];
+                            var behaviorValue = IsPartialForBehavior(inter, settings) ? partialValue : containedValue;
+                            if (string.IsNullOrWhiteSpace(behaviorValue))
+                            {
+                                continue;
+                            }
+
+                            entries.Add(new WritebackEntry
+                            {
+                                CategoryName = behaviorCategory,
+                                PropertyName = SequencedPropertyName(behaviorProperty, i),
+                                Value = behaviorValue,
+                                Mode = WriteMode.Overwrite,
+                                AppendSeparator = string.Empty
+                            });
+                        }
+                    }
+                    else
+                    {
+                        var hasPartial = relevant.Any(r => IsPartialForBehavior(r, settings));
+                        var behaviorValue = hasPartial ? partialValue : containedValue;
+                        if (!string.IsNullOrWhiteSpace(behaviorValue))
+                        {
+                            entries.Add(new WritebackEntry
+                            {
+                                CategoryName = behaviorCategory,
+                                PropertyName = behaviorProperty,
+                                Value = behaviorValue,
+                                Mode = WriteMode.Overwrite,
+                                AppendSeparator = string.Empty
+                            });
+                        }
+                    }
+                }
+            }
+
+            if (settings?.WriteZoneContainmentPercentProperty == true && relevant != null && relevant.Count > 0)
+            {
+                var category = string.IsNullOrWhiteSpace(settings.ZoneBehaviorCategory)
+                    ? "ME_SpaceInfo"
+                    : settings.ZoneBehaviorCategory;
+
+                if (ShouldSequenceBehaviour(relevant, mappings, settings))
+                {
+                    var count = Math.Min(relevant.Count, MaxSequenceOutputsPerMapping);
+                    for (var i = 0; i < count; i++)
+                    {
+                        var value = FormatPercent(relevant[i]?.ContainmentFraction);
+                        if (string.IsNullOrWhiteSpace(value))
+                        {
+                            continue;
+                        }
+
                         entries.Add(new WritebackEntry
                         {
-                            CategoryName = behaviorCategory,
-                            PropertyName = behaviorProperty,
-                            Value = behaviorValue,
+                            CategoryName = category,
+                            PropertyName = SequencedPropertyName(ZoneContainmentPercentPropertyName, i),
+                            Value = value,
+                            Mode = WriteMode.Overwrite,
+                            AppendSeparator = string.Empty
+                        });
+                    }
+                }
+                else
+                {
+                    var values = relevant
+                        .Select(r => FormatPercent(r?.ContainmentFraction))
+                        .Where(v => !string.IsNullOrWhiteSpace(v))
+                        .ToList();
+
+                    if (values.Count > 0)
+                    {
+                        var combined = values.Count == 1 ? values[0] : string.Join(", ", values);
+                        entries.Add(new WritebackEntry
+                        {
+                            CategoryName = category,
+                            PropertyName = ZoneContainmentPercentPropertyName,
+                            Value = combined,
                             Mode = WriteMode.Overwrite,
                             AppendSeparator = string.Empty
                         });
@@ -517,6 +873,37 @@ namespace MicroEng.Navisworks
                     }
                 }
 
+                if (values.Count == 0)
+                {
+                    continue;
+                }
+
+                if (mapping.MultiZoneCombineMode == MultiZoneCombineMode.Sequence
+                    && settings?.EnableMultipleZones == true
+                    && relevant.Count > 1)
+                {
+                    var count = Math.Min(values.Count, MaxSequenceOutputsPerMapping);
+                    for (var i = 0; i < count; i++)
+                    {
+                        var value = values[i] ?? string.Empty;
+                        if (string.IsNullOrWhiteSpace(value))
+                        {
+                            continue;
+                        }
+
+                        entries.Add(new WritebackEntry
+                        {
+                            CategoryName = mapping.TargetCategory,
+                            PropertyName = SequencedPropertyName(mapping.TargetPropertyName, i),
+                            Value = value,
+                            Mode = mapping.WriteMode,
+                            AppendSeparator = mapping.AppendSeparator
+                        });
+                    }
+
+                    continue;
+                }
+
                 var combined = CombineValues(values, mapping.MultiZoneCombineMode, mapping.AppendSeparator);
                 if (string.IsNullOrWhiteSpace(combined))
                 {
@@ -534,6 +921,27 @@ namespace MicroEng.Navisworks
             }
 
             return entries;
+        }
+
+        private static bool IsPartialForBehavior(ZoneTargetIntersection intersection, SpaceMapperProcessingSettings settings)
+        {
+            if (intersection == null)
+            {
+                return false;
+            }
+
+            var mode = settings?.ContainmentCalculationMode ?? SpaceMapperContainmentCalculationMode.Auto;
+            if (mode == SpaceMapperContainmentCalculationMode.Auto)
+            {
+                return intersection.IsPartial;
+            }
+
+            if (intersection.ContainmentFraction.HasValue)
+            {
+                return intersection.ContainmentFraction.Value < 1.0 - ContainmentFullTolerance;
+            }
+
+            return intersection.IsPartial;
         }
 
         private static List<ResolvedWritebackEntry> ResolveWritebackEntries(ModelItem item, IReadOnlyList<WritebackEntry> entries)
@@ -838,6 +1246,19 @@ namespace MicroEng.Navisworks
             var zoneModels = ResolveZones(session, request.ZoneSource, request.ZoneSetName, doc).ToList();
             var targetsByRule = new Dictionary<string, List<SpaceMapperTargetRule>>(StringComparer.OrdinalIgnoreCase);
             var targetModels = ResolveTargets(doc, request.TargetRules, targetsByRule).ToList();
+            var settings = request.ProcessingSettings;
+            if (settings?.ExcludeZonesFromTargets == true && zoneModels.Count > 0 && targetModels.Count > 0)
+            {
+                var zoneKeys = new HashSet<string>(zoneModels.Select(z => z.ItemKey), StringComparer.OrdinalIgnoreCase);
+                if (zoneKeys.Count > 0)
+                {
+                    targetModels = targetModels.Where(t => !zoneKeys.Contains(t.ItemKey)).ToList();
+                    foreach (var key in zoneKeys)
+                    {
+                        targetsByRule.Remove(key);
+                    }
+                }
+            }
             sw.Stop();
 
             return new SpaceMapperResolvedData
@@ -854,48 +1275,100 @@ namespace MicroEng.Navisworks
             SpaceMapperProcessingSettings settings,
             bool buildTargetGeometry,
             CancellationToken token,
+            SpaceMapperRunProgressState runProgress = null,
             bool? forceRequirePlanes = null)
         {
             if (resolved == null) throw new ArgumentNullException(nameof(resolved));
 
             var sw = Stopwatch.StartNew();
             var zones = new List<ZoneGeometry>(resolved.ZoneModels.Count);
-            var requirePlanes = forceRequirePlanes ?? (settings == null || !settings.UseOriginPointOnly);
+            var requirePlanes = forceRequirePlanes ?? false;
+            var useMesh = settings?.ZoneContainmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate;
+            var zonesWithMesh = 0;
+            var zonesMeshFallback = 0;
+            var meshExtractionErrors = 0;
+            var requireTargetTriangles = settings != null
+                && settings.ContainmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
+                && (settings.WriteZoneContainmentPercentProperty || settings.WriteZoneBehaviorProperty);
+            var zoneTotal = resolved.ZoneModels.Count;
+            var targetTotal = resolved.TargetModels.Count;
 
-            foreach (var zoneModel in resolved.ZoneModels)
+            runProgress?.UpdateDetail($"Extracting zones (0/{zoneTotal})...");
+            for (int i = 0; i < resolved.ZoneModels.Count; i++)
             {
                 token.ThrowIfCancellationRequested();
+                var zoneModel = resolved.ZoneModels[i];
+                if (runProgress != null)
+                {
+                    var zoneName = string.IsNullOrWhiteSpace(zoneModel?.DisplayName) ? zoneModel?.ItemKey : zoneModel.DisplayName;
+                    runProgress.UpdateDetail($"Extracting zone {i + 1}/{zoneTotal}: {zoneName}");
+                }
                 var zone = GeometryExtractor.ExtractZoneGeometry(zoneModel.ModelItem, zoneModel.ItemKey, zoneModel.DisplayName, settings);
-                if (zone?.BoundingBox == null)
+                var hasBounds = zone?.BoundingBox != null;
+                var hasPlanes = !requirePlanes || (zone?.Planes != null && zone.Planes.Count > 0);
+
+                if (hasBounds && hasPlanes)
                 {
-                    continue;
+                    zones.Add(zone);
+                    if (zone.HasTriangleMesh)
+                    {
+                        zonesWithMesh++;
+                    }
+                    else if (useMesh)
+                    {
+                        zonesMeshFallback++;
+                    }
+
+                    if (zone.MeshExtractionFailed)
+                    {
+                        meshExtractionErrors++;
+                    }
                 }
 
-                if (requirePlanes && (zone.Planes == null || zone.Planes.Count == 0))
+                if (runProgress != null && ((i & 15) == 0 || i == zoneTotal - 1))
                 {
-                    continue;
+                    runProgress.UpdateZonesProcessed(i + 1);
+                    runProgress.UpdateDetail($"Extracting zones ({i + 1}/{zoneTotal})...");
                 }
-
-                zones.Add(zone);
             }
 
             var targetsForEngine = new List<TargetGeometry>(resolved.TargetModels.Count);
-            if (buildTargetGeometry)
+            if (buildTargetGeometry || requireTargetTriangles == true)
             {
-                foreach (var target in resolved.TargetModels)
+                for (int i = 0; i < resolved.TargetModels.Count; i++)
                 {
                     token.ThrowIfCancellationRequested();
-                    var geom = GeometryExtractor.ExtractTargetGeometry(target.ModelItem, target.ItemKey, target.DisplayName);
-                    if (geom?.BoundingBox == null)
+                    var target = resolved.TargetModels[i];
+                    if (runProgress != null)
                     {
-                        continue;
+                        var targetName = string.IsNullOrWhiteSpace(target?.DisplayName) ? target?.ItemKey : target.DisplayName;
+                        runProgress.UpdateDetail($"Extracting target {i + 1}/{targetTotal}: {targetName}");
                     }
-                    targetsForEngine.Add(geom);
+                    var geom = GeometryExtractor.ExtractTargetGeometry(
+                        target.ModelItem,
+                        target.ItemKey,
+                        target.DisplayName,
+                        extractTriangles: requireTargetTriangles == true);
+                    if (geom?.BoundingBox != null)
+                    {
+                        targetsForEngine.Add(geom);
+                    }
+
+                    if (runProgress != null && ((i & 31) == 0 || i == targetTotal - 1))
+                    {
+                        runProgress.UpdateTargetsProcessed(i + 1);
+                        runProgress.UpdateDetail($"Extracting targets ({i + 1}/{targetTotal})...");
+                    }
                 }
             }
             else
             {
                 targetsForEngine.AddRange(resolved.TargetModels);
+                if (runProgress != null && targetTotal > 0)
+                {
+                    runProgress.UpdateTargetsProcessed(targetTotal);
+                    runProgress.UpdateDetail($"Using cached targets ({targetTotal}/{targetTotal})...");
+                }
             }
 
             sw.Stop();
@@ -908,7 +1381,10 @@ namespace MicroEng.Navisworks
                 TargetModels = resolved.TargetModels,
                 TargetsByRule = resolved.TargetsByRule,
                 ResolveTime = resolved.ResolveTime,
-                BuildGeometryTime = sw.Elapsed
+                BuildGeometryTime = sw.Elapsed,
+                ZonesWithMesh = zonesWithMesh,
+                ZonesMeshFallback = zonesMeshFallback,
+                MeshExtractionErrors = meshExtractionErrors
             };
         }
 
@@ -991,7 +1467,8 @@ namespace MicroEng.Navisworks
                         TargetItemKey = inter.TargetItemKey,
                         IsContained = true,
                         IsPartial = inter.IsPartial,
-                        OverlapVolume = inter.OverlapVolume
+                        OverlapVolume = inter.OverlapVolume,
+                        ContainmentFraction = inter.ContainmentFraction
                     };
                 }
                 else if (partial && allowPartial)
@@ -1001,26 +1478,209 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private static ZoneTargetIntersection SelectBestIntersection(IReadOnlyList<ZoneTargetIntersection> intersections)
+        private struct BestZoneCandidate
+        {
+            public ZoneTargetIntersection Intersection;
+            public int ZoneOrder;
+            public double Volume;
+            public double DistanceSq;
+        }
+
+        private static ZoneTargetIntersection SelectBestIntersection(
+            IReadOnlyList<ZoneTargetIntersection> intersections,
+            SpaceMapperProcessingSettings settings,
+            IReadOnlyDictionary<string, ZoneGeometry> zoneLookup,
+            IReadOnlyDictionary<string, int> zoneOrderLookup,
+            TargetGeometry target)
         {
             if (intersections == null || intersections.Count == 0)
             {
                 return null;
             }
 
-            var bestContained = intersections
-                .Where(i => i.IsContained)
-                .OrderByDescending(i => i.OverlapVolume)
-                .FirstOrDefault();
+            var strategy = settings?.ZoneResolutionStrategy ?? SpaceMapperZoneResolutionStrategy.MostSpecific;
+            var containmentEngine = settings?.ZoneContainmentEngine ?? SpaceMapperZoneContainmentEngine.BoundsFast;
 
-            if (bestContained != null)
+            var hasTargetPoint = TryGetTargetPoint(target, settings, containmentEngine, out var tx, out var ty, out var tz);
+            BestZoneCandidate best = default;
+            var hasBest = false;
+
+            foreach (var inter in intersections)
             {
-                return bestContained;
+                if (inter == null || string.IsNullOrWhiteSpace(inter.ZoneId))
+                {
+                    continue;
+                }
+
+                var candidate = new BestZoneCandidate
+                {
+                    Intersection = inter,
+                    ZoneOrder = zoneOrderLookup != null && zoneOrderLookup.TryGetValue(inter.ZoneId, out var order)
+                        ? order
+                        : int.MaxValue,
+                    Volume = double.PositiveInfinity,
+                    DistanceSq = double.PositiveInfinity
+                };
+
+                if (zoneLookup != null && zoneLookup.TryGetValue(inter.ZoneId, out var zone))
+                {
+                    var bounds = GetZoneQueryBounds(zone, settings);
+                    candidate.Volume = bounds.SizeX * bounds.SizeY * bounds.SizeZ;
+
+                    if (hasTargetPoint)
+                    {
+                        var cx = (bounds.MinX + bounds.MaxX) * 0.5;
+                        var cy = (bounds.MinY + bounds.MaxY) * 0.5;
+                        var cz = (bounds.MinZ + bounds.MaxZ) * 0.5;
+                        var dx = tx - cx;
+                        var dy = ty - cy;
+                        var dz = tz - cz;
+                        candidate.DistanceSq = (dx * dx) + (dy * dy) + (dz * dz);
+                    }
+                }
+
+                if (!hasBest || IsBetterCandidate(candidate, best, strategy))
+                {
+                    best = candidate;
+                    hasBest = true;
+                }
             }
 
-            return intersections
-                .OrderByDescending(i => i.OverlapVolume)
-                .First();
+            return hasBest ? best.Intersection : null;
+        }
+
+        private static bool IsBetterCandidate(
+            in BestZoneCandidate candidate,
+            in BestZoneCandidate current,
+            SpaceMapperZoneResolutionStrategy strategy)
+        {
+            if (candidate.Intersection.IsContained != current.Intersection.IsContained)
+            {
+                return candidate.Intersection.IsContained;
+            }
+
+            switch (strategy)
+            {
+                case SpaceMapperZoneResolutionStrategy.FirstMatch:
+                    return candidate.ZoneOrder < current.ZoneOrder;
+                case SpaceMapperZoneResolutionStrategy.LargestOverlap:
+                    if (candidate.Intersection.OverlapVolume > current.Intersection.OverlapVolume)
+                    {
+                        return true;
+                    }
+                    if (candidate.Intersection.OverlapVolume < current.Intersection.OverlapVolume)
+                    {
+                        return false;
+                    }
+                    break;
+            }
+
+            if (candidate.Volume < current.Volume)
+            {
+                return true;
+            }
+
+            if (candidate.Volume > current.Volume)
+            {
+                return false;
+            }
+
+            if (candidate.DistanceSq < current.DistanceSq)
+            {
+                return true;
+            }
+
+            if (candidate.DistanceSq > current.DistanceSq)
+            {
+                return false;
+            }
+
+            return candidate.ZoneOrder < current.ZoneOrder;
+        }
+
+        private static bool TryGetTargetPoint(
+            TargetGeometry target,
+            SpaceMapperProcessingSettings settings,
+            SpaceMapperZoneContainmentEngine containmentEngine,
+            out double x,
+            out double y,
+            out double z)
+        {
+            x = 0;
+            y = 0;
+            z = 0;
+
+            var bbox = target?.BoundingBox;
+            if (bbox == null)
+            {
+                return false;
+            }
+
+            _ = containmentEngine;
+
+            var min = bbox.Min;
+            var max = bbox.Max;
+            var useBottom = settings?.TargetMidpointMode == SpaceMapperMidpointMode.BoundingBoxBottomCenter;
+            var useMidpoint = (settings?.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+                || (settings?.UseOriginPointOnly == true);
+
+            x = (min.X + max.X) * 0.5;
+            y = (min.Y + max.Y) * 0.5;
+            z = useMidpoint && useBottom
+                ? min.Z
+                : (min.Z + max.Z) * 0.5;
+
+            return true;
+        }
+
+        private static Aabb GetZoneQueryBounds(ZoneGeometry zone, SpaceMapperProcessingSettings settings)
+        {
+            if (zone == null)
+            {
+                return new Aabb(0, 0, 0, 0, 0, 0);
+            }
+
+            var baseBox = zone.RawBoundingBox ?? zone.BoundingBox;
+            if (baseBox == null)
+            {
+                return new Aabb(0, 0, 0, 0, 0, 0);
+            }
+
+            var aabb = ToAabb(baseBox);
+            if (zone.RawBoundingBox == null)
+            {
+                return aabb;
+            }
+
+            return Inflate(aabb, settings);
+        }
+
+        private static Aabb Inflate(Aabb bbox, SpaceMapperProcessingSettings settings)
+        {
+            if (settings == null)
+            {
+                return bbox;
+            }
+
+            var offset = settings.Offset3D;
+            var offsetSides = settings.OffsetSides;
+            var top = settings.OffsetTop;
+            var bottom = settings.OffsetBottom;
+
+            return new Aabb(
+                bbox.MinX - offset - offsetSides,
+                bbox.MinY - offset - offsetSides,
+                bbox.MinZ - offset - bottom,
+                bbox.MaxX + offset + offsetSides,
+                bbox.MaxY + offset + offsetSides,
+                bbox.MaxZ + offset + top);
+        }
+
+        private static Aabb ToAabb(BoundingBox3D bbox)
+        {
+            var min = bbox.Min;
+            var max = bbox.Max;
+            return new Aabb(min.X, min.Y, min.Z, max.X, max.Y, max.Z);
         }
 
         private static string CombineValues(List<string> values, MultiZoneCombineMode mode, string sep)
@@ -1039,6 +1699,8 @@ namespace MicroEng.Navisworks
                 case MultiZoneCombineMode.Average:
                     var nums = values.Select(TryDouble).Where(v => v.HasValue).Select(v => v.Value).ToList();
                     return nums.Any() ? nums.Average().ToString("0.###") : values.First();
+                case MultiZoneCombineMode.Sequence:
+                    return values.First();
                 default:
                     return values.First();
             }

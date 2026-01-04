@@ -1,0 +1,624 @@
+### 1) Is your current GPU implementation “correct” (and is Codex’s code broadly right)?
+
+Yes — conceptually and architecturally it’s a valid, correct approach for accelerating **Mesh Accurate point‑in‑mesh** checks:
+
+* **D3D11PointInMeshGpu.cs** is a proper D3D11 compute wrapper: structured buffers (triangles/points), UAV output, dispatch, staging readback, and an HLSL kernel that does **parity ray casting** (even/odd intersections) per point. The “two rays + mismatch ⇒ uncertain” strategy is a standard robustness trick.
+  The overall structure is sound. 
+
+* **SpaceMapperEngines.cs** is using that wrapper in the right place: only when you’re in **Mesh Accurate** mode, only for candidate sets big enough to justify GPU overhead, and with CPU fallback when GPU can’t be created or a zone isn’t eligible. The GPU path is integrated into your “zone-major” pipeline and still respects the rest of your engine’s rules. 
+
+* Your **benchmark evidence** shows GPU is actually engaging and doing work:
+
+  * CPU run total: **5,359,369 ms**
+  * GPU run total: **3,826,709 ms**
+    That’s ~**28.6% faster overall** on that dataset. The narrow‑phase portion dropped from **3,434,939 ms → 2,319,771 ms** (~**32.5% faster**), which is exactly where GPU should help. 
+
+So: **Codex didn’t produce a “fake GPU”** — it’s real compute on your RTX 5090 (your report shows the adapter correctly), and performance moves in the right direction.
+
+---
+
+### 2) The main “gotchas” / improvements you should make (even before CUDA)
+
+These are the things I would tighten so the current D3D11 backend is maximally reliable and better optimized. None of these are “rewrite the world”.
+
+#### A) Your “GPU dispatch time” metric is misleading (it will often be ~0 ms)
+
+Right now your wrapper measures:
+
+* **Dispatch time** = time to enqueue the dispatch on CPU
+* **Readback time** = time that includes waiting for GPU completion (stall) + map/copy
+
+So “dispatch=0ms” does **not** mean “GPU did no work”; it means “enqueue was fast”. This is expected in D3D11.
+Recommendation:
+
+* Rename the metric to something honest (e.g., **GpuEnqueueMs** and **GpuReadbackMs**) or
+* Add **timestamp queries** (TimestampDisjoint + Timestamp) to get true GPU execution time (optional, but very useful for tuning).
+
+#### B) GPU is only used for 60 zones because your threshold is conservative
+
+Your own report shows:
+
+* Zones eligible (mesh + closed): 229
+* Zones processed on GPU: 60
+* Zones skipped (below point threshold): 169
+
+So the code is behaving as designed: it’s *not* trying to GPU everything.
+
+If your goal is **max speed on a 5090**, you likely want one (or both) of:
+
+1. **Lower the point threshold** (e.g. 512 → 256 or 128) when the user explicitly selects GPU mode
+2. **Batch multiple zones per dispatch** so the overhead amortizes and even small zones benefit
+
+Batching is the “real” win because it’s how you avoid “GPU overhead dominates small workloads”.
+
+#### C) Adapter selection should be explicit (avoid iGPU on laptops)
+
+`new Device(DriverType.Hardware, …)` can pick the “wrong” adapter on multi‑GPU systems. Your current report shows it picked the right card, but don’t rely on that.
+
+Recommendation:
+
+* Enumerate DXGI adapters; prefer NVIDIA + highest dedicated VRAM; create device from that adapter.
+
+#### D) Open / self‑intersecting meshes: your “second chance” logic exists — verify it’s *actually being used*
+
+Your engine code includes:
+
+* Open mesh thresholds and eligibility
+* Point nudge
+* Outside-sample tolerance
+
+But your report format currently doesn’t make it obvious whether those 4 “open mesh” zones were retried on GPU or still skipped. I would add explicit counters/lines into the report such as:
+
+* `Open mesh eligible for GPU: X`
+* `Open mesh processed on GPU: Y`
+* `Open mesh points nudged: Z`
+  So you can see instantly if your “second chance” path is live.
+
+#### E) Biggest practical bottleneck is still writeback, not classification
+
+Even in the GPU run, writeback time is **1,207,304 ms** (~20 minutes).
+
+No GPU backend (D3D11 or CUDA) will eliminate that. If you want the next huge gain, you need to continue attacking:
+
+* “Skip unchanged”
+* Packed writes
+* Minimal UI updates / headless-ish run
+* Fewer COM calls per object (combine property writes, avoid per-property work)
+
+---
+
+### 3) Important clarification: your current “GPU” backend is not CUDA — but it already uses your RTX 5090
+
+Right now you are using **Direct3D 11 compute** (via SharpDX). That already runs on NVIDIA’s GPU hardware. So “adding CUDA” does **not** suddenly “enable GPU”; you already have GPU.
+
+What CUDA *can* improve is:
+
+* Potentially lower overhead and better control of memory movement
+* Easier access to NVIDIA‑specific features
+* Better scaling when you implement a BVH / spatial acceleration structure on GPU
+* Better integration with NVIDIA ray tracing stacks (OptiX) if you go that route
+
+But: if you implement a **naïve CUDA parity kernel** that still does `points × triangles` brute force, don’t expect an order‑of‑magnitude leap vs your current compute shader. The big wins come from **batching + acceleration structures** (in either API).
+
+---
+
+## 4) If you still want CUDA: here is the staged implementation plan + code + Codex prompt
+
+I’m going to give you a plan that:
+
+* Keeps your current D3D11 compute backend as the default/fallback (works on AMD/Intel too)
+* Adds an NVIDIA‑only CUDA backend that you can enable automatically when present
+* Minimizes disruption to your existing SpaceMapper pipeline
+
+### Stage 0 (required refactor): introduce a common “point-in-mesh GPU backend” interface
+
+**Goal:** make D3D11 and CUDA plug‑replaceable.
+
+Create: `MicroEng.Navisworks/SpaceMapper/Gpu/IPointInMeshGpuBackend.cs`
+
+```csharp
+using System;
+using System.Threading;
+
+namespace MicroEng.Navisworks.SpaceMapper.Gpu
+{
+    internal interface IPointInMeshGpuBackend : IDisposable
+    {
+        string BackendName { get; }
+        string DeviceName { get; }
+
+        /// <summary>
+        /// Returns flags per point: 0=outside, 1=inside, 2=uncertain (needs CPU fallback).
+        /// </summary>
+        uint[] TestPoints(Triangle[] trianglesLocal, Float4[] pointsLocal, bool intensive, CancellationToken ct);
+    }
+}
+```
+
+Create shared types so both backends use identical memory layout:
+
+`MicroEng.Navisworks/SpaceMapper/Gpu/GpuTypes.cs`
+
+```csharp
+using System.Runtime.InteropServices;
+
+namespace MicroEng.Navisworks.SpaceMapper.Gpu
+{
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Float4
+    {
+        public float X, Y, Z, W;
+        public Float4(float x, float y, float z, float w = 0f) { X = x; Y = y; Z = z; W = w; }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Triangle
+    {
+        public Float4 V0;
+        public Float4 V1;
+        public Float4 V2;
+
+        public Triangle(Float4 v0, Float4 v1, Float4 v2) { V0 = v0; V1 = v1; V2 = v2; }
+    }
+}
+```
+
+Then update your existing **D3D11PointInMeshGpu** class to:
+
+* Implement `IPointInMeshGpuBackend`
+* Use these shared `Float4`/`Triangle` structs (remove local duplicates)
+
+(That’s a mechanical change and makes CUDA integration cleaner.)
+
+---
+
+### Stage 1 (CUDA backend): add a native CUDA DLL + C# P/Invoke wrapper
+
+#### 1A) Add native project (recommended): `Native/MicroEng.CudaPointInMesh/`
+
+**Files:**
+
+* `microeng_cuda_point_in_mesh.cu`
+* `CMakeLists.txt`
+
+##### `microeng_cuda_point_in_mesh.cu`
+
+```cpp
+// Native/MicroEng.CudaPointInMesh/microeng_cuda_point_in_mesh.cu
+#include <cuda_runtime.h>
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
+
+struct Float4 { float x, y, z, w; };
+struct Triangle { Float4 v0, v1, v2; };
+
+static int g_device = -1;
+static Triangle* d_tris = nullptr;
+static Float4* d_pts = nullptr;
+static uint32_t* d_out = nullptr;
+static int g_triCap = 0;
+static int g_ptCap = 0;
+
+static void writeErr(char* buf, int len, const char* msg)
+{
+    if (!buf || len <= 0) return;
+    strncpy(buf, msg ? msg : "", len - 1);
+    buf[len - 1] = '\0';
+}
+
+static int ensureCap(int triCount, int ptCount, char* err, int errLen)
+{
+    if (triCount > g_triCap)
+    {
+        if (d_tris) cudaFree(d_tris);
+        g_triCap = triCount;
+        cudaError_t e = cudaMalloc((void**)&d_tris, sizeof(Triangle) * (size_t)g_triCap);
+        if (e != cudaSuccess) { writeErr(err, errLen, cudaGetErrorString(e)); return -1; }
+    }
+    if (ptCount > g_ptCap)
+    {
+        if (d_pts) cudaFree(d_pts);
+        if (d_out) cudaFree(d_out);
+        g_ptCap = ptCount;
+        cudaError_t e1 = cudaMalloc((void**)&d_pts, sizeof(Float4) * (size_t)g_ptCap);
+        if (e1 != cudaSuccess) { writeErr(err, errLen, cudaGetErrorString(e1)); return -2; }
+        cudaError_t e2 = cudaMalloc((void**)&d_out, sizeof(uint32_t) * (size_t)g_ptCap);
+        if (e2 != cudaSuccess) { writeErr(err, errLen, cudaGetErrorString(e2)); return -3; }
+    }
+    return 0;
+}
+
+__device__ __forceinline__ float3 make3(const Float4& f) { return make_float3(f.x, f.y, f.z); }
+__device__ __forceinline__ float3 sub3(const float3& a, const float3& b) { return make_float3(a.x-b.x, a.y-b.y, a.z-b.z); }
+__device__ __forceinline__ float3 cross3(const float3& a, const float3& b)
+{
+    return make_float3(a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x);
+}
+__device__ __forceinline__ float dot3(const float3& a, const float3& b) { return a.x*b.x + a.y*b.y + a.z*b.z; }
+
+__device__ __forceinline__ float3 norm3(const float3& v)
+{
+    float d = sqrtf(dot3(v, v));
+    if (d <= 1e-20f) return make_float3(0,0,0);
+    return make_float3(v.x/d, v.y/d, v.z/d);
+}
+
+__device__ __forceinline__ bool rayTri(const float3& orig, const float3& dir, const Triangle& t)
+{
+    // Match the HLSL tolerances as closely as possible
+    const float EPS_DET = 1e-8f;
+    const float EPS_DIST = 1e-5f;
+
+    float3 v0 = make3(t.v0);
+    float3 v1 = make3(t.v1);
+    float3 v2 = make3(t.v2);
+
+    float3 e1 = sub3(v1, v0);
+    float3 e2 = sub3(v2, v0);
+    float3 pvec = cross3(dir, e2);
+    float det = dot3(e1, pvec);
+
+    if (fabsf(det) < EPS_DET) return false;
+    float invDet = 1.0f / det;
+
+    float3 tvec = sub3(orig, v0);
+    float u = dot3(tvec, pvec) * invDet;
+    if (u < 0.f || u > 1.f) return false;
+
+    float3 qvec = cross3(tvec, e1);
+    float v = dot3(dir, qvec) * invDet;
+    if (v < 0.f || (u + v) > 1.f) return false;
+
+    float dist = dot3(e2, qvec) * invDet;
+    return dist > EPS_DIST;
+}
+
+__device__ __forceinline__ bool insideRay(const float3& p, const Triangle* tris, int triCount, const float3& baseDir, uint32_t tid)
+{
+    // Deterministic jitter (to mimic your HLSL intent: avoid edge/vertex degeneracy)
+    uint32_t s = tid * 1664525u + 1013904223u;
+    float jitter = ((s & 1023u) / 1023.0f) * 2.0f - 1.0f;
+    float3 dir = norm3(make_float3(
+        baseDir.x + jitter * 1e-3f,
+        baseDir.y + jitter * 0.37e-3f,
+        baseDir.z + jitter * 0.51e-3f));
+
+    int hits = 0;
+    for (int i = 0; i < triCount; ++i)
+        if (rayTri(p, dir, tris[i])) hits++;
+
+    return (hits & 1) != 0;
+}
+
+__global__ void pointInMeshKernel(const Triangle* tris, int triCount, const Float4* pts, int ptCount, int useSecondRay, uint32_t* outFlags)
+{
+    int tid = (int)(blockIdx.x * blockDim.x + threadIdx.x);
+    if (tid >= ptCount) return;
+
+    float3 p = make_float3(pts[tid].x, pts[tid].y, pts[tid].z);
+
+    // Match your HLSL-ish rays
+    const float3 base1 = make_float3(0.976f, 0.182f, 0.120f);
+    const float3 base2 = make_float3(0.289f, 0.957f, 0.034f);
+
+    bool in1 = insideRay(p, tris, triCount, base1, (uint32_t)tid);
+
+    if (!useSecondRay)
+    {
+        outFlags[tid] = in1 ? 1u : 0u;
+        return;
+    }
+
+    bool in2 = insideRay(p, tris, triCount, base2, (uint32_t)tid);
+
+    outFlags[tid] = (in1 == in2) ? (in1 ? 1u : 0u) : 2u;
+}
+
+extern "C" __declspec(dllexport)
+int me_cuda_init(int deviceOrdinal, int* chosenDevice, char* errBuf, int errBufLen)
+{
+    int count = 0;
+    cudaError_t e = cudaGetDeviceCount(&count);
+    if (e != cudaSuccess || count <= 0) { writeErr(errBuf, errBufLen, "No CUDA device found."); return -1; }
+
+    int best = 0;
+    size_t bestMem = 0;
+    for (int i = 0; i < count; ++i)
+    {
+        cudaDeviceProp p{};
+        if (cudaGetDeviceProperties(&p, i) == cudaSuccess)
+        {
+            if ((size_t)p.totalGlobalMem > bestMem)
+            {
+                bestMem = (size_t)p.totalGlobalMem;
+                best = i;
+            }
+        }
+    }
+
+    int dev = (deviceOrdinal >= 0 && deviceOrdinal < count) ? deviceOrdinal : best;
+
+    e = cudaSetDevice(dev);
+    if (e != cudaSuccess) { writeErr(errBuf, errBufLen, cudaGetErrorString(e)); return -2; }
+
+    g_device = dev;
+    if (chosenDevice) *chosenDevice = dev;
+    return 0;
+}
+
+extern "C" __declspec(dllexport)
+int me_cuda_test_points(const Triangle* triangles, int triCount,
+                        const Float4* points, int ptCount,
+                        int useSecondRay,
+                        uint32_t* outFlags,
+                        char* errBuf, int errBufLen)
+{
+    if (!triangles || triCount <= 0 || !points || ptCount <= 0 || !outFlags)
+    { writeErr(errBuf, errBufLen, "Invalid arguments."); return -1; }
+
+    int capRc = ensureCap(triCount, ptCount, errBuf, errBufLen);
+    if (capRc != 0) return capRc;
+
+    cudaError_t e1 = cudaMemcpy(d_tris, triangles, sizeof(Triangle) * (size_t)triCount, cudaMemcpyHostToDevice);
+    if (e1 != cudaSuccess) { writeErr(errBuf, errBufLen, cudaGetErrorString(e1)); return -2; }
+
+    cudaError_t e2 = cudaMemcpy(d_pts, points, sizeof(Float4) * (size_t)ptCount, cudaMemcpyHostToDevice);
+    if (e2 != cudaSuccess) { writeErr(errBuf, errBufLen, cudaGetErrorString(e2)); return -3; }
+
+    int threads = 256;
+    int blocks = (ptCount + threads - 1) / threads;
+    pointInMeshKernel<<<blocks, threads>>>(d_tris, triCount, d_pts, ptCount, useSecondRay ? 1 : 0, d_out);
+
+    cudaError_t e3 = cudaGetLastError();
+    if (e3 != cudaSuccess) { writeErr(errBuf, errBufLen, cudaGetErrorString(e3)); return -4; }
+
+    cudaError_t e4 = cudaDeviceSynchronize();
+    if (e4 != cudaSuccess) { writeErr(errBuf, errBufLen, cudaGetErrorString(e4)); return -5; }
+
+    cudaError_t e5 = cudaMemcpy(outFlags, d_out, sizeof(uint32_t) * (size_t)ptCount, cudaMemcpyDeviceToHost);
+    if (e5 != cudaSuccess) { writeErr(errBuf, errBufLen, cudaGetErrorString(e5)); return -6; }
+
+    return 0;
+}
+
+extern "C" __declspec(dllexport)
+void me_cuda_shutdown()
+{
+    if (d_tris) cudaFree(d_tris);
+    if (d_pts) cudaFree(d_pts);
+    if (d_out) cudaFree(d_out);
+    d_tris = nullptr; d_pts = nullptr; d_out = nullptr;
+    g_triCap = 0; g_ptCap = 0;
+    g_device = -1;
+}
+```
+
+##### `CMakeLists.txt`
+
+```cmake
+cmake_minimum_required(VERSION 3.24)
+project(MicroEngCudaPointInMesh LANGUAGES CXX CUDA)
+
+add_library(MicroEng.CudaPointInMesh SHARED microeng_cuda_point_in_mesh.cu)
+set_target_properties(MicroEng.CudaPointInMesh PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CXX_STANDARD 17
+    CUDA_ARCHITECTURES native
+)
+
+# Optional: static link the CUDA runtime so you don't need cudart64_*.dll deployed.
+# Uncomment if you want that behavior.
+# set_target_properties(MicroEng.CudaPointInMesh PROPERTIES CUDA_RUNTIME_LIBRARY Static)
+```
+
+#### 1B) Add the C# wrapper
+
+Create: `MicroEng.Navisworks/SpaceMapper/Gpu/CudaPointInMeshGpu.cs`
+
+```csharp
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+namespace MicroEng.Navisworks.SpaceMapper.Gpu
+{
+    internal sealed class CudaPointInMeshGpu : IPointInMeshGpuBackend
+    {
+        private const string DllName = "MicroEng.CudaPointInMesh.dll";
+
+        public string BackendName => "CUDA";
+        public string DeviceName { get; private set; } = "CUDA Device";
+
+        private bool _initialized;
+
+        private CudaPointInMeshGpu() { }
+
+        public static bool TryCreate(out CudaPointInMeshGpu backend, out string reason)
+        {
+            backend = null;
+            reason = null;
+
+            try
+            {
+                // Ensure the native DLL is loadable from the plugin folder
+                // (Navisworks working dir is not reliable).
+                LoadNativeFromPluginFolder(DllName);
+
+                var err = new StringBuilder(2048);
+                int chosen;
+                int rc = me_cuda_init(-1, out chosen, err, err.Capacity);
+                if (rc != 0)
+                {
+                    reason = $"me_cuda_init failed ({rc}): {err}";
+                    return false;
+                }
+
+                backend = new CudaPointInMeshGpu
+                {
+                    _initialized = true,
+                    DeviceName = $"CUDA device {chosen}"
+                };
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = ex.Message;
+                return false;
+            }
+        }
+
+        public uint[] TestPoints(Triangle[] trianglesLocal, Float4[] pointsLocal, bool intensive, CancellationToken ct)
+        {
+            if (!_initialized) throw new InvalidOperationException("CUDA backend not initialized.");
+            ct.ThrowIfCancellationRequested();
+
+            var outFlags = new uint[pointsLocal.Length];
+
+            var err = new StringBuilder(2048);
+
+            GCHandle hTris = default, hPts = default, hOut = default;
+            try
+            {
+                hTris = GCHandle.Alloc(trianglesLocal, GCHandleType.Pinned);
+                hPts = GCHandle.Alloc(pointsLocal, GCHandleType.Pinned);
+                hOut = GCHandle.Alloc(outFlags, GCHandleType.Pinned);
+
+                int rc = me_cuda_test_points(
+                    hTris.AddrOfPinnedObject(), trianglesLocal.Length,
+                    hPts.AddrOfPinnedObject(), pointsLocal.Length,
+                    intensive ? 1 : 0,
+                    hOut.AddrOfPinnedObject(),
+                    err, err.Capacity);
+
+                if (rc != 0)
+                    throw new InvalidOperationException($"me_cuda_test_points failed ({rc}): {err}");
+
+                return outFlags;
+            }
+            finally
+            {
+                if (hTris.IsAllocated) hTris.Free();
+                if (hPts.IsAllocated) hPts.Free();
+                if (hOut.IsAllocated) hOut.Free();
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_initialized)
+            {
+                me_cuda_shutdown();
+                _initialized = false;
+            }
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
+
+        private static void LoadNativeFromPluginFolder(string dllName)
+        {
+            // LoadLibrary with absolute path ensures DLL load even when working dir differs.
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var path = System.IO.Path.Combine(baseDir, dllName);
+            if (System.IO.File.Exists(path))
+                LoadLibrary(path);
+        }
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern int me_cuda_init(int deviceOrdinal, out int chosenDevice, StringBuilder errBuf, int errBufLen);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+        private static extern int me_cuda_test_points(
+            IntPtr triangles, int triCount,
+            IntPtr points, int ptCount,
+            int useSecondRay,
+            IntPtr outFlags,
+            StringBuilder errBuf, int errBufLen);
+
+        [DllImport(DllName, CallingConvention = CallingConvention.Cdecl)]
+        private static extern void me_cuda_shutdown();
+    }
+}
+```
+
+---
+
+### Stage 2: Wire CUDA into SpaceMapper (without changing the UI)
+
+**Rule:** When user selects GPU modes, prefer CUDA if available; otherwise fallback to D3D11.
+
+In your GPU selection logic (currently where you call `D3D11PointInMeshGpu.TryCreate(...)`), change to:
+
+1. Try CUDA backend
+2. Else try D3D11 backend
+3. Else CPU
+
+You’ll also want to record `BackendName` / `DeviceName` into your existing diagnostics so the report shows “CUDA” vs “D3D11 compute”.
+
+---
+
+## 5) Codex prompt (copy/paste)
+
+Use this exact change request in Codex.
+
+```text
+Goal
+Add a CUDA backend for Mesh Accurate point-in-mesh, while keeping the existing D3D11 compute backend as the default fallback. CUDA should be used automatically when an NVIDIA GPU + native DLL is available, but the plugin must still work on non-NVIDIA machines.
+
+Constraints
+- Project is net48, Navisworks plugin (x64).
+- Must not crash if CUDA is missing.
+- Results contract must match existing GPU backend: per-point flags 0=outside, 1=inside, 2=uncertain (CPU fallback).
+- Keep existing UI unchanged; just prefer CUDA behind GPU modes.
+- Keep existing writeback, sequencing, partial logic unchanged.
+
+Work items
+1) Introduce a common interface:
+   - Add MicroEng.Navisworks/SpaceMapper/Gpu/IPointInMeshGpuBackend.cs
+   - Add MicroEng.Navisworks/SpaceMapper/Gpu/GpuTypes.cs with Float4 and Triangle structs (Sequential layout).
+
+2) Refactor D3D11PointInMeshGpu.cs:
+   - Make it implement IPointInMeshGpuBackend.
+   - Remove its local Float4/Triangle structs and use the shared types from GpuTypes.cs.
+   - Expose BackendName="D3D11" and DeviceName = adapter name.
+
+3) Add CUDA backend wrapper:
+   - Add MicroEng.Navisworks/SpaceMapper/Gpu/CudaPointInMeshGpu.cs as the P/Invoke wrapper.
+   - It must attempt to LoadLibrary from AppDomain.CurrentDomain.BaseDirectory and then call me_cuda_init.
+   - Provide TryCreate(out backend, out reason) like D3D11 version.
+
+4) Add native CUDA DLL project:
+   - Create folder Native/MicroEng.CudaPointInMesh/
+   - Add CMakeLists.txt and microeng_cuda_point_in_mesh.cu exactly as specified (exported functions me_cuda_init, me_cuda_test_points, me_cuda_shutdown).
+   - Build output name MUST be MicroEng.CudaPointInMesh.dll (x64 Release).
+
+5) Wire into SpaceMapperEngines GPU path:
+   - Wherever we currently do D3D11PointInMeshGpu.TryCreate, change to:
+       if (CudaPointInMeshGpu.TryCreate(...)) use CUDA backend
+       else if (D3D11PointInMeshGpu.TryCreate(...)) use D3D11 backend
+       else fallback to CPU
+   - Ensure diagnostics/reporting records which backend was used.
+
+6) Deployment:
+   - Update MicroEng.Navisworks.csproj so MicroEng.CudaPointInMesh.dll gets copied to the Navisworks plugin output folder (same folder as MicroEng.Navisworks.dll).
+   - If the native dll is not present, CUDA backend should simply fail TryCreate and D3D11 should be used instead.
+
+Acceptance
+- dotnet build succeeds (net48).
+- If native CUDA dll is missing, GPU mode still works via D3D11.
+- If native CUDA dll is present, report shows backend “CUDA” and it runs.
+```
+
+---
+
+## Final recommendation (what I would do next)
+
+If your goal is **maximum ROI speedup**:
+
+1. Keep the current D3D11 GPU path (it’s correct and already helps).
+2. Implement **batching** (multi-zone per dispatch) and **lower/auto thresholds** — that will increase “zones processed on GPU” far beyond 60 and get a bigger real speedup.
+3. Only then add CUDA if you still want NVIDIA‑specific performance — and if you do, **don’t stop at a brute-force kernel**; the real jump comes from adding a BVH / acceleration structure (CUDA) or going to DXR/OptiX.
+
+If you want, I can give you a second Codex prompt specifically for the **batching** version (which will likely give you more speed than CUDA alone).

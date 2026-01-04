@@ -35,18 +35,101 @@ namespace MicroEng.Navisworks
             MicroEngWpfUiTheme.ApplyTo(this);
             DataContext = host;
 
-            _ = new HoverFlyoutController(Offset3DFlyoutButton, Offset3DFlyoutContent, Offset3DFlyout);
-            _ = new HoverFlyoutController(OffsetTopFlyoutButton, OffsetTopFlyoutContent, OffsetTopFlyout);
-            _ = new HoverFlyoutController(OffsetBottomFlyoutButton, OffsetBottomFlyoutContent, OffsetBottomFlyout);
-            _ = new HoverFlyoutController(OffsetSidesFlyoutButton, OffsetSidesFlyoutContent, OffsetSidesFlyout);
-            _ = new HoverFlyoutController(PresetHelpFlyoutButton, PresetHelpFlyoutContent, PresetHelpFlyout);
-            _ = new HoverFlyoutController(UnitsFlyoutButton, UnitsFlyoutContent, UnitsFlyout);
-            _ = new HoverFlyoutController(OffsetModeFlyoutButton, OffsetModeFlyoutContent, OffsetModeFlyout);
+            WireHover(Offset3DFlyoutButton, Offset3DFlyout);
+            WireHover(OffsetTopFlyoutButton, OffsetTopFlyout);
+            WireHover(OffsetBottomFlyoutButton, OffsetBottomFlyout);
+            WireHover(OffsetSidesFlyoutButton, OffsetSidesFlyout);
+            WireHover(UnitsFlyoutButton, UnitsFlyout);
+            WireHover(OffsetModeFlyoutButton, OffsetModeFlyout);
+            WireHover(EnableMultiZoneHelpToggle, EnableMultiZoneHelpFlyout);
+            WireHover(ExcludeZonesFromTargetsHelpToggle, ExcludeZonesFromTargetsHelpFlyout);
+            WireHover(TreatPartialHelpToggle, TreatPartialHelpFlyout);
+            WireHover(TagPartialHelpToggle, TagPartialHelpFlyout);
+            WireHover(SkipUnchangedHelpToggle, SkipUnchangedHelpFlyout);
+            WireHover(PackWritebackHelpToggle, PackWritebackHelpFlyout);
+            WireHover(ShowInternalHelpToggle, ShowInternalHelpFlyout);
+            WireHover(WriteZoneBehaviorHelpToggle, WriteZoneBehaviorHelpFlyout);
+            WireHover(WriteContainmentPercentHelpToggle, WriteContainmentPercentHelpFlyout);
+            WireHover(ContainmentCalculationHelpToggle, ContainmentCalculationHelpFlyout);
+            WireHover(CloseDockPanesHelpToggle, CloseDockPanesHelpFlyout);
+            WireHover(GpuRayAccuracyHelpToggle, GpuRayAccuracyHelpFlyout);
+            HookUiStateUpdates();
+            Loaded += (_, __) => UpdateProcessingUiState();
+        }
+
+        private void HookUiStateUpdates()
+        {
+            if (ZoneContainmentEngineComboControl != null)
+            {
+                ZoneContainmentEngineComboControl.SelectionChanged += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (ZoneBoundsSliderControl != null)
+            {
+                ZoneBoundsSliderControl.ValueChanged += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (TargetBoundsSliderControl != null)
+            {
+                TargetBoundsSliderControl.ValueChanged += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (ZoneResolutionStrategyComboControl != null)
+            {
+                ZoneResolutionStrategyComboControl.SelectionChanged += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (EnableMultiZoneCheckControl != null)
+            {
+                EnableMultiZoneCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                EnableMultiZoneCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (TreatPartialCheckControl != null)
+            {
+                TreatPartialCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                TreatPartialCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (TagPartialCheckControl != null)
+            {
+                TagPartialCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                TagPartialCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (WriteZoneBehaviorCheckControl != null)
+            {
+                WriteZoneBehaviorCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                WriteZoneBehaviorCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (WriteContainmentPercentCheckControl != null)
+            {
+                WriteContainmentPercentCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                WriteContainmentPercentCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
+        }
+
+        private static void WireHover(FrameworkElement trigger, WpfFlyout flyout)
+        {
+            if (trigger == null || flyout == null)
+            {
+                return;
+            }
+
+            if (flyout.Content is not FrameworkElement content)
+            {
+                return;
+            }
+
+            _ = new HoverFlyoutController(trigger, content, flyout);
         }
 
         internal CheckBox TreatPartialCheck => TreatPartialCheckControl;
         internal CheckBox TagPartialCheck => TagPartialCheckControl;
+        internal CheckBox WriteZoneBehaviorCheck => WriteZoneBehaviorCheckControl;
         internal CheckBox EnableMultiZoneCheck => EnableMultiZoneCheckControl;
+        internal CheckBox ExcludeZonesFromTargetsCheck => ExcludeZonesFromTargetsCheckControl;
         internal TextBox ZoneBehaviorCategoryBox => ZoneBehaviorCategoryBoxControl;
         internal TextBox ZoneBehaviorPropertyBox => ZoneBehaviorPropertyBoxControl;
         internal TextBox ZoneBehaviorContainedBox => ZoneBehaviorContainedBoxControl;
@@ -57,42 +140,274 @@ namespace MicroEng.Navisworks
         internal TextBox OffsetSidesBox => OffsetSidesBoxControl;
         internal TextBox UnitsBox => UnitsBoxControl;
         internal TextBox OffsetModeBox => OffsetModeBoxControl;
-        internal TextBox MaxThreadsBox => MaxThreadsBoxControl;
-        internal TextBox BatchSizeBox => BatchSizeBoxControl;
-        internal CheckBox AutoPresetToggle => AutoPresetToggleControl;
-        internal Slider PresetSlider => PresetSliderControl;
-        internal TextBlock PresetDescriptionText => PresetDescriptionTextControl;
-        internal TextBlock PresetResolvedText => PresetResolvedTextControl;
-        internal Slider IndexGranularitySlider => IndexGranularitySliderControl;
-        internal TextBlock IndexGranularityHintText => IndexGranularityHintTextControl;
-        internal TextBlock EstimateRuntimeText => EstimateRuntimeTextControl;
-        internal TextBlock EstimateCountsText => EstimateCountsTextControl;
-        internal TextBlock EstimatePairsText => EstimatePairsTextControl;
-        internal TextBlock EstimateAvgLabelText => EstimateAvgLabelTextControl;
-        internal TextBlock EstimateAvgText => EstimateAvgTextControl;
-        internal TextBlock EstimateConfidenceText => EstimateConfidenceTextControl;
-        internal TextBlock EstimateCellSizeText => EstimateCellSizeTextControl;
-        internal TextBlock EstimatePreflightTimeText => EstimatePreflightTimeTextControl;
-        internal TextBlock PreflightStatusText => PreflightStatusTextControl;
-        internal ProgressBar PreflightProgressBar => PreflightProgressBarControl;
-        internal Wpf.Ui.Controls.Button RunPreflightButton => RunPreflightButtonControl;
-        internal CheckBox LiveEstimateToggle => LiveEstimateToggleControl;
-        internal CheckBox ReusePreflightToggle => ReusePreflightToggleControl;
-        internal Wpf.Ui.Controls.Button ComparisonReportButton => ComparisonReportButtonControl;
-        internal TextBlock ComparisonReportStatusText => ComparisonReportStatusTextControl;
-        internal ComboBox BenchmarkModeCombo => BenchmarkModeComboControl;
-        internal TextBlock BenchmarkModeHintText => BenchmarkModeHintTextControl;
-        internal ComboBox WritebackStrategyCombo => WritebackStrategyComboControl;
+        internal Slider ZoneBoundsSlider => ZoneBoundsSliderControl;
+        internal Slider TargetBoundsSlider => TargetBoundsSliderControl;
+        internal FrameworkElement ZoneKDopVariantRow => ZoneKDopVariantRowControl;
+        internal ComboBox ZoneKDopVariantCombo => ZoneKDopVariantComboControl;
+        internal FrameworkElement TargetKDopVariantRow => TargetKDopVariantRowControl;
+        internal ComboBox TargetKDopVariantCombo => TargetKDopVariantComboControl;
+        internal FrameworkElement TargetMidpointModeRow => TargetMidpointModeRowControl;
+        internal ComboBox TargetMidpointModeCombo => TargetMidpointModeComboControl;
+        internal ComboBox ZoneContainmentEngineCombo => ZoneContainmentEngineComboControl;
+        internal ComboBox ZoneResolutionStrategyCombo => ZoneResolutionStrategyComboControl;
+        internal TextBlock ZoneContainmentHintText => ZoneContainmentHintTextControl;
         internal CheckBox SkipUnchangedWritebackCheck => SkipUnchangedWritebackCheckControl;
         internal CheckBox PackWritebackCheck => PackWritebackCheckControl;
         internal CheckBox ShowInternalWritebackCheck => ShowInternalWritebackCheckControl;
+        internal CheckBox WriteContainmentPercentCheck => WriteContainmentPercentCheckControl;
+        internal ComboBox ContainmentCalculationCombo => ContainmentCalculationComboControl;
+        internal FrameworkElement ContainmentCalculationPanel => ContainmentCalculationPanelControl;
         internal CheckBox CloseDockPanesCheck => CloseDockPanesCheckControl;
-        internal TextBlock BenchmarkSummaryText => BenchmarkSummaryTextControl;
-        internal TextBlock BenchmarkSummaryDetailText => BenchmarkSummaryDetailTextControl;
-        internal Expander AdvancedPerformanceExpander => AdvancedPerformanceExpanderControl;
-        internal ComboBox FastTraversalCombo => FastTraversalComboControl;
-        internal TextBlock FastTraversalHintText => FastTraversalHintTextControl;
-        internal TextBlock FastTraversalResolvedText => FastTraversalResolvedTextControl;
+        internal Button VariationCheckButton => VariationCheckButtonControl;
+        internal ComboBox GpuRayAccuracyCombo => GpuRayAccuracyComboControl;
+
+        internal void UpdateProcessingUiState()
+        {
+            var isMeshAccurate = ZoneContainmentEngineComboControl?.SelectedIndex == 1;
+            var isMidpoint = TargetBoundsSliderControl != null
+                && (int)Math.Round(TargetBoundsSliderControl.Value) == 0;
+            var isMultiZone = EnableMultiZoneCheckControl?.IsChecked == true;
+
+            if (PartialSectionControl != null)
+            {
+                PartialSectionControl.Visibility = isMidpoint ? Visibility.Collapsed : Visibility.Visible;
+            }
+
+            if (MidpointNoPartialNoteTextControl != null)
+            {
+                MidpointNoPartialNoteTextControl.Visibility = isMidpoint ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (TargetMidpointModeRowControl != null)
+            {
+                TargetMidpointModeRowControl.Visibility = isMidpoint ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (TreatPartialCheckControl != null && TagPartialCheckControl != null)
+            {
+                if (isMidpoint)
+                {
+                    if (TreatPartialCheckControl.IsChecked == true)
+                    {
+                        TreatPartialCheckControl.IsChecked = false;
+                    }
+
+                    if (TagPartialCheckControl.IsChecked == true)
+                    {
+                        TagPartialCheckControl.IsChecked = false;
+                    }
+
+                    TreatPartialCheckControl.IsEnabled = false;
+                    TagPartialCheckControl.IsEnabled = false;
+                }
+                else
+                {
+                    TreatPartialCheckControl.IsEnabled = true;
+                    TagPartialCheckControl.IsEnabled = true;
+                }
+            }
+
+            if (WriteContainmentPercentCheckControl != null)
+            {
+                if (isMidpoint)
+                {
+                    if (WriteContainmentPercentCheckControl.IsChecked == true)
+                    {
+                        WriteContainmentPercentCheckControl.IsChecked = false;
+                    }
+
+                    WriteContainmentPercentCheckControl.IsEnabled = false;
+                }
+                else
+                {
+                    WriteContainmentPercentCheckControl.IsEnabled = true;
+                }
+            }
+
+            if (MeshAccurateNoteTextControl != null)
+            {
+                MeshAccurateNoteTextControl.Visibility = isMeshAccurate ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (GpuRayAccuracyRowControl != null)
+            {
+                GpuRayAccuracyRowControl.Visibility = isMeshAccurate ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (ZoneBoundsHeaderTextControl != null)
+            {
+                ZoneBoundsHeaderTextControl.Text = isMeshAccurate
+                    ? "Fallback Bounds"
+                    : "Zone Representation (for candidate filtering / fallback)";
+            }
+
+            UpdateResolutionUi(isMidpoint, isMultiZone);
+            UpdateEffectiveMethodSummary(isMeshAccurate, isMidpoint, isMultiZone);
+
+            var writeBehavior = WriteZoneBehaviorCheckControl?.IsChecked == true;
+            var writePercent = WriteContainmentPercentCheckControl?.IsChecked == true;
+            if (ZoneBehaviorFieldsPanelControl != null)
+            {
+                ZoneBehaviorFieldsPanelControl.IsEnabled = writeBehavior;
+                ZoneBehaviorFieldsPanelControl.Visibility = writeBehavior ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (ContainmentCalculationPanelControl != null)
+            {
+                var showCalc = writeBehavior || writePercent;
+                ContainmentCalculationPanelControl.IsEnabled = showCalc;
+                ContainmentCalculationPanelControl.Visibility = showCalc ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
+        private void UpdateResolutionUi(bool isMidpoint, bool isMultiZone)
+        {
+            if (ZoneResolutionStrategyComboControl == null)
+            {
+                return;
+            }
+
+            ZoneResolutionStrategyComboControl.IsEnabled = !isMultiZone;
+
+            if (ZoneResolutionHintTextControl != null)
+            {
+                if (isMultiZone)
+                {
+                    ZoneResolutionHintTextControl.Text = "Resolution is only used when assigning a single best zone.";
+                    ZoneResolutionHintTextControl.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    ZoneResolutionHintTextControl.Text = string.Empty;
+                    ZoneResolutionHintTextControl.Visibility = Visibility.Collapsed;
+                }
+            }
+
+            if (ZoneResolutionStrategyComboControl.Items.Count > 1
+                && ZoneResolutionStrategyComboControl.Items[1] is ComboBoxItem overlapItem)
+            {
+                overlapItem.IsEnabled = !isMidpoint;
+            }
+
+            if (isMidpoint && ZoneResolutionStrategyComboControl.SelectedIndex == 1)
+            {
+                ZoneResolutionStrategyComboControl.SelectedIndex = 0;
+            }
+        }
+
+        private void UpdateEffectiveMethodSummary(bool isMeshAccurate, bool isMidpoint, bool isMultiZone)
+        {
+            if (EffectiveMethodTextControl == null)
+            {
+                return;
+            }
+
+            var engineLabel = GetComboLabel(ZoneContainmentEngineComboControl) ?? "Bounds (fast)";
+            var zoneRep = GetZoneRepresentationLabel();
+            var targetRep = GetTargetRepresentationLabel();
+            var resolutionLabel = GetResolutionLabel(isMultiZone);
+            var multiZoneLabel = isMultiZone ? "On" : "Off";
+            var partialLabel = GetPartialsLabel(isMidpoint);
+            var zoneLabel = isMeshAccurate ? $"Fallback = {zoneRep}" : $"Zone = {zoneRep}";
+
+            EffectiveMethodTextControl.Text =
+                $"Effective: Engine = {engineLabel}; {zoneLabel}; Target = {targetRep}; Resolution = {resolutionLabel}; Multi-zone = {multiZoneLabel}; Partials = {partialLabel}.";
+        }
+
+        private string GetZoneRepresentationLabel()
+        {
+            if (ZoneBoundsSliderControl == null)
+            {
+                return "AABB";
+            }
+
+            return (int)Math.Round(ZoneBoundsSliderControl.Value) switch
+            {
+                1 => "OBB",
+                2 => "k-DOP",
+                3 => "Hull",
+                _ => "AABB"
+            };
+        }
+
+        private string GetTargetRepresentationLabel()
+        {
+            if (TargetBoundsSliderControl == null)
+            {
+                return "AABB";
+            }
+
+            return (int)Math.Round(TargetBoundsSliderControl.Value) switch
+            {
+                0 => "Midpoint",
+                1 => "AABB",
+                2 => "OBB",
+                3 => "k-DOP",
+                4 => "Hull",
+                _ => "AABB"
+            };
+        }
+
+        private string GetResolutionLabel(bool isMultiZone)
+        {
+            if (isMultiZone)
+            {
+                return "n/a (multi-zone)";
+            }
+
+            var label = GetComboLabel(ZoneResolutionStrategyComboControl);
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                return "Most specific";
+            }
+
+            if (label.IndexOf("Most", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Most specific";
+            }
+
+            if (label.IndexOf("Largest", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Largest overlap";
+            }
+
+            if (label.IndexOf("First", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "First match";
+            }
+
+            return label;
+        }
+
+        private string GetPartialsLabel(bool isMidpoint)
+        {
+            if (isMidpoint)
+            {
+                return "Off (Midpoint)";
+            }
+
+            if (TreatPartialCheckControl?.IsChecked == true)
+            {
+                return "Treated as contained";
+            }
+
+            if (TagPartialCheckControl?.IsChecked == true)
+            {
+                return "Tagged separately";
+            }
+
+            return "Off";
+        }
+
+        private static string GetComboLabel(ComboBox comboBox)
+        {
+            if (comboBox?.SelectedItem is ComboBoxItem item && item.Content != null)
+            {
+                return item.Content.ToString();
+            }
+
+            return comboBox?.Text;
+        }
 
         private void OnOffset3DFlyoutOpened(WpfFlyout sender, RoutedEventArgs args)
         {

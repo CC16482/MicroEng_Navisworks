@@ -2,18 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using Autodesk.Navisworks.Api;
-using MicroEng.Navisworks.SpaceMapper.Estimation;
-using MicroEng.Navisworks.SpaceMapper.Util;
 using Wpf.Ui.Abstractions;
 using WpfNavigationView = Wpf.Ui.Controls.NavigationView;
 using WpfNavigatingCancelEventArgs = Wpf.Ui.Controls.NavigatingCancelEventArgs;
@@ -37,23 +33,18 @@ namespace MicroEng.Navisworks
         private readonly SpaceMapperTemplateStore _templateStore = new(
             Path.GetDirectoryName(typeof(SpaceMapperControl).Assembly.Location) ?? AppDomain.CurrentDomain.BaseDirectory);
         private List<SpaceMapperTemplate> _templates = new();
-        private readonly SpaceMapperPreflightService _preflightService = new();
-        private readonly SpaceMapperCalibrationStore _calibrationStore = new();
-        private readonly AsyncDebouncer _preflightDebouncer = new(TimeSpan.FromMilliseconds(500));
-        private CancellationTokenSource _preflightCts;
-        private CancellationTokenSource _compareCts;
-        private SpaceMapperPreflightResult _lastPreflight;
-        private SpaceMapperRuntimeEstimate _lastEstimate;
         private readonly SpaceMapperStepSetupPage _setupPage;
         private readonly SpaceMapperStepZonesTargetsPage _zonesPage;
         private readonly SpaceMapperStepProcessingPage _processingPage;
         private readonly SpaceMapperStepMappingPage _mappingPage;
         private readonly SpaceMapperStepResultsPage _resultsPage;
         private Stopwatch _processingNavStopwatch;
+        private CancellationTokenSource _runCts;
         private bool _handlersWired;
         private bool _initialized;
         private bool _applyingTemplate;
         private bool _updatingSetLists;
+        private bool? _lastMeshAccurate;
         private const string NotApplicableText = "N/A";
 
         public SpaceMapperControl()
@@ -61,6 +52,7 @@ namespace MicroEng.Navisworks
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
             DataContext = this;
+            GeometryExtractor.SetUiDispatcher(Dispatcher);
             _setupPage = new SpaceMapperStepSetupPage(this);
             _zonesPage = new SpaceMapperStepZonesTargetsPage(this);
             _processingPage = new SpaceMapperStepProcessingPage(this);
@@ -170,62 +162,23 @@ namespace MicroEng.Navisworks
             _mappingPage.ZonePropertyTreeView.SelectedItemChanged += OnZonePropertyTreeSelectionChanged;
             _resultsPage.ExportStatsButton.Click += (s, e) => ExportStats();
 
-            _processingPage.RunPreflightButton.Click += async (s, e) => await RunPreflightAsync(isLive: false, CancellationToken.None);
-            _processingPage.ComparisonReportButton.Click += async (s, e) => await RunComparisonReportAsync();
-              if (_processingPage.BenchmarkModeCombo != null)
-              {
-                  _processingPage.BenchmarkModeCombo.SelectionChanged += (s, e) =>
-                  {
-                      UpdateComparisonStatus(string.Empty);
-                      ClearBenchmarkSummary();
-                  };
-              }
-              if (_processingPage.SkipUnchangedWritebackCheck != null)
-              {
-                  _processingPage.SkipUnchangedWritebackCheck.Checked += (s, e) =>
-                  {
-                      UpdateComparisonStatus(string.Empty);
-                      ClearBenchmarkSummary();
-                  };
-                  _processingPage.SkipUnchangedWritebackCheck.Unchecked += (s, e) =>
-                  {
-                      UpdateComparisonStatus(string.Empty);
-                      ClearBenchmarkSummary();
-                  };
-              }
-              if (_processingPage.PackWritebackCheck != null)
-              {
-                  _processingPage.PackWritebackCheck.Checked += (s, e) =>
-                  {
-                      UpdateComparisonStatus(string.Empty);
-                      ClearBenchmarkSummary();
-                  };
-                  _processingPage.PackWritebackCheck.Unchecked += (s, e) =>
-                  {
-                      UpdateComparisonStatus(string.Empty);
-                      ClearBenchmarkSummary();
-                  };
-              }
-            _processingPage.LiveEstimateToggle.Checked += (s, e) => TriggerLivePreflight();
-            _processingPage.LiveEstimateToggle.Unchecked += (s, e) => ResetPreflightUi("Idle");
-            _processingPage.AutoPresetToggle.Checked += (s, e) =>
+            _processingPage.ZoneBoundsSlider.ValueChanged += (s, e) => OnBoundsModesChanged();
+            _processingPage.TargetBoundsSlider.ValueChanged += (s, e) => OnBoundsModesChanged();
+            _processingPage.ZoneKDopVariantCombo.SelectionChanged += (s, e) => OnBoundsModesChanged();
+            _processingPage.TargetKDopVariantCombo.SelectionChanged += (s, e) => OnBoundsModesChanged();
+            _processingPage.TargetMidpointModeCombo.SelectionChanged += (s, e) => OnBoundsModesChanged();
+            if (_processingPage.ZoneContainmentEngineCombo != null)
             {
-                _processingPage.PresetSlider.IsEnabled = false;
-                OnPresetChanged();
-            };
-            _processingPage.AutoPresetToggle.Unchecked += (s, e) =>
+                _processingPage.ZoneContainmentEngineCombo.SelectionChanged += (s, e) => OnBoundsModesChanged();
+            }
+            if (_processingPage.ZoneResolutionStrategyCombo != null)
             {
-                _processingPage.PresetSlider.IsEnabled = true;
-                OnPresetChanged();
-            };
-            _processingPage.PresetSlider.ValueChanged += (s, e) =>
+                _processingPage.ZoneResolutionStrategyCombo.SelectionChanged += (s, e) => OnBoundsModesChanged();
+            }
+            if (_processingPage.VariationCheckButton != null)
             {
-                if (_processingPage.AutoPresetToggle.IsChecked == true)
-                {
-                    return;
-                }
-                OnPresetChanged();
-            };
+                _processingPage.VariationCheckButton.Click += (s, e) => RunVariationCheckReport();
+            }
 
             _processingPage.TreatPartialCheck.Checked += (s, e) =>
             {
@@ -239,30 +192,59 @@ namespace MicroEng.Navisworks
             };
             _processingPage.TagPartialCheck.Checked += (s, e) =>
             {
-                UpdateZoneBehaviorInputs();
                 UpdateFastTraversalUi();
                 TriggerLivePreflight();
             };
             _processingPage.TagPartialCheck.Unchecked += (s, e) =>
             {
-                UpdateZoneBehaviorInputs();
                 UpdateFastTraversalUi();
                 TriggerLivePreflight();
             };
+            if (_processingPage.WriteZoneBehaviorCheck != null)
+            {
+                _processingPage.WriteZoneBehaviorCheck.Checked += (s, e) =>
+                {
+                    UpdateZoneBehaviorInputs();
+                    UpdateFastTraversalUi();
+                    TriggerLivePreflight();
+                };
+                _processingPage.WriteZoneBehaviorCheck.Unchecked += (s, e) =>
+                {
+                    UpdateZoneBehaviorInputs();
+                    UpdateFastTraversalUi();
+                    TriggerLivePreflight();
+                };
+            }
+            if (_processingPage.WriteContainmentPercentCheck != null)
+            {
+                _processingPage.WriteContainmentPercentCheck.Checked += (s, e) =>
+                {
+                    UpdateFastTraversalUi();
+                    TriggerLivePreflight();
+                };
+                _processingPage.WriteContainmentPercentCheck.Unchecked += (s, e) =>
+                {
+                    UpdateFastTraversalUi();
+                    TriggerLivePreflight();
+                };
+            }
+            if (_processingPage.ContainmentCalculationCombo != null)
+            {
+                _processingPage.ContainmentCalculationCombo.SelectionChanged += (s, e) => TriggerLivePreflight();
+            }
             _processingPage.EnableMultiZoneCheck.Checked += (s, e) => TriggerLivePreflight();
             _processingPage.EnableMultiZoneCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            if (_processingPage.ExcludeZonesFromTargetsCheck != null)
+            {
+                _processingPage.ExcludeZonesFromTargetsCheck.Checked += (s, e) => TriggerLivePreflight();
+                _processingPage.ExcludeZonesFromTargetsCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            }
             _processingPage.Offset3DBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.OffsetTopBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.OffsetBottomBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.OffsetSidesBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.UnitsBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.OffsetModeBox.TextChanged += (s, e) => TriggerLivePreflight();
-            _processingPage.IndexGranularitySlider.ValueChanged += (s, e) => TriggerLivePreflight();
-            _processingPage.FastTraversalCombo.SelectionChanged += (s, e) =>
-            {
-                UpdateFastTraversalUi();
-                TriggerLivePreflight();
-            };
 
             _zonesPage.ZoneSourceCombo.SelectionChanged += (s, e) =>
             {
@@ -444,12 +426,7 @@ namespace MicroEng.Navisworks
                 _applyingTemplate = false;
             }
 
-            UpdatePresetUi(_lastPreflight);
             UpdateReadinessText();
-            if (_processingPage.LiveEstimateToggle.IsChecked == true)
-            {
-                TriggerLivePreflight();
-            }
         }
 
         private SpaceMapperTemplate BuildTemplateFromUi(string name)
@@ -955,11 +932,12 @@ namespace MicroEng.Navisworks
                 return;
             }
 
-            var enabled = _processingPage.TagPartialCheck.IsChecked == true;
+            var enabled = _processingPage.WriteZoneBehaviorCheck?.IsChecked == true;
             _processingPage.ZoneBehaviorCategoryBox.IsEnabled = enabled;
             _processingPage.ZoneBehaviorPropertyBox.IsEnabled = enabled;
             _processingPage.ZoneBehaviorContainedBox.IsEnabled = enabled;
             _processingPage.ZoneBehaviorPartialBox.IsEnabled = enabled;
+            _processingPage.UpdateProcessingUiState();
         }
 
         private void RefreshSelectionSetLists()
@@ -1649,29 +1627,221 @@ namespace MicroEng.Navisworks
         private void RunSpaceMapper()
         {
             DockPaneVisibilitySnapshot paneSnapshot = null;
+            if (!ValidateRunInputs())
+            {
+                return;
+            }
+
+            _runCts?.Cancel();
+            _runCts?.Dispose();
+            _runCts = new CancellationTokenSource();
+
+            var runProgress = new SpaceMapperRunProgressState();
+            using var progressHost = SpaceMapperRunProgressHost.Show(runProgress, () => _runCts.Cancel());
+
             try
             {
-                if (!ValidateRunInputs())
+                var request = BuildRequest();
+                if (request == null)
                 {
+                    runProgress.MarkFailed(new InvalidOperationException("Unable to build Space Mapper request."));
                     return;
                 }
 
-                var request = BuildRequest();
-                if (request?.ProcessingSettings?.CloseDockPanesDuringRun == true)
+                var useMesh = request.ProcessingSettings?.ZoneContainmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate;
+                if (_lastMeshAccurate.HasValue && _lastMeshAccurate.Value != useMesh)
+                {
+                    GeometryExtractor.ClearCache();
+                }
+                _lastMeshAccurate = useMesh;
+
+                if (request.ProcessingSettings?.CloseDockPanesDuringRun == true)
                 {
                     paneSnapshot = NavisworksDockPaneManager.HideDockPanes();
                 }
 
                 var service = new SpaceMapperService(MicroEngActions.Log);
-                var cache = _processingPage.ReusePreflightToggle.IsChecked == true ? _preflightService.Cache : null;
-                var result = service.Run(request, cache);
+                var result = service.RunWithProgress(request, null, runProgress, _runCts.Token);
+
+                progressHost.Close();
                 ShowResults(result);
-                UpdateCalibrationFromRun(request, result);
                 SpaceMapperNav.Navigate(typeof(SpaceMapperStepResultsPage));
+            }
+            catch (OperationCanceledException)
+            {
+                runProgress.MarkCancelled();
             }
             catch (Exception ex)
             {
+                runProgress.MarkFailed(ex);
                 MessageBox.Show($"Space Mapper failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                NavisworksDockPaneManager.RestoreDockPanes(paneSnapshot);
+            }
+        }
+
+        private void RunVariationCheckReport()
+        {
+            DockPaneVisibilitySnapshot paneSnapshot = null;
+            if (!ValidateVariationCheckInputs())
+            {
+                return;
+            }
+
+            _runCts?.Cancel();
+            _runCts?.Dispose();
+            _runCts = new CancellationTokenSource();
+
+            var runProgress = new SpaceMapperRunProgressState();
+            using var progressHost = SpaceMapperRunProgressHost.Show(runProgress, () => _runCts.Cancel());
+
+            try
+            {
+                runProgress.Start();
+                runProgress.SetStage(SpaceMapperRunStage.ResolvingInputs, "Resolving zones and targets...");
+
+                var request = BuildRequest();
+                if (request == null)
+                {
+                    runProgress.MarkFailed(new InvalidOperationException("Unable to build Space Mapper request."));
+                    return;
+                }
+
+                var doc = NavisApp.ActiveDocument;
+                if (doc == null)
+                {
+                    runProgress.MarkFailed(new InvalidOperationException("No active document."));
+                    return;
+                }
+
+                var session = SpaceMapperService.GetSession(request.ScraperProfileName);
+                var requiresSession = request.ZoneSource == ZoneSourceType.DataScraperZones;
+                if (requiresSession && session == null)
+                {
+                    runProgress.MarkFailed(new InvalidOperationException(
+                        $"No Data Scraper sessions found for profile '{request.ScraperProfileName ?? "Default"}'."));
+                    return;
+                }
+
+                if (session != null)
+                {
+                    DataScraperCache.LastSession = session;
+                }
+
+                if (request.ProcessingSettings?.CloseDockPanesDuringRun == true)
+                {
+                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes();
+                }
+
+                var resolved = SpaceMapperService.ResolveData(request, doc, session);
+                runProgress.SetTotals(resolved.ZoneModels.Count, resolved.TargetModels.Count);
+
+                if (!resolved.ZoneModels.Any())
+                {
+                    runProgress.MarkFailed(new InvalidOperationException("No zones found."));
+                    return;
+                }
+
+                if (!resolved.TargetModels.Any())
+                {
+                    runProgress.MarkFailed(new InvalidOperationException("No targets found for the selected rules."));
+                    return;
+                }
+
+                runProgress.SetStage(SpaceMapperRunStage.ExtractingGeometry, "Preparing geometry...");
+
+                var dataset = SpaceMapperService.BuildGeometryData(
+                    resolved,
+                    request.ProcessingSettings,
+                    buildTargetGeometry: true,
+                    _runCts.Token,
+                    runProgress);
+
+                if (!dataset.Zones.Any())
+                {
+                    runProgress.MarkFailed(new InvalidOperationException("No zones with bounding boxes found."));
+                    return;
+                }
+
+                if (!dataset.TargetsForEngine.Any())
+                {
+                    runProgress.MarkFailed(new InvalidOperationException("No targets with bounding boxes found."));
+                    return;
+                }
+
+                Interlocked.Exchange(ref runProgress.ZonesProcessed, runProgress.ZonesTotal);
+                Interlocked.Exchange(ref runProgress.TargetsProcessed, runProgress.TargetsTotal);
+
+                runProgress.SetStage(SpaceMapperRunStage.ComputingIntersections, "Running variation check...", "Preparing variants...");
+
+                var options = new SpaceMapperComparisonOptions
+                {
+                    IncludeAllBoundsVariants = true,
+                    IncludeCpuGpuComparison = true,
+                    BenchmarkMode = SpaceMapperBenchmarkMode.ComputeOnly,
+                    MaxZones = int.MaxValue,
+                    MaxTargets = int.MaxValue
+                };
+
+                var input = new SpaceMapperComparisonInput
+                {
+                    Request = request,
+                    Dataset = dataset,
+                    Options = options,
+                    ModelName = GetDocumentTitle(doc)
+                };
+
+                var progress = new Progress<SpaceMapperComparisonProgress>(update =>
+                {
+                    if (update == null)
+                    {
+                        return;
+                    }
+
+                    var detail = string.IsNullOrWhiteSpace(update.Stage) ? "Running variants..." : update.Stage;
+                    if (update.Percentage >= 0)
+                    {
+                        detail = $"{detail} ({update.Percentage}%)";
+                    }
+
+                    runProgress.SetStage(SpaceMapperRunStage.ComputingIntersections, "Running variation check...", detail);
+                });
+
+                var runner = new SpaceMapperComparisonRunner(MicroEngActions.Log);
+                var output = runner.Run(input, progress, _runCts.Token);
+
+                runProgress.SetStage(SpaceMapperRunStage.Finalizing, "Writing report...");
+
+                var reportPath = BuildVariationReportPath(doc, request.TemplateName);
+                var reportDir = Path.GetDirectoryName(reportPath);
+                if (!string.IsNullOrWhiteSpace(reportDir))
+                {
+                    Directory.CreateDirectory(reportDir);
+                }
+
+                File.WriteAllText(reportPath, output?.Markdown ?? string.Empty, Encoding.UTF8);
+
+                if (!string.IsNullOrWhiteSpace(output?.Json))
+                {
+                    var jsonPath = Path.ChangeExtension(reportPath, ".json");
+                    File.WriteAllText(jsonPath, output.Json, Encoding.UTF8);
+                }
+
+                runProgress.MarkCompleted();
+                progressHost.Close();
+
+                MessageBox.Show($"Variation check report saved to:\n{reportPath}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (OperationCanceledException)
+            {
+                runProgress.MarkCancelled();
+            }
+            catch (Exception ex)
+            {
+                runProgress.MarkFailed(ex);
+                MessageBox.Show($"Variation check failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -1681,40 +1851,70 @@ namespace MicroEng.Navisworks
 
         private SpaceMapperProcessingSettings BuildSettings()
         {
+            var containmentEngine = GetSelectedZoneContainmentEngine();
+            var resolutionStrategy = GetSelectedZoneResolutionStrategy();
+            var zoneBoundsMode = GetSelectedZoneBoundsMode();
+            var targetBoundsMode = GetSelectedTargetBoundsMode();
+            var treatPartial = _processingPage.TreatPartialCheck.IsChecked == true;
+            var tagPartial = _processingPage.TagPartialCheck.IsChecked == true;
+            var writeBehavior = _processingPage.WriteZoneBehaviorCheck?.IsChecked == true;
+            var writeContainmentPercent = _processingPage.WriteContainmentPercentCheck?.IsChecked == true;
+            var containmentCalculationMode = GetSelectedContainmentCalculationMode();
+            var gpuRayCount = GetSelectedGpuRayCount();
+
+            // Tier A/B: user controls target representation even when MeshAccurate is selected.
+            if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+            {
+                treatPartial = false;
+                tagPartial = false;
+                writeContainmentPercent = false;
+            }
+
             return new SpaceMapperProcessingSettings
             {
-                ProcessingMode = SpaceMapperProcessingMode.CpuNormal,
-                TreatPartialAsContained = _processingPage.TreatPartialCheck.IsChecked == true,
-                TagPartialSeparately = _processingPage.TagPartialCheck.IsChecked == true,
+                ProcessingMode = SpaceMapperProcessingMode.Auto,
+                TreatPartialAsContained = treatPartial,
+                TagPartialSeparately = tagPartial,
                 EnableMultipleZones = _processingPage.EnableMultiZoneCheck.IsChecked == true,
+                ExcludeZonesFromTargets = _processingPage.ExcludeZonesFromTargetsCheck?.IsChecked == true,
                 Offset3D = ParseDouble(_processingPage.Offset3DBox.Text),
                 OffsetTop = ParseDouble(_processingPage.OffsetTopBox.Text),
                 OffsetBottom = ParseDouble(_processingPage.OffsetBottomBox.Text),
                 OffsetSides = ParseDouble(_processingPage.OffsetSidesBox.Text),
                 Units = _processingPage.UnitsBox.Text,
                 OffsetMode = _processingPage.OffsetModeBox.Text,
-                MaxThreads = ParseInt(_processingPage.MaxThreadsBox.Text),
-                BatchSize = ParseInt(_processingPage.BatchSizeBox.Text),
-                IndexGranularity = (int)Math.Round(_processingPage.IndexGranularitySlider.Value),
-                PerformancePreset = GetSelectedPreset(),
-                FastTraversalMode = GetSelectedFastTraversalMode(),
+                MaxThreads = null,
+                BatchSize = null,
+                IndexGranularity = 0,
+                PerformancePreset = InferPresetFromBounds(zoneBoundsMode, targetBoundsMode, containmentEngine),
+                FastTraversalMode = SpaceMapperFastTraversalMode.Auto,
+                WriteZoneBehaviorProperty = writeBehavior,
+                WriteZoneContainmentPercentProperty = writeContainmentPercent,
+                ContainmentCalculationMode = containmentCalculationMode,
                 ZoneBehaviorCategory = _processingPage.ZoneBehaviorCategoryBox.Text?.Trim(),
                 ZoneBehaviorPropertyName = _processingPage.ZoneBehaviorPropertyBox.Text?.Trim(),
                 ZoneBehaviorContainedValue = _processingPage.ZoneBehaviorContainedBox.Text?.Trim(),
-                  ZoneBehaviorPartialValue = _processingPage.ZoneBehaviorPartialBox.Text?.Trim(),
-                  WritebackStrategy = GetSelectedWritebackStrategy(),
-                  ShowInternalPropertiesDuringWriteback = _processingPage.ShowInternalWritebackCheck?.IsChecked == true,
-                  CloseDockPanesDuringRun = _processingPage.CloseDockPanesCheck?.IsChecked == true,
-                  SkipUnchangedWriteback = _processingPage.SkipUnchangedWritebackCheck?.IsChecked == true,
-                  PackWritebackProperties = _processingPage.PackWritebackCheck?.IsChecked == true
-              };
-          }
+                ZoneBehaviorPartialValue = _processingPage.ZoneBehaviorPartialBox.Text?.Trim(),
+                WritebackStrategy = SpaceMapperWritebackStrategy.OptimizedSingleCategory,
+                ShowInternalPropertiesDuringWriteback = _processingPage.ShowInternalWritebackCheck?.IsChecked == true,
+                CloseDockPanesDuringRun = _processingPage.CloseDockPanesCheck?.IsChecked == true,
+                SkipUnchangedWriteback = _processingPage.SkipUnchangedWritebackCheck?.IsChecked == true,
+                PackWritebackProperties = _processingPage.PackWritebackCheck?.IsChecked == true,
+                ZoneBoundsMode = zoneBoundsMode,
+                ZoneKDopVariant = GetSelectedZoneKDopVariant(),
+                TargetBoundsMode = targetBoundsMode,
+                TargetKDopVariant = GetSelectedTargetKDopVariant(),
+                TargetMidpointMode = GetSelectedTargetMidpointMode(),
+                ZoneContainmentEngine = containmentEngine,
+                ZoneResolutionStrategy = resolutionStrategy,
+                UseOriginPointOnly = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint,
+                GpuRayCount = gpuRayCount
+            };
+        }
 
         private SpaceMapperRequest BuildRequest()
         {
             var settings = BuildSettings();
-            var resolvedPreset = SpaceMapperPresetLogic.ResolvePreset(settings, _lastPreflight, out _);
-            settings.UseOriginPointOnly = resolvedPreset == SpaceMapperPerformancePreset.Fast;
             return new SpaceMapperRequest
             {
                 TemplateName = _setupPage.TemplateCombo.SelectedItem?.ToString(),
@@ -1730,646 +1930,239 @@ namespace MicroEng.Navisworks
 
         private void TriggerLivePreflight()
         {
-            if (_applyingTemplate)
-            {
-                return;
-            }
-
-            if (_processingPage.LiveEstimateToggle.IsChecked != true)
-            {
-                return;
-            }
-
-            _preflightDebouncer.Debounce(token => RunPreflightOnUiThreadAsync(isLive: true, token));
+            // Preflight/benchmark UI removed; keep as a no-op for existing change hooks.
         }
 
-        private Task RunPreflightOnUiThreadAsync(bool isLive, CancellationToken token)
+        private SpaceMapperZoneBoundsMode GetSelectedZoneBoundsMode()
         {
-            if (Dispatcher.CheckAccess())
-            {
-                return RunPreflightAsync(isLive, token);
-            }
-
-            return Dispatcher.InvokeAsync(() => RunPreflightAsync(isLive, token)).Task.Unwrap();
-        }
-
-        private async Task RunPreflightAsync(bool isLive, CancellationToken debounceToken)
-        {
-            if (debounceToken.IsCancellationRequested)
-            {
-                return;
-            }
-
-            if (!ValidatePreflightInputs(showMessage: !isLive))
-            {
-                ResetPreflightUi("Invalid input");
-                return;
-            }
-
-            var request = BuildRequest();
-            CancelPreflight();
-
-            _preflightCts = CancellationTokenSource.CreateLinkedTokenSource(debounceToken);
-            var token = _preflightCts.Token;
-
-            _processingPage.RunPreflightButton.IsEnabled = false;
-            _processingPage.PreflightProgressBar.IsIndeterminate = true;
-            _processingPage.PreflightProgressBar.Value = 0;
-            _processingPage.PreflightStatusText.Text = isLive ? "Live..." : "Running";
-
-            var progress = new Progress<SpaceMapperPreflightProgress>(p =>
-            {
-                _processingPage.PreflightStatusText.Text = string.IsNullOrWhiteSpace(p.Stage) ? "Running" : p.Stage;
-                _processingPage.PreflightProgressBar.IsIndeterminate = false;
-                _processingPage.PreflightProgressBar.Value = Math.Min(100, Math.Max(0, p.Percentage));
-            });
-
-            try
-            {
-                var result = await _preflightService.RunAsync(request, token, progress);
-                if (token.IsCancellationRequested)
-                {
-                    ResetPreflightUi("Cancelled");
-                    return;
-                }
-
-                if (result == null)
-                {
-                    ResetPreflightUi("No data");
-                    UpdateEstimateUi(request, null);
-                    return;
-                }
-
-                _lastPreflight = result;
-                UpdateEstimateUi(request, result);
-                _processingPage.PreflightStatusText.Text = "Complete";
-            }
-            catch (OperationCanceledException)
-            {
-                ResetPreflightUi("Cancelled");
-            }
-            catch (Exception ex)
-            {
-                ResetPreflightUi("Failed");
-                MicroEngActions.Log($"SpaceMapper Preflight: failed - {ex.Message}");
-            }
-            finally
-            {
-                _processingPage.RunPreflightButton.IsEnabled = true;
-                _processingPage.PreflightProgressBar.IsIndeterminate = false;
-            }
-        }
-
-        private async Task RunComparisonReportAsync()
-        {
-            DockPaneVisibilitySnapshot paneSnapshot = null;
-            if (_compareCts != null)
-            {
-                _compareCts.Cancel();
-                return;
-            }
-
-            if (!ValidatePreflightInputs(showMessage: true))
-            {
-                UpdateComparisonStatus("Invalid input");
-                return;
-            }
-
-            var doc = NavisApp.ActiveDocument;
-            if (doc == null)
-            {
-                UpdateComparisonStatus("No active document.");
-                return;
-            }
-
-            var request = BuildRequest();
-            var session = SpaceMapperService.GetSession(request.ScraperProfileName);
-            var requiresSession = request.ZoneSource == ZoneSourceType.DataScraperZones;
-            if (requiresSession && session == null)
-            {
-                UpdateComparisonStatus($"No Data Scraper sessions found for profile '{request.ScraperProfileName ?? "Default"}'.");
-                return;
-            }
-
-            _compareCts = new CancellationTokenSource();
-            var token = _compareCts.Token;
-
-            SetComparisonRunning(true);
-            UpdateComparisonStatus("Preparing...");
-            ClearBenchmarkSummary();
-            _processingPage.PreflightProgressBar.IsIndeterminate = true;
-            _processingPage.PreflightProgressBar.Value = 0;
-            _processingPage.PreflightStatusText.Text = "Benchmark";
-
-            var progress = new Progress<SpaceMapperComparisonProgress>(UpdateComparisonProgress);
-
-            try
-            {
-                if (request?.ProcessingSettings?.CloseDockPanesDuringRun == true)
-                {
-                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes();
-                }
-
-                var resolved = SpaceMapperService.ResolveData(request, doc, session);
-                if (!resolved.ZoneModels.Any())
-                {
-                    UpdateComparisonStatus("No zones found.");
-                    return;
-                }
-
-                if (!resolved.TargetModels.Any())
-                {
-                    UpdateComparisonStatus("No targets found for the selected rules.");
-                    return;
-                }
-
-                UpdateComparisonStatus("Building dataset...");
-                var dataset = SpaceMapperService.BuildGeometryData(
-                    resolved,
-                    request.ProcessingSettings,
-                    buildTargetGeometry: true,
-                    token,
-                    forceRequirePlanes: false);
-
-                if (!dataset.Zones.Any())
-                {
-                    UpdateComparisonStatus("No zones with bounding boxes found.");
-                    return;
-                }
-
-                if (!dataset.TargetsForEngine.Any())
-                {
-                    UpdateComparisonStatus("No targets with bounding boxes found.");
-                    return;
-                }
-
-                var input = new SpaceMapperComparisonInput
-                {
-                    Request = request,
-                    Dataset = dataset,
-                    Options = new SpaceMapperComparisonOptions
-                    {
-                        ReusePreflightForRun = _processingPage.ReusePreflightToggle.IsChecked == true,
-                        BenchmarkMode = GetSelectedBenchmarkMode()
-                    },
-                    ModelName = GetModelName(doc)
-                };
-
-                var runner = new SpaceMapperComparisonRunner(MicroEngActions.Log);
-                var output = await Task.Run(() => runner.Run(input, progress, token), token);
-
-                var (mdPath, _) = WriteComparisonReport(output);
-                UpdateComparisonStatus($"Benchmark saved: {mdPath}");
-                MicroEngActions.Log($"SpaceMapper Benchmark: report saved {mdPath}");
-                _processingPage.PreflightStatusText.Text = "Complete";
-                UpdateBenchmarkSummary(output?.Report);
-            }
-            catch (OperationCanceledException)
-            {
-                UpdateComparisonStatus("Benchmark cancelled.");
-                _processingPage.PreflightStatusText.Text = "Cancelled";
-            }
-            catch (Exception ex)
-            {
-                UpdateComparisonStatus("Benchmark failed.");
-                _processingPage.PreflightStatusText.Text = "Failed";
-                MicroEngActions.Log($"SpaceMapper Benchmark: failed - {ex.Message}");
-                MessageBox.Show($"Benchmark failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                _compareCts?.Dispose();
-                _compareCts = null;
-                SetComparisonRunning(false);
-                _processingPage.PreflightProgressBar.IsIndeterminate = false;
-                _processingPage.PreflightProgressBar.Value = 0;
-                NavisworksDockPaneManager.RestoreDockPanes(paneSnapshot);
-            }
-        }
-
-        private void UpdateComparisonProgress(SpaceMapperComparisonProgress progress)
-        {
-            if (progress == null)
-            {
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(progress.Stage))
-            {
-                _processingPage.PreflightStatusText.Text = progress.Stage;
-            }
-
-            if (progress.Percentage >= 0)
-            {
-                _processingPage.PreflightProgressBar.IsIndeterminate = false;
-                _processingPage.PreflightProgressBar.Value = Math.Min(100, Math.Max(0, progress.Percentage));
-            }
-            else
-            {
-                _processingPage.PreflightProgressBar.IsIndeterminate = true;
-            }
-        }
-
-        private void SetComparisonRunning(bool running)
-        {
-            _processingPage.ComparisonReportButton.Content = running ? "Cancel Benchmark" : "Benchmark";
-            if (_processingPage.BenchmarkModeCombo != null)
-            {
-                _processingPage.BenchmarkModeCombo.IsEnabled = !running;
-            }
-        }
-
-        private void UpdateComparisonStatus(string status)
-        {
-            _processingPage.ComparisonReportStatusText.Text = status ?? string.Empty;
-        }
-
-        private void ClearBenchmarkSummary()
-        {
-            if (_processingPage?.BenchmarkSummaryText != null)
-            {
-                _processingPage.BenchmarkSummaryText.Text = string.Empty;
-            }
-
-            if (_processingPage?.BenchmarkSummaryDetailText != null)
-            {
-                _processingPage.BenchmarkSummaryDetailText.Text = string.Empty;
-            }
-        }
-
-        private void UpdateBenchmarkSummary(SpaceMapperComparisonReport report)
-        {
-            if (_processingPage?.BenchmarkSummaryText == null || _processingPage.BenchmarkSummaryDetailText == null)
-            {
-                return;
-            }
-
-            if (report?.Variants == null || report.Variants.Count == 0)
-            {
-                ClearBenchmarkSummary();
-                return;
-            }
-
-            var completed = report.Variants
-                .Where(v => v != null && !v.Skipped && v.Timings != null)
-                .ToList();
-
-            if (completed.Count == 0)
-            {
-                ClearBenchmarkSummary();
-                return;
-            }
-
-            var fastest = completed
-                .OrderBy(v => v.Timings.TotalMs <= 0 ? double.MaxValue : v.Timings.TotalMs)
-                .FirstOrDefault();
-
-            var fastestName = fastest?.Name ?? "n/a";
-            var fastestMs = fastest?.Timings?.TotalMs ?? 0;
-
-            var bestAgreement = report.Comparisons?
-                .OrderByDescending(c => c.SameZonePercent)
-                .FirstOrDefault();
-
-            var summary = $"Fastest: {fastestName} ({fastestMs:0} ms)";
-            if (bestAgreement != null)
-            {
-                summary += $"; Best agreement: {bestAgreement.VariantName} {bestAgreement.SameZonePercent:0.0}%";
-            }
-
-            var detailParts = new List<string>();
-            var targetsProcessed = fastest?.Workload?.TargetsProcessed ?? 0;
-            if (targetsProcessed > 0)
-            {
-                var unmatched = fastest.Workload.UnmatchedTargets;
-                var coverage = 100.0 * Math.Max(0, targetsProcessed - unmatched) / targetsProcessed;
-                detailParts.Add($"Coverage: {coverage:0.0}%");
-            }
-
-            var writes = fastest?.Workload?.WritesPerformed ?? 0;
-            if (writes > 0)
-            {
-                detailParts.Add($"Writes: {writes:N0}");
-            }
-
-            var mode = fastest?.Settings?.BenchmarkMode;
-            if (!string.IsNullOrWhiteSpace(mode))
-            {
-                detailParts.Add($"Mode: {FormatBenchmarkModeLabel(mode)}");
-            }
-
-            _processingPage.BenchmarkSummaryText.Text = summary;
-            _processingPage.BenchmarkSummaryDetailText.Text = string.Join(" | ", detailParts);
-        }
-
-        private static string FormatBenchmarkModeLabel(string mode)
-        {
-            if (string.Equals(mode, SpaceMapperBenchmarkMode.ComputeOnly.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                return "Compute only";
-            }
-
-            if (string.Equals(mode, SpaceMapperBenchmarkMode.SimulateWriteback.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                return "Simulate writeback";
-            }
-
-            if (string.Equals(mode, SpaceMapperBenchmarkMode.FullWriteback.ToString(), StringComparison.OrdinalIgnoreCase))
-            {
-                return "Full writeback";
-            }
-
-            return mode;
-        }
-
-        private static (string MarkdownPath, string JsonPath) WriteComparisonReport(SpaceMapperComparisonOutput output)
-        {
-            var baseDir = Path.GetDirectoryName(typeof(SpaceMapperControl).Assembly.Location)
-                ?? AppDomain.CurrentDomain.BaseDirectory;
-            var reportsDir = Path.Combine(baseDir, "Reports");
-            Directory.CreateDirectory(reportsDir);
-
-            var timestamp = DateTime.UtcNow;
-            if (!string.IsNullOrWhiteSpace(output?.Report?.GeneratedUtc)
-                && DateTime.TryParse(output.Report.GeneratedUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed))
-            {
-                timestamp = parsed.ToUniversalTime();
-            }
-
-            var stamp = timestamp.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
-            var mdPath = Path.Combine(reportsDir, $"SpaceMapper_Compare_{stamp}.md");
-            var jsonPath = Path.Combine(reportsDir, $"SpaceMapper_Compare_{stamp}.json");
-
-            File.WriteAllText(mdPath, output?.Markdown ?? string.Empty);
-            File.WriteAllText(jsonPath, output?.Json ?? string.Empty);
-
-            return (mdPath, jsonPath);
-        }
-
-        private static string GetModelName(Document doc)
-        {
-            if (doc == null)
-            {
-                return string.Empty;
-            }
-
-            var name = doc.FileName;
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return "Untitled";
-            }
-
-            return Path.GetFileName(name);
-        }
-
-        private void UpdateEstimateUi(SpaceMapperRequest request, SpaceMapperPreflightResult result)
-        {
-            if (result == null)
-            {
-                _processingPage.EstimateRuntimeText.Text = "n/a";
-                _processingPage.EstimateCountsText.Text = "-";
-                _processingPage.EstimatePairsText.Text = "-";
-                _processingPage.EstimateAvgLabelText.Text = "Avg candidates/zone:";
-                _processingPage.EstimateAvgText.Text = "-";
-                _processingPage.EstimateConfidenceText.Text = "Low";
-                _processingPage.EstimateCellSizeText.Text = "-";
-                _processingPage.EstimatePreflightTimeText.Text = "-";
-                UpdateIndexGranularityHint(null);
-                UpdatePresetUi(null);
-                UpdateFastTraversalUi();
-                return;
-            }
-
-            _processingPage.EstimateCountsText.Text = $"Zones: {result.ZoneCount:N0} Targets: {result.TargetCount:N0}";
-            _processingPage.EstimatePairsText.Text = $"{result.CandidatePairs:N0}";
-            if (result.TraversalUsed == SpaceMapperFastTraversalMode.TargetMajor)
-            {
-                _processingPage.EstimateAvgLabelText.Text = "Avg candidates/target:";
-                _processingPage.EstimateAvgText.Text = $"{result.AvgCandidatesPerTarget:N0}";
-            }
-            else
-            {
-                _processingPage.EstimateAvgLabelText.Text = "Avg candidates/zone:";
-                _processingPage.EstimateAvgText.Text = $"{result.AvgCandidatesPerZone:N0}";
-            }
-
-            if (result.ZoneCount == 0 || result.TargetCount == 0)
-            {
-                _processingPage.EstimateRuntimeText.Text = "n/a";
-                _processingPage.EstimateConfidenceText.Text = "Low";
-                return;
-            }
-
-            var mappingCount = Mappings.Count(m => !string.IsNullOrWhiteSpace(m.TargetPropertyName));
-            var calibrationKey = GetCalibrationKey(request?.ProcessingSettings, result);
-            var calibration = _calibrationStore.GetOrCreate(calibrationKey);
-            _lastEstimate = SpaceMapperRuntimeEstimator.Estimate(result, calibration, mappingCount);
-
-            _processingPage.EstimateRuntimeText.Text = FormatEstimate(_lastEstimate.EstimatedTotal);
-            _processingPage.EstimateConfidenceText.Text = $"{_lastEstimate.ConfidenceLabel}";
-            _processingPage.EstimateCellSizeText.Text = FormatCellSize(result);
-            _processingPage.EstimatePreflightTimeText.Text = FormatPreflightTimestamp(result.TimestampUtc);
-            UpdateIndexGranularityHint(result);
-            UpdatePresetUi(result);
-            UpdateFastTraversalUi();
-        }
-
-        private SpaceMapperPerformancePreset GetSelectedPreset()
-        {
-            if (_processingPage.AutoPresetToggle.IsChecked == true)
-            {
-                return SpaceMapperPerformancePreset.Auto;
-            }
-
-            var v = (int)Math.Round(_processingPage.PresetSlider.Value);
+            var v = (int)Math.Round(_processingPage.ZoneBoundsSlider.Value);
             return v switch
             {
-                0 => SpaceMapperPerformancePreset.Fast,
-                1 => SpaceMapperPerformancePreset.Normal,
-                2 => SpaceMapperPerformancePreset.Accurate,
-                _ => SpaceMapperPerformancePreset.Normal
+                1 => SpaceMapperZoneBoundsMode.Obb,
+                2 => SpaceMapperZoneBoundsMode.KDop,
+                3 => SpaceMapperZoneBoundsMode.Hull,
+                _ => SpaceMapperZoneBoundsMode.Aabb
             };
         }
 
-        private SpaceMapperFastTraversalMode GetSelectedFastTraversalMode()
+        private SpaceMapperTargetBoundsMode GetSelectedTargetBoundsMode()
         {
-            if (_processingPage.FastTraversalCombo == null)
+            var v = (int)Math.Round(_processingPage.TargetBoundsSlider.Value);
+            return v switch
             {
-                return SpaceMapperFastTraversalMode.Auto;
-            }
-
-            return _processingPage.FastTraversalCombo.SelectedIndex switch
-            {
-                1 => SpaceMapperFastTraversalMode.ZoneMajor,
-                2 => SpaceMapperFastTraversalMode.TargetMajor,
-                _ => SpaceMapperFastTraversalMode.Auto
+                0 => SpaceMapperTargetBoundsMode.Midpoint,
+                1 => SpaceMapperTargetBoundsMode.Aabb,
+                2 => SpaceMapperTargetBoundsMode.Obb,
+                3 => SpaceMapperTargetBoundsMode.KDop,
+                4 => SpaceMapperTargetBoundsMode.Hull,
+                _ => SpaceMapperTargetBoundsMode.Aabb
             };
         }
 
-        private SpaceMapperBenchmarkMode GetSelectedBenchmarkMode()
+        private SpaceMapperZoneContainmentEngine GetSelectedZoneContainmentEngine()
         {
-            if (_processingPage?.BenchmarkModeCombo == null)
+            if (_processingPage.ZoneContainmentEngineCombo == null)
             {
-                return SpaceMapperBenchmarkMode.ComputeOnly;
+                return SpaceMapperZoneContainmentEngine.BoundsFast;
             }
 
-            return _processingPage.BenchmarkModeCombo.SelectedIndex switch
+            return _processingPage.ZoneContainmentEngineCombo.SelectedIndex switch
             {
-                1 => SpaceMapperBenchmarkMode.SimulateWriteback,
-                2 => SpaceMapperBenchmarkMode.FullWriteback,
-                _ => SpaceMapperBenchmarkMode.ComputeOnly
+                1 => SpaceMapperZoneContainmentEngine.MeshAccurate,
+                _ => SpaceMapperZoneContainmentEngine.BoundsFast
             };
         }
 
-        private SpaceMapperWritebackStrategy GetSelectedWritebackStrategy()
+        private SpaceMapperZoneResolutionStrategy GetSelectedZoneResolutionStrategy()
         {
-            if (_processingPage?.WritebackStrategyCombo == null)
+            if (_processingPage.ZoneResolutionStrategyCombo == null)
             {
-                return SpaceMapperWritebackStrategy.OptimizedSingleCategory;
+                return SpaceMapperZoneResolutionStrategy.MostSpecific;
             }
 
-            return _processingPage.WritebackStrategyCombo.SelectedIndex switch
+            return _processingPage.ZoneResolutionStrategyCombo.SelectedIndex switch
             {
-                0 => SpaceMapperWritebackStrategy.VirtualNoBake,
-                2 => SpaceMapperWritebackStrategy.LegacyPerMapping,
-                _ => SpaceMapperWritebackStrategy.OptimizedSingleCategory
+                1 => SpaceMapperZoneResolutionStrategy.LargestOverlap,
+                2 => SpaceMapperZoneResolutionStrategy.FirstMatch,
+                _ => SpaceMapperZoneResolutionStrategy.MostSpecific
             };
         }
 
-        private void ApplyFastTraversalMode(SpaceMapperFastTraversalMode mode)
+        private SpaceMapperContainmentCalculationMode GetSelectedContainmentCalculationMode()
         {
-            if (_processingPage.FastTraversalCombo == null)
+            if (_processingPage.ContainmentCalculationCombo == null)
             {
-                return;
+                return SpaceMapperContainmentCalculationMode.Auto;
             }
 
-            _processingPage.FastTraversalCombo.SelectedIndex = mode switch
+            return _processingPage.ContainmentCalculationCombo.SelectedIndex switch
             {
-                SpaceMapperFastTraversalMode.ZoneMajor => 1,
-                SpaceMapperFastTraversalMode.TargetMajor => 2,
-                _ => 0
+                1 => SpaceMapperContainmentCalculationMode.SamplePoints,
+                2 => SpaceMapperContainmentCalculationMode.SamplePointsDense,
+                3 => SpaceMapperContainmentCalculationMode.TargetGeometry,
+                4 => SpaceMapperContainmentCalculationMode.BoundsOverlap,
+                _ => SpaceMapperContainmentCalculationMode.Auto
             };
         }
 
-        private void UpdatePresetUi(SpaceMapperPreflightResult preflight)
+        private int GetSelectedGpuRayCount()
         {
-            var selected = GetSelectedPreset();
-            _processingPage.PresetDescriptionText.Text = SpaceMapperPresetLogic.DescribePreset(selected);
-
-            if (selected == SpaceMapperPerformancePreset.Auto)
+            if (_processingPage.GpuRayAccuracyCombo == null)
             {
-                _ = SpaceMapperPresetLogic.ResolvePreset(selected, preflight, out var reason);
-                _processingPage.PresetResolvedText.Text = reason;
-                return;
+                return 2;
             }
 
-            _processingPage.PresetResolvedText.Text = string.Empty;
+            return _processingPage.GpuRayAccuracyCombo.SelectedIndex switch
+            {
+                0 => 1,
+                _ => 2
+            };
+        }
+
+        private SpaceMapperKDopVariant GetSelectedZoneKDopVariant()
+        {
+            return _processingPage.ZoneKDopVariantCombo.SelectedIndex switch
+            {
+                0 => SpaceMapperKDopVariant.KDop8,
+                2 => SpaceMapperKDopVariant.KDop18,
+                _ => SpaceMapperKDopVariant.KDop14
+            };
+        }
+
+        private SpaceMapperKDopVariant GetSelectedTargetKDopVariant()
+        {
+            return _processingPage.TargetKDopVariantCombo.SelectedIndex switch
+            {
+                0 => SpaceMapperKDopVariant.KDop8,
+                2 => SpaceMapperKDopVariant.KDop18,
+                _ => SpaceMapperKDopVariant.KDop14
+            };
+        }
+
+        private SpaceMapperMidpointMode GetSelectedTargetMidpointMode()
+        {
+            return _processingPage.TargetMidpointModeCombo.SelectedIndex switch
+            {
+                1 => SpaceMapperMidpointMode.BoundingBoxBottomCenter,
+                _ => SpaceMapperMidpointMode.BoundingBoxCenter
+            };
+        }
+
+        private static SpaceMapperPerformancePreset InferPresetFromBounds(
+            SpaceMapperZoneBoundsMode zoneMode,
+            SpaceMapperTargetBoundsMode targetMode,
+            SpaceMapperZoneContainmentEngine containmentEngine = SpaceMapperZoneContainmentEngine.BoundsFast)
+        {
+            if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate)
+            {
+                return SpaceMapperPerformancePreset.Accurate;
+            }
+
+            if (targetMode == SpaceMapperTargetBoundsMode.Midpoint)
+            {
+                return SpaceMapperPerformancePreset.Fast;
+            }
+
+            if (zoneMode == SpaceMapperZoneBoundsMode.Hull
+                || targetMode == SpaceMapperTargetBoundsMode.Hull
+                || zoneMode == SpaceMapperZoneBoundsMode.KDop
+                || targetMode == SpaceMapperTargetBoundsMode.KDop
+                || zoneMode == SpaceMapperZoneBoundsMode.Obb
+                || targetMode == SpaceMapperTargetBoundsMode.Obb)
+            {
+                return SpaceMapperPerformancePreset.Accurate;
+            }
+
+            return SpaceMapperPerformancePreset.Normal;
+        }
+
+        private void OnBoundsModesChanged()
+        {
+            var containmentEngine = GetSelectedZoneContainmentEngine();
+            var resolutionStrategy = GetSelectedZoneResolutionStrategy();
+
+            if (_processingPage.TargetBoundsSlider != null)
+            {
+                // Tier A/B: allow user to choose target bounds even when MeshAccurate is selected.
+                _processingPage.TargetBoundsSlider.IsEnabled = true;
+            }
+
+            var zoneMode = GetSelectedZoneBoundsMode();
+            var targetMode = GetSelectedTargetBoundsMode();
+
+            if (_processingPage.ZoneKDopVariantRow != null)
+            {
+                _processingPage.ZoneKDopVariantRow.Visibility = zoneMode == SpaceMapperZoneBoundsMode.KDop
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (_processingPage.TargetKDopVariantRow != null)
+            {
+                _processingPage.TargetKDopVariantRow.Visibility = targetMode == SpaceMapperTargetBoundsMode.KDop
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (_processingPage.TargetMidpointModeRow != null)
+            {
+                _processingPage.TargetMidpointModeRow.Visibility = targetMode == SpaceMapperTargetBoundsMode.Midpoint
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (targetMode == SpaceMapperTargetBoundsMode.Midpoint)
+            {
+                if (_processingPage.TreatPartialCheck.IsChecked == true)
+                {
+                    _processingPage.TreatPartialCheck.IsChecked = false;
+                }
+                if (_processingPage.TagPartialCheck.IsChecked == true)
+                {
+                    _processingPage.TagPartialCheck.IsChecked = false;
+                }
+                _processingPage.TreatPartialCheck.IsEnabled = false;
+                _processingPage.TagPartialCheck.IsEnabled = false;
+            }
+            else
+            {
+                _processingPage.TreatPartialCheck.IsEnabled = true;
+                _processingPage.TagPartialCheck.IsEnabled = true;
+            }
+
+            if (_processingPage.ZoneContainmentHintText != null)
+            {
+                _processingPage.ZoneContainmentHintText.Text = GetZoneContainmentHintText(containmentEngine, resolutionStrategy);
+            }
+
+            UpdateZoneBehaviorInputs();
+            UpdateFastTraversalUi();
+            TriggerLivePreflight();
         }
 
         private void UpdateFastTraversalUi()
         {
-            if (_processingPage?.FastTraversalCombo == null)
-            {
-                return;
-            }
-
-            var needsPartial = _processingPage.TagPartialCheck.IsChecked == true
-                || _processingPage.TreatPartialCheck.IsChecked == true;
-            var selectedPreset = GetSelectedPreset();
-            var effectivePreset = SpaceMapperPresetLogic.ResolvePreset(selectedPreset, _lastPreflight, out _);
-            var allowTargetMajor = effectivePreset == SpaceMapperPerformancePreset.Fast && !needsPartial;
-
-            if (_processingPage.FastTraversalCombo.Items.Count > 2
-                && _processingPage.FastTraversalCombo.Items[2] is ComboBoxItem targetItem)
-            {
-                targetItem.IsEnabled = allowTargetMajor;
-            }
-
-            if (!allowTargetMajor && _processingPage.FastTraversalCombo.SelectedIndex == 2)
-            {
-                _processingPage.FastTraversalCombo.SelectedIndex = 1;
-            }
-
-            if (_processingPage.FastTraversalHintText != null)
-            {
-                _processingPage.FastTraversalHintText.Text = allowTargetMajor
-                    ? "Target-major is available only when partial options are disabled."
-                    : "Target-major is disabled unless Fast preset is active and partial options are off.";
-            }
-
-            var selectedTraversal = GetSelectedFastTraversalMode();
-            SpaceMapperFastTraversalMode resolved;
-            string reason = null;
-
-            if (!allowTargetMajor)
-            {
-                resolved = SpaceMapperFastTraversalMode.ZoneMajor;
-                if (needsPartial)
-                {
-                    reason = "partials enabled";
-                }
-                else if (effectivePreset != SpaceMapperPerformancePreset.Fast)
-                {
-                    reason = "preset not Fast";
-                }
-            }
-            else if (selectedTraversal == SpaceMapperFastTraversalMode.Auto)
-            {
-                if (_lastPreflight != null && _lastPreflight.TargetCount > _lastPreflight.ZoneCount * 2)
-                {
-                    resolved = SpaceMapperFastTraversalMode.TargetMajor;
-                }
-                else
-                {
-                    resolved = SpaceMapperFastTraversalMode.ZoneMajor;
-                }
-
-                if (_lastPreflight == null)
-                {
-                    reason = "run preflight to auto-resolve";
-                }
-            }
-            else
-            {
-                resolved = selectedTraversal;
-            }
-
-            if (_processingPage.FastTraversalResolvedText != null)
-            {
-                var label = resolved == SpaceMapperFastTraversalMode.TargetMajor ? "Target-major" : "Zone-major";
-                _processingPage.FastTraversalResolvedText.Text = string.IsNullOrWhiteSpace(reason)
-                    ? $"Resolved: {label}"
-                    : $"Resolved: {label} ({reason})";
-            }
+            // Fast traversal UI removed; keep no-op for existing call sites.
         }
 
-        private void OnPresetChanged()
+        private static string GetZoneContainmentHintText(
+            SpaceMapperZoneContainmentEngine engine,
+            SpaceMapperZoneResolutionStrategy strategy)
         {
-            UpdatePresetUi(_lastPreflight);
-            UpdateFastTraversalUi();
+            var prefix = engine == SpaceMapperZoneContainmentEngine.MeshAccurate
+                ? "Mesh accurate engine: Tier A = Midpoint (single point); Tier B = AABB/OBB/k-DOP/Hull (multi-sample)."
+                : "Bounds engine: uses planes/AABB checks; Midpoint reduces targets to a single point.";
 
-            if (_processingPage.LiveEstimateToggle.IsChecked != true)
+            return strategy switch
             {
-                return;
-            }
-
-            if (_lastPreflight != null)
-            {
-                UpdateEstimateUi(BuildRequest(), _lastPreflight);
-            }
-            else
-            {
-                TriggerLivePreflight();
-            }
-        }
-
-        private static string FormatEstimate(TimeSpan estimate)
-        {
-            if (estimate.TotalHours >= 1)
-            {
-                return estimate.ToString(@"h\:mm\:ss");
-            }
-            return estimate.ToString(@"m\:ss");
+                SpaceMapperZoneResolutionStrategy.MostSpecific =>
+                    $"{prefix} Most specific picks the smallest enclosing zone.",
+                SpaceMapperZoneResolutionStrategy.LargestOverlap =>
+                    $"{prefix} Largest overlap uses AABB overlap volume to choose a single zone.",
+                SpaceMapperZoneResolutionStrategy.FirstMatch =>
+                    $"{prefix} First match picks the first zone in order.",
+                _ => prefix
+            };
         }
 
         private static string FormatDuration(TimeSpan span)
@@ -2381,39 +2174,28 @@ namespace MicroEng.Navisworks
             return $"{span.TotalMilliseconds:0}ms";
         }
 
-        private static string GetCalibrationKey(SpaceMapperProcessingSettings settings, SpaceMapperPreflightResult preflight)
-        {
-            var mode = settings?.ProcessingMode ?? SpaceMapperProcessingMode.CpuNormal;
-            var preset = SpaceMapperPresetLogic.ResolvePreset(settings, preflight, out _);
-            return $"{mode}/{preset}";
-        }
-
-        private void CancelPreflight()
-        {
-            if (_preflightCts == null)
-            {
-                return;
-            }
-
-            _preflightCts.Cancel();
-            _preflightCts.Dispose();
-            _preflightCts = null;
-        }
-
-        private void ResetPreflightUi(string status)
-        {
-            _preflightDebouncer.Cancel();
-            CancelPreflight();
-            _processingPage.PreflightStatusText.Text = status;
-            _processingPage.PreflightProgressBar.IsIndeterminate = false;
-            _processingPage.PreflightProgressBar.Value = 0;
-        }
-
         private sealed class ValidationIssue
         {
             public string Message { get; set; }
             public Action FocusAction { get; set; }
             public Type PageType { get; set; }
+        }
+
+        private bool ValidateVariationCheckInputs()
+        {
+            var issues = new List<ValidationIssue>();
+            ValidateSetupInputs(issues);
+            ValidateZonesTargetsInputs(issues);
+            ValidateProcessingInputs(issues);
+
+            if (issues.Count == 0)
+            {
+                return true;
+            }
+
+            ShowValidationIssues(issues);
+            NavigateToIssue(issues[0]);
+            return false;
         }
 
         private bool ValidateRunInputs()
@@ -2431,27 +2213,6 @@ namespace MicroEng.Navisworks
 
             ShowValidationIssues(issues);
             NavigateToIssue(issues[0]);
-            return false;
-        }
-
-        private bool ValidatePreflightInputs(bool showMessage)
-        {
-            var issues = new List<ValidationIssue>();
-            ValidateSetupInputs(issues);
-            ValidateZonesTargetsInputs(issues);
-            ValidateProcessingInputs(issues);
-
-            if (issues.Count == 0)
-            {
-                return true;
-            }
-
-            if (showMessage)
-            {
-                ShowValidationIssues(issues);
-                NavigateToIssue(issues[0]);
-            }
-
             return false;
         }
 
@@ -2659,7 +2420,7 @@ namespace MicroEng.Navisworks
                 });
             }
 
-            if (_processingPage.TagPartialCheck.IsChecked == true)
+            if (_processingPage.WriteZoneBehaviorCheck?.IsChecked == true)
             {
                 if (string.IsNullOrWhiteSpace(_processingPage.ZoneBehaviorCategoryBox.Text))
                 {
@@ -2702,33 +2463,6 @@ namespace MicroEng.Navisworks
                 }
             }
 
-            if (!TryParseOptionalNonNegativeInt(_processingPage.MaxThreadsBox.Text, out _))
-            {
-                issues.Add(new ValidationIssue
-                {
-                    PageType = typeof(SpaceMapperStepProcessingPage),
-                    Message = "Max Threads must be 0 or a positive whole number.",
-                    FocusAction = () =>
-                    {
-                        _processingPage.AdvancedPerformanceExpander.IsExpanded = true;
-                        _processingPage.MaxThreadsBox.Focus();
-                    }
-                });
-            }
-
-            if (!TryParseOptionalNonNegativeInt(_processingPage.BatchSizeBox.Text, out _))
-            {
-                issues.Add(new ValidationIssue
-                {
-                    PageType = typeof(SpaceMapperStepProcessingPage),
-                    Message = "Batch Size must be 0 or a positive whole number.",
-                    FocusAction = () =>
-                    {
-                        _processingPage.AdvancedPerformanceExpander.IsExpanded = true;
-                        _processingPage.BatchSizeBox.Focus();
-                    }
-                });
-            }
         }
 
         private void ValidateMappingInputs(List<ValidationIssue> issues)
@@ -2939,50 +2673,6 @@ namespace MicroEng.Navisworks
             return double.TryParse(text, out var d) ? d : 0;
         }
 
-        private static int? ParseInt(string text)
-        {
-            return int.TryParse(text, out var i) && i > 0 ? i : (int?)null;
-        }
-
-        private void UpdateCalibrationFromRun(SpaceMapperRequest request, SpaceMapperRunResult result)
-        {
-            if (request == null || result?.Stats == null)
-            {
-                return;
-            }
-
-            if (_lastPreflight == null)
-            {
-                return;
-            }
-
-            var signature = SpaceMapperPreflightService.BuildSignature(request);
-            if (!string.Equals(signature, _lastPreflight.Signature, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            if (_lastPreflight.CandidatePairs <= 0)
-            {
-                return;
-            }
-
-            var key = GetCalibrationKeyWithPreset(request.ProcessingSettings, result.Stats);
-            _calibrationStore.Update(key, result.Stats.Elapsed.TotalSeconds, _lastPreflight.CandidatePairs, result.Stats.WritesPerformed);
-
-            var mappingCount = Mappings.Count(m => !string.IsNullOrWhiteSpace(m.TargetPropertyName));
-            var calibration = _calibrationStore.GetOrCreate(key);
-            _lastEstimate = SpaceMapperRuntimeEstimator.Estimate(_lastPreflight, calibration, mappingCount);
-            UpdateEstimateUi(request, _lastPreflight);
-        }
-
-        private static string GetCalibrationKeyWithPreset(SpaceMapperProcessingSettings settings, SpaceMapperRunStats stats)
-        {
-            var mode = settings?.ProcessingMode ?? SpaceMapperProcessingMode.CpuNormal;
-            var preset = stats?.PresetUsed ?? SpaceMapperPerformancePreset.Normal;
-            return $"{mode}/{preset}";
-        }
-
         private void ShowResults(SpaceMapperRunResult result)
         {
             ZoneSummaries.Clear();
@@ -3001,10 +2691,13 @@ namespace MicroEng.Navisworks
                 sb.AppendLine($"Zones: {result.Stats.ZonesProcessed}, Targets: {result.Stats.TargetsProcessed}");
                 sb.AppendLine($"Contained: {result.Stats.ContainedTagged}, Partial: {result.Stats.PartialTagged}, Multi-Zone: {result.Stats.MultiZoneTagged}, Skipped: {result.Stats.Skipped}");
                 sb.AppendLine($"Candidates: {result.Stats.CandidatePairs:N0} (avg {result.Stats.AvgCandidatesPerZone:0.##}/zone, max {result.Stats.MaxCandidatesPerZone:N0})");
-                sb.AppendLine($"Preflight index: {(result.Stats.UsedPreflightIndex ? "Yes" : "No")}");
                 sb.AppendLine($"Preset used: {result.Stats.PresetUsed}");
                 sb.AppendLine($"Mode: {result.Stats.ModeUsed}, Time: {result.Stats.Elapsed.TotalSeconds:0.00}s");
                 sb.AppendLine($"Stages: resolve {FormatDuration(result.Stats.ResolveTime)}, build {FormatDuration(result.Stats.BuildGeometryTime)}, index {FormatDuration(result.Stats.BuildIndexTime)}, candidates {FormatDuration(result.Stats.CandidateQueryTime)}, narrow {FormatDuration(result.Stats.NarrowPhaseTime)}, write {FormatDuration(result.Stats.WriteBackTime)}");
+            }
+            if (!string.IsNullOrWhiteSpace(result?.ReportPath))
+            {
+                sb.AppendLine($"Report: {result.ReportPath}");
             }
             _resultsPage.ResultsSummaryBox.Text = sb.ToString();
         }
@@ -3041,30 +2734,50 @@ namespace MicroEng.Navisworks
             if (settings == null) return;
             _processingPage.TreatPartialCheck.IsChecked = settings.TreatPartialAsContained;
             _processingPage.TagPartialCheck.IsChecked = settings.TagPartialSeparately;
+            var writeBehavior = settings.WriteZoneBehaviorProperty;
+            if (!writeBehavior && settings.TagPartialSeparately)
+            {
+                writeBehavior = true;
+            }
+            if (_processingPage.WriteZoneBehaviorCheck != null)
+            {
+                _processingPage.WriteZoneBehaviorCheck.IsChecked = writeBehavior;
+            }
+            if (_processingPage.WriteContainmentPercentCheck != null)
+            {
+                _processingPage.WriteContainmentPercentCheck.IsChecked = settings.WriteZoneContainmentPercentProperty;
+            }
+            if (_processingPage.ContainmentCalculationCombo != null)
+            {
+                _processingPage.ContainmentCalculationCombo.SelectedIndex = settings.ContainmentCalculationMode switch
+                {
+                    SpaceMapperContainmentCalculationMode.SamplePoints => 1,
+                    SpaceMapperContainmentCalculationMode.SamplePointsDense => 2,
+                    SpaceMapperContainmentCalculationMode.TargetGeometry => 3,
+                    SpaceMapperContainmentCalculationMode.BoundsOverlap => 4,
+                    _ => 0
+                };
+            }
+            if (_processingPage.GpuRayAccuracyCombo != null)
+            {
+                _processingPage.GpuRayAccuracyCombo.SelectedIndex = settings.GpuRayCount >= 2 ? 1 : 0;
+            }
             _processingPage.EnableMultiZoneCheck.IsChecked = settings.EnableMultipleZones;
+            if (_processingPage.ExcludeZonesFromTargetsCheck != null)
+            {
+                _processingPage.ExcludeZonesFromTargetsCheck.IsChecked = settings.ExcludeZonesFromTargets;
+            }
             _processingPage.Offset3DBox.Text = settings.Offset3D.ToString();
             _processingPage.OffsetTopBox.Text = settings.OffsetTop.ToString();
             _processingPage.OffsetBottomBox.Text = settings.OffsetBottom.ToString();
             _processingPage.OffsetSidesBox.Text = settings.OffsetSides.ToString();
             _processingPage.UnitsBox.Text = settings.Units;
             _processingPage.OffsetModeBox.Text = settings.OffsetMode;
-            _processingPage.MaxThreadsBox.Text = settings.MaxThreads?.ToString() ?? "0";
-            _processingPage.BatchSizeBox.Text = settings.BatchSize?.ToString() ?? "0";
-            _processingPage.IndexGranularitySlider.Value = settings.IndexGranularity;
             _processingPage.ZoneBehaviorCategoryBox.Text = settings.ZoneBehaviorCategory ?? "ME_SpaceInfo";
             _processingPage.ZoneBehaviorPropertyBox.Text = settings.ZoneBehaviorPropertyName ?? "Zone Behaviour";
             _processingPage.ZoneBehaviorContainedBox.Text = settings.ZoneBehaviorContainedValue ?? "Contained";
             _processingPage.ZoneBehaviorPartialBox.Text = settings.ZoneBehaviorPartialValue ?? "Partial";
             UpdateZoneBehaviorInputs();
-            if (_processingPage.WritebackStrategyCombo != null)
-            {
-                _processingPage.WritebackStrategyCombo.SelectedIndex = settings.WritebackStrategy switch
-                {
-                    SpaceMapperWritebackStrategy.VirtualNoBake => 0,
-                    SpaceMapperWritebackStrategy.LegacyPerMapping => 2,
-                    _ => 1
-                };
-            }
             if (_processingPage.ShowInternalWritebackCheck != null)
             {
                 _processingPage.ShowInternalWritebackCheck.IsChecked = settings.ShowInternalPropertiesDuringWriteback;
@@ -3081,86 +2794,112 @@ namespace MicroEng.Navisworks
             {
                 _processingPage.CloseDockPanesCheck.IsChecked = settings.CloseDockPanesDuringRun;
             }
-            ApplyPresetSettings(settings.PerformancePreset);
-            ApplyFastTraversalMode(settings.FastTraversalMode);
-            UpdateFastTraversalUi();
+            ApplyBoundsSettings(settings);
         }
 
-        private void UpdateIndexGranularityHint(SpaceMapperPreflightResult preflight)
+        private void ApplyBoundsSettings(SpaceMapperProcessingSettings settings)
         {
-            if (_processingPage?.IndexGranularityHintText == null)
+            if (settings == null || _processingPage == null)
             {
                 return;
             }
 
-            if (preflight == null)
+            ApplyLegacyBoundsFromPreset(settings);
+
+            _processingPage.ZoneBoundsSlider.Value = settings.ZoneBoundsMode switch
             {
-                _processingPage.IndexGranularityHintText.Text = "Controls spatial grid cell size. Smaller cells reduce candidate pairs but increase index build cost.";
-                return;
-            }
-
-            var units = string.IsNullOrWhiteSpace(_processingPage.UnitsBox.Text) ? "units" : _processingPage.UnitsBox.Text.Trim();
-            var label = GetIndexGranularityLabel();
-            _processingPage.IndexGranularityHintText.Text = $"Cell size used: {preflight.CellSizeUsed:0.##} {units} ({label})";
-        }
-
-        private string FormatCellSize(SpaceMapperPreflightResult preflight)
-        {
-            if (preflight == null)
-            {
-                return "-";
-            }
-
-            var units = string.IsNullOrWhiteSpace(_processingPage.UnitsBox.Text) ? "units" : _processingPage.UnitsBox.Text.Trim();
-            var label = GetIndexGranularityLabel();
-            return $"{preflight.CellSizeUsed:0.##} {units} ({label})";
-        }
-
-        private static string FormatPreflightTimestamp(DateTime timestampUtc)
-        {
-            if (timestampUtc == default)
-            {
-                return "-";
-            }
-
-            return timestampUtc.ToLocalTime().ToString("g");
-        }
-
-        private string GetIndexGranularityLabel()
-        {
-            var value = (int)Math.Round(_processingPage.IndexGranularitySlider.Value);
-            return value switch
-            {
-                1 => "Coarse",
-                2 => "Normal",
-                3 => "Fine",
-                4 => "Ultra",
-                _ => "Auto"
+                SpaceMapperZoneBoundsMode.Obb => 1,
+                SpaceMapperZoneBoundsMode.KDop => 2,
+                SpaceMapperZoneBoundsMode.Hull => 3,
+                _ => 0
             };
-        }
 
-        private void ApplyPresetSettings(SpaceMapperPerformancePreset preset)
-        {
-            if (preset == SpaceMapperPerformancePreset.Auto)
+            _processingPage.TargetBoundsSlider.Value = settings.TargetBoundsMode switch
             {
-                _processingPage.AutoPresetToggle.IsChecked = true;
-                _processingPage.PresetSlider.IsEnabled = false;
-                _processingPage.PresetSlider.Value = 1;
-            }
-            else
+                SpaceMapperTargetBoundsMode.Midpoint => 0,
+                SpaceMapperTargetBoundsMode.Aabb => 1,
+                SpaceMapperTargetBoundsMode.Obb => 2,
+                SpaceMapperTargetBoundsMode.KDop => 3,
+                SpaceMapperTargetBoundsMode.Hull => 4,
+                _ => 1
+            };
+
+            _processingPage.ZoneKDopVariantCombo.SelectedIndex = settings.ZoneKDopVariant switch
             {
-                _processingPage.AutoPresetToggle.IsChecked = false;
-                _processingPage.PresetSlider.IsEnabled = true;
-                _processingPage.PresetSlider.Value = preset switch
+                SpaceMapperKDopVariant.KDop8 => 0,
+                SpaceMapperKDopVariant.KDop18 => 2,
+                _ => 1
+            };
+
+            _processingPage.TargetKDopVariantCombo.SelectedIndex = settings.TargetKDopVariant switch
+            {
+                SpaceMapperKDopVariant.KDop8 => 0,
+                SpaceMapperKDopVariant.KDop18 => 2,
+                _ => 1
+            };
+
+            _processingPage.TargetMidpointModeCombo.SelectedIndex = settings.TargetMidpointMode switch
+            {
+                SpaceMapperMidpointMode.BoundingBoxBottomCenter => 1,
+                _ => 0
+            };
+
+            if (_processingPage.ZoneContainmentEngineCombo != null)
+            {
+                _processingPage.ZoneContainmentEngineCombo.SelectedIndex = settings.ZoneContainmentEngine switch
                 {
-                    SpaceMapperPerformancePreset.Fast => 0,
-                    SpaceMapperPerformancePreset.Normal => 1,
-                    SpaceMapperPerformancePreset.Accurate => 2,
-                    _ => 1
+                    SpaceMapperZoneContainmentEngine.MeshAccurate => 1,
+                    _ => 0
                 };
             }
 
-            UpdatePresetUi(_lastPreflight);
+            if (_processingPage.ZoneResolutionStrategyCombo != null)
+            {
+                _processingPage.ZoneResolutionStrategyCombo.SelectedIndex = settings.ZoneResolutionStrategy switch
+                {
+                    SpaceMapperZoneResolutionStrategy.LargestOverlap => 1,
+                    SpaceMapperZoneResolutionStrategy.FirstMatch => 2,
+                    _ => 0
+                };
+            }
+
+            OnBoundsModesChanged();
+        }
+
+        private static void ApplyLegacyBoundsFromPreset(SpaceMapperProcessingSettings settings)
+        {
+            if (settings == null)
+            {
+                return;
+            }
+
+            var boundsExplicit = settings.ZoneBoundsMode != SpaceMapperZoneBoundsMode.Aabb
+                || settings.TargetBoundsMode != SpaceMapperTargetBoundsMode.Aabb
+                || settings.ZoneKDopVariant != SpaceMapperKDopVariant.KDop14
+                || settings.TargetKDopVariant != SpaceMapperKDopVariant.KDop14
+                || settings.TargetMidpointMode != SpaceMapperMidpointMode.BoundingBoxCenter;
+
+            if (boundsExplicit)
+            {
+                return;
+            }
+
+            switch (settings.PerformancePreset)
+            {
+                case SpaceMapperPerformancePreset.Fast:
+                    settings.ZoneBoundsMode = SpaceMapperZoneBoundsMode.Aabb;
+                    settings.TargetBoundsMode = SpaceMapperTargetBoundsMode.Midpoint;
+                    settings.TargetMidpointMode = SpaceMapperMidpointMode.BoundingBoxCenter;
+                    break;
+                case SpaceMapperPerformancePreset.Accurate:
+                    settings.ZoneBoundsMode = SpaceMapperZoneBoundsMode.Hull;
+                    settings.TargetBoundsMode = SpaceMapperTargetBoundsMode.Hull;
+                    break;
+                default:
+                    settings.ZoneBoundsMode = SpaceMapperZoneBoundsMode.Aabb;
+                    settings.TargetBoundsMode = SpaceMapperTargetBoundsMode.Aabb;
+                    break;
+            }
         }
 
         private void ExportStats()
@@ -3186,6 +2925,65 @@ namespace MicroEng.Navisworks
             }
             writer.Flush();
             MessageBox.Show("Export complete.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private static string BuildVariationReportPath(Document doc, string templateName)
+        {
+            var baseDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "Autodesk",
+                "Navisworks Manage 2025",
+                "Plugins",
+                "MicroEng.Navisworks",
+                "Reports",
+                "SpaceMapper");
+
+            var modelName = GetDocumentTitle(doc);
+            var template = string.IsNullOrWhiteSpace(templateName) ? null : templateName.Trim();
+            var safeModel = SanitizeFileName(modelName);
+            var safeTemplate = SanitizeFileName(template);
+            var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+            var suffixParts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(safeModel)) suffixParts.Add(safeModel);
+            if (!string.IsNullOrWhiteSpace(safeTemplate)) suffixParts.Add(safeTemplate);
+            var suffix = suffixParts.Count == 0 ? string.Empty : "_" + string.Join("_", suffixParts);
+
+            var fileName = $"SpaceMapper_VariationCheck_{stamp}{suffix}.md";
+            return Path.Combine(baseDir, fileName);
+        }
+
+        private static string GetDocumentTitle(Document doc)
+        {
+            if (doc == null)
+            {
+                return "Untitled";
+            }
+
+            var title = doc.Title;
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                return title.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(doc.FileName))
+            {
+                return Path.GetFileNameWithoutExtension(doc.FileName);
+            }
+
+            return "Untitled";
+        }
+
+        private static string SanitizeFileName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var invalid = Path.GetInvalidFileNameChars();
+            var cleaned = new string(value.Where(ch => !invalid.Contains(ch)).ToArray());
+            return cleaned.Length > 60 ? cleaned.Substring(0, 60) : cleaned;
         }
 
         private static string Escape(string value)

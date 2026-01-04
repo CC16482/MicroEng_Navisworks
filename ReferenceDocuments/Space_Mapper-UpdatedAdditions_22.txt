@@ -1,0 +1,249 @@
+The below is in relation to the following issue:
+Ive done a check in blender and confirmed it's completely water tight and normals are correct but it is a complex shape. we need to be able to calculate these complex zones properly. there must be a way. Somehting is wrong in the calculation if its counting this as not closed. Ive done an inspection on it again this is Name:EMERGENCY EGRESS 1 250.05.205 , GUID:7da9143a-b5fa-4e70-bb3a-b9e91defbccb
+
+GPT Answer and Instructions:
+
+You are already running the UI at (or extremely close to) “max accuracy.” In your latest run report (`SpaceMapper_Run_20260103_231148...Doors.md`) you have:
+
+* **Zone containment engine:** `MeshAccurate`
+* **Zone bounds:** `Hull`
+* **Target bounds:** `Hull`
+* **Resolution strategy:** `MostSpecific`
+* **Multiple zones + partial handling:** enabled (`Enable multiple zones: True`, `Treat partial as contained: True`, `Tag partial separately: True`)
+* **Containment % writing:** enabled, using the most detailed method currently available in the UI (`Write containment % property: True`, `Containment calculation mode: TargetGeometry`)
+* **Tier:** `Tier B (Hull: multi-sample)` with **27 samples per target**
+
+
+So: there is **nothing else** you can reasonably “turn up” in the current UI to make that specific room behave better.
+
+## What is actually going wrong for EMERGENCY EGRESS 1
+
+Even though you selected **MeshAccurate**, your run reports still show:
+
+* **Zones mesh fallback: 11**
+* **Mesh fallback point tests:** thousands
+
+
+And critically, the zone you called out is explicitly one of the “fallback” meshes:
+
+* `EMERGENCY EGRESS 1 250.05.205 (7da9143a-b5fa-4e70-bb3a-b9e91defbccb): MeshNotClosed - BoundaryEdges=36, NonManifoldEdges=0.`
+
+
+When the plugin marks a zone as **MeshNotClosed**, it **does not use the real triangle mesh** for containment. It **falls back to the selected bounds representation** (Hull/k-DOP/OBB/AABB). For a concave corridor-like space, the “Hull” fallback is **inherently over-inclusive**, so nearby doors that are outside the true corridor volume can still be tagged (exactly the symptom you’re showing).
+
+This is why it looks like the system is “simplifying too much”: it literally is—because that zone is being treated as **invalid for mesh containment**.
+
+## Why Blender can say “watertight” and the plugin still says “not closed”
+
+Two common reasons:
+
+1. **Triangle topology vs geometric watertightness:** A surface can be “closed” geometrically but still fail a strict “each mesh edge appears exactly twice” test if the tessellation produces **T-junctions** (one face edge split into multiple edges on the adjacent face).
+2. **Tolerance/quantization effects** in edge-keying can create false “boundary edges” even if the underlying solid is fine.
+
+Either way, the result is the same: **your zone gets blocked from MeshAccurate and drops to bounds**, which will never be reliable for complex concave rooms.
+
+---
+
+# Codex change request (recommended fix)
+
+## Goal
+
+**Stop treating `MeshNotClosed` as a hard failure for `MeshAccurate`.**
+Instead:
+
+* Use mesh ray-casting whenever a triangle mesh exists and is structurally valid (count % 3 == 0).
+* Keep “not closed” as a **warning/diagnostic**, not a reason to abandon mesh containment.
+* Optionally, use a slightly more robust ray strategy for “not closed” meshes (only for those zones).
+
+This will make zones like **EMERGENCY EGRESS 1** actually run through mesh containment instead of convex hull fallback.
+
+## Files to modify
+
+* `SpaceMapperService.cs` (where zone geometry/mesh validity is evaluated and `HasTriangleMesh` / fallback reason is assigned)
+* `SpaceMapperEngines.cs` (mesh point containment path; optionally choose robust ray path when mesh not closed)
+* `SpaceMapperRunReportWriter.cs` (report wording/stats so it no longer reports these as “fallback” if you still used mesh)
+* `SpaceMapperModels.cs` (add `MeshIsClosed` / `MeshClosure*` fields if needed)
+* `SpaceMapperGeometry.cs` (optional: add `TryIsInsideMeshRobust`)
+
+---
+
+## Implementation details
+
+### 1) In zone build/validation: don’t disable mesh on MeshNotClosed
+
+**Current behavior (problem):**
+If `TryEvaluateMeshClosure()` finds `BoundaryEdges > 0`, code sets `hasTriangleMesh = false` and assigns `MeshNotClosed`, which forces bounds fallback.
+
+**New behavior:**
+
+* Keep `HasTriangleMesh = true` if the triangle list is valid.
+* Store closure results (`BoundaryEdges`, `NonManifoldEdges`, `MeshIsClosed=false`) for reporting, but **do not force fallback**.
+
+Pseudo-diff (Codex can implement in your exact structure):
+
+```csharp
+// Before: MeshNotClosed => hasTriangleMesh = false
+// After: MeshNotClosed => keep mesh; mark as warning/diagnostic
+
+bool triListValid = triVerts != null && triVerts.Count >= 3 && (triVerts.Count % 3) == 0;
+hasTriangleMesh = triListValid;
+
+int boundaryEdges = 0;
+int nonManifoldEdges = 0;
+bool meshIsClosed = false;
+
+string meshFallbackReason = null;   // only for truly unusable meshes
+string meshFallbackDetail = null;
+
+string meshClosureIssue = null;     // warning/diagnostic
+string meshClosureDetail = null;
+
+if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate && triListValid)
+{
+    if (!SpaceMapperGeometry.TryEvaluateMeshClosure(triVerts, out boundaryEdges, out nonManifoldEdges))
+    {
+        hasTriangleMesh = false;
+        meshFallbackReason = "MeshInvalid";
+        meshFallbackDetail = "Triangle list invalid (count not multiple of 3 or other structural error).";
+    }
+    else
+    {
+        meshIsClosed = (boundaryEdges == 0 && nonManifoldEdges == 0);
+        if (!meshIsClosed)
+        {
+            meshClosureIssue = "MeshNotClosed";
+            meshClosureDetail = $"BoundaryEdges={boundaryEdges}, NonManifoldEdges={nonManifoldEdges}";
+            // IMPORTANT: do NOT set hasTriangleMesh=false here
+        }
+    }
+}
+
+// Persist
+zoneGeo.HasTriangleMesh = hasTriangleMesh;
+zoneGeo.MeshBoundaryEdges = boundaryEdges;
+zoneGeo.MeshNonManifoldEdges = nonManifoldEdges;
+zoneGeo.MeshIsClosed = meshIsClosed;
+
+// keep old fallback fields ONLY for true fallback
+zoneGeo.MeshFallbackReason = meshFallbackReason;
+zoneGeo.MeshFallbackDetail = meshFallbackDetail;
+
+// new warning fields (or reuse existing fields but fix reporting)
+zoneGeo.MeshClosureIssue = meshClosureIssue;
+zoneGeo.MeshClosureDetail = meshClosureDetail;
+```
+
+If you don’t want new properties, you *can* reuse existing `MeshFallbackReason` as a “mesh validation issue,” but you **must** then update reporting so it’s not treated as fallback.
+
+### 2) In containment: use mesh whenever triangles exist
+
+In `ZoneContainsPoint(...)` (and the Tier B sample-based classification), make the gate:
+
+* **MeshAccurate uses mesh if triangle list exists and is valid**
+* Only fall back when triangles are missing/invalid
+
+Optional “robust ray” only for `!zone.MeshIsClosed`:
+
+```csharp
+if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate
+    && zone.TriangleVertices != null
+    && zone.TriangleVertices.Count >= 3)
+{
+    bool ok;
+    bool inside;
+
+    if (zone.MeshIsClosed)
+        ok = SpaceMapperGeometry.TryIsInsideMesh(zone.TriangleVertices, pt, out inside);
+    else
+        ok = SpaceMapperGeometry.TryIsInsideMeshRobust(zone.TriangleVertices, pt, out inside);
+
+    if (ok)
+    {
+        stats.MeshPointTests++;
+        return inside;
+    }
+
+    // only here is a true fallback
+    stats.MeshFallbackPointTests++;
+}
+```
+
+### 3) Add `TryIsInsideMeshRobust` (optional, but recommended for “not closed”)
+
+This reduces “ray exactly hits an edge/vertex” instability and tends to behave better on non-manifold / T‑junction tessellations.
+
+Minimal version: cast 3 deterministic rays and take majority vote.
+
+```csharp
+public static bool TryIsInsideMeshRobust(IReadOnlyList<Vector3D> triVerts, Vector3D p, out bool isInside)
+{
+    isInside = false;
+    if (triVerts == null || triVerts.Count < 3 || (triVerts.Count % 3) != 0) return false;
+
+    var dirs = new[]
+    {
+        new Vector3D(1, 0.237, 0.103),
+        new Vector3D(0.103, 1, 0.237),
+        new Vector3D(0.237, 0.103, 1),
+    };
+
+    int insideVotes = 0;
+    int outsideVotes = 0;
+
+    foreach (var d in dirs)
+    {
+        if (TryIsInsideMeshWithDirection(triVerts, p, d, out bool voteInside))
+        {
+            if (voteInside) insideVotes++;
+            else outsideVotes++;
+        }
+    }
+
+    // if all 3 ran, majority vote; if something odd happens, still return best effort
+    isInside = insideVotes >= outsideVotes;
+    return true;
+}
+
+private static bool TryIsInsideMeshWithDirection(
+    IReadOnlyList<Vector3D> triVerts, Vector3D p, Vector3D rayDir, out bool isInside)
+{
+    isInside = false;
+    if (triVerts == null || triVerts.Count < 3 || (triVerts.Count % 3) != 0) return false;
+
+    var dir = rayDir;
+    dir.Normalize();
+
+    const double eps = 1e-9;
+    int hits = 0;
+
+    for (int i = 0; i < triVerts.Count; i += 3)
+    {
+        if (RayIntersectsTriangle(p, dir, triVerts[i], triVerts[i + 1], triVerts[i + 2], out double t) && t > eps)
+            hits++;
+    }
+
+    isInside = (hits % 2) == 1;
+    return true;
+}
+```
+
+Refactor your existing `TryIsInsideMesh` to call `TryIsInsideMeshWithDirection(...)` with the original ray direction so you don’t duplicate intersection code.
+
+### 4) Fix the run report so it reflects reality
+
+Right now the report says **“Zones mesh fallback: 11”** because `MeshNotClosed` turns meshes off. After the change, that should become:
+
+* “Zones with triangle mesh: X”
+* “Zones with invalid mesh (fallback): Y”
+* “Zones with non-watertight mesh (warning, still used): Z”
+
+…and list EMERGENCY EGRESS 1 under the warning section, not fallback.
+
+---
+
+# What you should expect after this change
+
+* **EMERGENCY EGRESS 1** will stop using the convex hull fallback and will use mesh containment even if the closure test still reports `BoundaryEdges=36`.
+* Doors that are merely *near* the corridor but outside it should stop being incorrectly tagged, because ray-casting against the actual surface is far more discriminating than convex hull bounds.
+
+If you want, paste the above change request into Codex exactly as-is; it is written to be mechanically implementable with clear acceptance criteria.

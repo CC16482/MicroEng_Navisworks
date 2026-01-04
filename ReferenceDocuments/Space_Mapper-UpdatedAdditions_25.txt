@@ -1,0 +1,181 @@
+You are correct to focus on **(a) batching** and **(b) thresholding**: your current GPU path is structurally “one-zone-per-dispatch” and it is hard-gated by a fixed **GpuPointThreshold = 512** , which is why you’re only seeing **60 zones processed on GPU** and **169 skipped below threshold** in the latest GPU run report .
+
+Below is a **Codex-ready change request** that implements:
+
+1. **Multi-zone batching per GPU dispatch** (amortizes dispatch + readback + setup across many zones).
+2. **Lower + auto thresholding** (so most of the 229 mesh-eligible zones are actually sent to GPU).
+3. **Diagnostics that prove it worked** (batch counts, per-dispatch points/triangles, and the “why not GPU” reasons remain visible in your existing report format ).
+
+---
+
+## Why it’s currently capped at ~60 GPU zones
+
+* Your compute shader wrapper only supports **one triangle set + one point set per dispatch**: `Constants` contains only `TriangleCount`, `PointCount`, `UseSecondRay` , and `TestPoints(...)` binds a single triangle SRV + point SRV and dispatches once .
+* In `CudaIntersectionEngine`, you compute `estimatedPoints = candidateCount * sampleCountPerTarget` and you *skip GPU* if `< 512` . Your report confirms that’s happening at scale .
+
+Batching + lower/auto thresholds directly targets those two bottlenecks.
+
+---
+
+## Codex change request (implement batching + lower/auto thresholds)
+
+Paste the following into Codex.
+
+```txt
+Implement GPU batching (multi-zone per dispatch) and lower/auto thresholds for Space Mapper.
+
+Context:
+- GPU path is D3D11 compute (D3D11PointInMeshGpu.cs) and CudaIntersectionEngine in SpaceMapperEngines.cs.
+- Current GPU executes one zone per dispatch via D3D11PointInMeshGpu.TestPoints(trianglesLocal, pointsLocal, ...) and is hard-gated by GpuPointThreshold=512. This causes many zones to be skipped as “below point threshold” (see reports).
+Goal:
+- Batch multiple zones into a single dispatch to amortize dispatch+readback overhead and enable much lower per-zone point thresholds.
+- Replace the fixed 512 threshold with an adaptive (and lower) per-zone rule.
+
+Stage A — Extend D3D11PointInMeshGpu to support batched zones
+1) In D3D11PointInMeshGpu.cs add:
+   - Struct ZoneRange { uint TriStart; uint TriCount; } [StructLayout.Sequential]
+   - New dynamic SRV buffers:
+     - _zoneRangesBuffer/_zoneRangesSrv + capacity
+     - _pointZoneBuffer/_pointZoneSrv + capacity
+   - EnsureZoneRangeCapacity(zoneCount) and EnsurePointZoneCapacity(pointCount) similar to EnsureTriangleCapacity/EnsurePointCapacity.
+2) Add a new method:
+   uint[] TestPointsBatched(
+      Triangle[] trianglesAll,
+      Float4[] pointsAll,
+      uint[] pointZoneIds,        // length == pointsAll.Length
+      ZoneRange[] zoneRanges,     // length == zoneCount
+      bool intensiveTwoRays,
+      CancellationToken token,
+      out TimeSpan dispatchTime,
+      out TimeSpan readbackTime)
+   - Upload trianglesAll, pointsAll, pointZoneIds, zoneRanges into dynamic structured buffers.
+   - Bind:
+     - Triangles SRV t0
+     - Points SRV t1
+     - PointZones SRV t2
+     - ZoneRanges SRV t3
+     - Output UAV u0
+   - Dispatch groups = ceil(pointsAll.Length / 256) as before.
+3) Update shader source (ShaderSource string) to support batched zones:
+   - Add:
+       struct ZoneRange { uint triStart; uint triCount; };
+       StructuredBuffer<uint> PointZones : register(t2);
+       StructuredBuffer<ZoneRange> ZoneRanges : register(t3);
+       cbuffer Constants: add uint ZoneCount (and pad)
+   - Replace Parity() with ParityRange(p, dir, ZoneRange r):
+       for i in [0..r.triCount): RayTri(p, dir, Triangles[r.triStart + i])
+   - In CSMain:
+       uint zid = PointZones[idx];
+       if (zid >= ZoneCount) { InsideOut[idx] = 0; return; }
+       ZoneRange r = ZoneRanges[zid];
+       parity computations use that r.
+   - Keep UseSecondRay behavior the same.
+
+Stage B — Batch zones in CudaIntersectionEngine (SpaceMapperEngines.cs)
+4) In SpaceMapperEngines.cs inside CudaIntersectionEngine.ComputeZoneMajorGpu:
+   - Replace the per-zone immediate gpu.TestPoints call with batching logic:
+     Maintain batch lists:
+       List<D3D11PointInMeshGpu.Triangle> batchTriangles
+       List<D3D11PointInMeshGpu.Float4>   batchPointsLocal
+       List<Vector3D>                    batchPointsWorld (for uncertain CPU fallback)
+       List<uint>                        batchPointZoneIds
+       List<D3D11PointInMeshGpu.ZoneRange> batchZoneRanges
+       List<ZoneJob> batchJobs
+
+     Where ZoneJob stores:
+       int ZoneIndex
+       ZoneGeometry Zone
+       Aabb ZoneBoundsLocal
+       List<int> CandidateTargetIndices
+       int[] TargetStartAbs   // absolute indices into batchPointsLocal
+       int[] TargetCount
+       int ZoneBatchId        // index into batchJobs
+       bool UseOpenMeshRetry
+       bool IntensiveForZone
+       (plus references to targetBounds/targetKeys arrays are already in scope)
+
+     For each zone:
+       - Build candidates list as currently.
+       - Decide whether zone is GPU-eligible (see Stage C threshold rules).
+       - If not GPU-eligible -> use existing CPU fallback path (unchanged).
+       - If GPU-eligible:
+           - Build trianglesLocal once (BuildTriangles(zone,...)).
+           - Append trianglesLocal to batchTriangles; record triStart, triCount.
+           - Create a ZoneRange { triStart, triCount } stored in batchZoneRanges at index ZoneBatchId.
+           - Build sample points for each candidate target:
+               - For each sample, append:
+                   - pointsWorld (world coords)
+                   - pointsLocal (zone-local coords with origin subtraction)
+                   - pointZoneIds (ZoneBatchId)
+                 and set TargetStartAbs/TargetCount for that candidate.
+           - Add ZoneJob to batchJobs.
+       - Flush batch when any of these limits would be exceeded:
+           MAX_BATCH_ZONES (default 32; can use settings.BatchSize if nonzero)
+           MAX_BATCH_POINTS (default 250_000)
+           MAX_BATCH_TRIANGLES (default 250_000)
+           Also flush when the next zone has different IntensiveForZone: keep separate batches for 1-ray and 2-ray (because UseSecondRay is a single constant today).
+     FlushBatch():
+       - Call gpu.TestPointsBatched(trianglesAll, pointsAll, pointZoneIds, zoneRanges, intensiveTwoRays, ...)
+       - Then postprocess per ZoneJob:
+           For each candidate in that zone, read insideFlags[start..start+count):
+             - handle Uncertain exactly as current code does: CPU fallback using batchPointsWorld[idx] and CpuIntersectionEngine.ZoneContainsPoint(...)
+             - compute anyInside/anyOutside/insideCount
+             - apply open-mesh tolerance (outside <= OpenMeshOutsideSampleTolerance) exactly as current GPU logic
+             - compute fraction if computeContainmentFraction
+             - emit hit and AddHit(...) like current implementation
+       - Update diagnostics:
+           gpuZonesProcessed += batchJobs.Count
+           gpuPointsTested += pointsAll.Length
+           gpuTrianglesTested += trianglesAll.Length (or sum per zone, but keep existing meaning)
+           gpuDispatchTicks/readbackTicks from returned timers
+           track max points/triangles per zone as before.
+       - Clear lists and continue.
+
+Stage C — Lower + auto thresholds (replace fixed 512 points)
+5) Replace hard gate (estimatedPoints < 512) with adaptive rules designed for batching:
+   - Define per-zone minimum points:
+       int minPoints = (Mode == GpuQuick) ? 64 : 32;
+   - Add triangle-weighted rule so tiny meshes don’t waste GPU:
+       long work = (long)estimatedPoints * (long)trianglesLocal.Length;
+       long minWork = (Mode == GpuQuick) ? 20000 : 10000;   // initial tuning
+   - A zone is GPU-eligible if:
+       hasMesh && estimatedPoints >= minPoints && work >= minWork
+     (Open-mesh retry eligible zones can bypass minWork if you want; keep conservative for now.)
+   - Because batching amortizes overhead, these low thresholds are safe and should massively reduce “Zones skipped (below point threshold)”.
+
+6) Update diagnostics/reporting:
+   - diagnostics.GpuPointThreshold should now reflect the minPoints used (not the old constant).
+   - Add new diagnostics fields (SpaceMapperModels.cs + SpaceMapperRunReportWriter.cs):
+       GpuBatchDispatchCount
+       GpuBatchMaxZones
+       GpuBatchMaxPoints
+       GpuBatchMaxTriangles
+       GpuBatchAvgZonesPerDispatch
+     Report them under GPU Diagnostics.
+
+Acceptance criteria:
+- In GPU report, “Zones skipped (below point threshold)” drops dramatically vs current (169) and “Zones processed on GPU” rises materially above 60 for the Boggo dataset.
+- Results must match existing CPU/GPU correctness (partials/multi-zone/etc. unchanged).
+- No changes to UI required; this is purely engine-side performance.
+
+Implementation notes:
+- Keep existing single-zone TestPoints method for fallback or debugging.
+- Ensure batching keeps 1-ray and 2-ray zones in separate dispatches unless you extend shader/constants to per-zone ray counts.
+```
+
+---
+
+## Practical expectations after this change
+
+* In your Boggo GPU run, you had **229 mesh-eligible zones** but only **60** were actually GPU’d because **169** were under the 512-point gate . With batching + `minPoints = 32/64` and the work-based gate, you should expect “Zones processed on GPU” to climb much closer to the eligible count (minus whatever you still exclude for open mesh, etc.).
+* You will be able to verify success immediately in the same report section your plugin already writes .
+
+---
+
+## One additional correctness note (keep this as-is)
+
+Your current “uncertain point” handling is correct in principle: the shader returns `2u` and you CPU-recheck that exact point via `CpuIntersectionEngine.ZoneContainsPoint(...)` . When batching, keep that logic identical—just index into the global `batchPointsWorld[]`.
+
+---
+
+If you want, I can also give you a second Codex prompt that adds a **targeted micro-benchmark**: “same zones/targets, run GPU single-zone vs GPU batched vs CPU” and logs per-dispatch timings so you can quantify the improvement in a single run report.

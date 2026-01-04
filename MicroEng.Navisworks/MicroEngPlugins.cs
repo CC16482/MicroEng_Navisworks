@@ -433,6 +433,31 @@ namespace MicroEng.Navisworks
                 pane.Visible = true;
             }
         }
+
+        public static void Sequence4D()
+        {
+            const string dockPanePluginId = "MicroEng.Sequence4D.DockPane.MENG";
+            Log("Sequence4D: locating plugin record");
+            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find 4D Sequence dock pane plugin '{dockPanePluginId}'.",
+                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!record.IsLoaded)
+            {
+                Log("Sequence4D: loading plugin");
+                record.LoadPlugin();
+            }
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+            {
+                Log("Sequence4D: setting pane visible");
+                pane.Visible = true;
+            }
+        }
     }
 
     // ========= Standalone Add-In commands (nice for NavisAddinManager testing) =========

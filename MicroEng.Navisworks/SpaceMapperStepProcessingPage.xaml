@@ -43,645 +43,695 @@
     </ResourceDictionary>
   </Page.Resources>
 
-  <Grid Margin="12">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-    </Grid.RowDefinitions>
-
-    <ui:Card Grid.Row="0"
-             Padding="10"
-             Margin="0,0,0,8"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch">
-      <StackPanel>
-        <ui:TextBlock Text="Step 3 - Processing" FontSize="16" FontWeight="SemiBold" />
-        <ui:TextBlock Text="Configure how intersections are evaluated and how offsets are applied."
-                      Margin="0,4,0,0"
-                      FontSize="12"
-                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-      </StackPanel>
-    </ui:Card>
-
-    <ui:Card Grid.Row="1"
-             Padding="10"
-             Margin="0,0,0,8"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Top"
-             VerticalAlignment="Top">
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
-
-        <ui:TextBlock Grid.Row="0"
-                      Grid.ColumnSpan="2"
-                      Text="Processing Mode"
-                      FontSize="14"
-                      FontWeight="SemiBold" />
-
-        <StackPanel Grid.Row="1" Grid.Column="0" Margin="0,6,16,0">
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <TextBlock Text="Preset" VerticalAlignment="Center" />
-            <Button x:Name="PresetHelpFlyoutButton"
-                    Style="{StaticResource HelpFlyoutButtonStyle}">
-              <ui:SymbolIcon Symbol="Info16" />
-            </Button>
-          </StackPanel>
-
-          <ui:Flyout x:Name="PresetHelpFlyout" Placement="Top">
-            <StackPanel x:Name="PresetHelpFlyoutContent" Width="420">
-              <TextBlock Text="Performance Presets" FontWeight="SemiBold" Margin="0,0,0,4" />
-              <TextBlock TextWrapping="Wrap">
-                Auto chooses Fast/Normal/Accurate based on preflight density.
-                Fast uses origin point (bbox center) in zone AABB, Normal uses corner sampling, Accurate uses extra sampling points.
-              </TextBlock>
-            </StackPanel>
-          </ui:Flyout>
-
-          <CheckBox x:Name="AutoPresetToggleControl"
-                    Content="Auto (Recommended)"
-                    Margin="0,6,0,0"
-                    IsChecked="True" />
-
-          <Slider x:Name="PresetSliderControl"
-                  Minimum="0"
-                  Maximum="2"
-                  TickFrequency="1"
-                  IsSnapToTickEnabled="True"
-                  TickPlacement="Both"
-                  Value="1"
-                  IsEnabled="False"
-                  Margin="0,6,0,0" />
-
-          <UniformGrid Columns="3" Margin="0,4,0,0">
-            <TextBlock Text="Fast" HorizontalAlignment="Center" />
-            <TextBlock Text="Normal" HorizontalAlignment="Center" />
-            <TextBlock Text="Accurate" HorizontalAlignment="Center" />
-          </UniformGrid>
-
-          <TextBlock x:Name="PresetDescriptionTextControl"
-                     Margin="0,6,0,0"
-                     TextWrapping="Wrap"
-                     Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-
-          <TextBlock x:Name="PresetResolvedTextControl"
-                     Margin="0,2,0,0"
-                     TextWrapping="Wrap"
-                     Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+  <ScrollViewer VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="12">
+      <ui:Card Padding="10"
+               Margin="0,0,0,12"
+               HorizontalAlignment="Stretch"
+               HorizontalContentAlignment="Stretch">
+        <StackPanel>
+          <ui:TextBlock Text="Step 3 - Processing" FontSize="16" FontWeight="SemiBold" />
+          <ui:TextBlock Text="Configure how intersections are evaluated and how offsets are applied."
+                        Margin="0,4,0,0"
+                        FontSize="12"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </StackPanel>
+      </ui:Card>
 
-        <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,6,0,0">
-          <TextBlock Text="Behavior" FontWeight="SemiBold" Margin="0,0,0,6" />
-          <CheckBox x:Name="TreatPartialCheckControl" Content="Treat Partial as Contained" Margin="0,0,0,6" />
-          <CheckBox x:Name="TagPartialCheckControl" Content="Write Zone Behaviour property" Margin="0,0,0,6" />
-          <StackPanel Margin="16,0,0,6">
-            <TextBlock Text="Writes Contained/Partial status to a separate property."
-                       FontSize="11"
-                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                       Margin="0,0,0,6" />
-            <Grid>
+      <ui:Card Padding="10"
+               Margin="0,0,0,12"
+               HorizontalAlignment="Stretch"
+               HorizontalContentAlignment="Stretch">
+        <StackPanel>
+          <Grid Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+              <ui:TextBlock Text="Containment Accuracy" FontSize="14" FontWeight="SemiBold" />
+              <ui:TextBlock Text="Choose how zones are evaluated (speed vs correctness)."
+                            Margin="0,4,0,0"
+                            FontSize="12"
+                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+            <ui:Button x:Name="VariationCheckButtonControl"
+                       Grid.Column="1"
+                       Content="Run Variation Check"
+                       Appearance="Secondary"
+                       Padding="10,4"
+                       Margin="12,0,0,0"
+                       VerticalAlignment="Top"
+                       ToolTip="Runs all zone/target bounds combinations and exports a comparison report." />
+          </Grid>
+
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="160" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="Engine:" VerticalAlignment="Center" />
+            <ComboBox x:Name="ZoneContainmentEngineComboControl" Grid.Column="1" Width="260" SelectedIndex="0">
+              <ComboBoxItem Content="Bounds (fast)" />
+              <ComboBoxItem Content="Mesh accurate (holes/voids)" />
+            </ComboBox>
+          </Grid>
+
+          <Grid x:Name="GpuRayAccuracyRowControl" Margin="0,6,0,0" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="160" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="GPU ray accuracy:" VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+              <ComboBox x:Name="GpuRayAccuracyComboControl" Width="260" SelectedIndex="1">
+                <ComboBoxItem Content="Fast (1 ray)" />
+                <ComboBoxItem Content="Accurate (2 rays)" />
+              </ComboBox>
+              <Button x:Name="GpuRayAccuracyHelpToggle"
+                      Style="{StaticResource HelpFlyoutButtonStyle}"
+                      Margin="6,0,0,0"
+                      VerticalAlignment="Center">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="GpuRayAccuracyHelpFlyout" Placement="Top">
+                <TextBlock Width="320"
+                           TextWrapping="Wrap"
+                           Text="Controls the ray count for GPU point-in-mesh tests. Accurate uses two rays for more reliable containment; Fast is quicker. GPU is used automatically when available; uncertain points and missing GPU fall back to CPU." />
+              </ui:Flyout>
+            </StackPanel>
+          </Grid>
+
+          <TextBlock x:Name="MeshAccurateNoteTextControl"
+                     Margin="0,6,0,0"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Text="Mesh accurate uses zone solids for holes/voids. Bounds are used for candidate filtering and fallback."
+                     Visibility="Collapsed" />
+
+          <StackPanel x:Name="BoundsSlidersPanelControl" Margin="0,10,0,0">
+            <TextBlock x:Name="ZoneBoundsHeaderTextControl"
+                       Text="Zone Representation (for candidate filtering / fallback)"
+                       Margin="0,0,0,2"
+                       TextWrapping="Wrap" />
+            <Slider x:Name="ZoneBoundsSliderControl"
+                    Minimum="0"
+                    Maximum="3"
+                    TickFrequency="1"
+                    IsSnapToTickEnabled="True"
+                    TickPlacement="Both"
+                    Value="0"
+                    Margin="0,4,0,0" />
+            <Grid Margin="0,4,0,0">
               <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
-              <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-              </Grid.RowDefinitions>
-
-              <TextBlock Text="Behaviour Category:" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6" />
-              <TextBox x:Name="ZoneBehaviorCategoryBoxControl" Grid.Row="0" Grid.Column="1" MinWidth="160" Margin="0,0,0,6" Text="ME_SpaceInfo" />
-
-              <TextBlock Text="Behaviour Property:" Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6" />
-              <TextBox x:Name="ZoneBehaviorPropertyBoxControl" Grid.Row="1" Grid.Column="1" MinWidth="160" Margin="0,0,0,6" Text="Zone Behaviour" />
-
-              <TextBlock Text="Contained Value:" Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6" />
-              <TextBox x:Name="ZoneBehaviorContainedBoxControl" Grid.Row="2" Grid.Column="1" MinWidth="160" Margin="0,0,0,6" Text="Contained" />
-
-              <TextBlock Text="Partial Value:" Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0" />
-              <TextBox x:Name="ZoneBehaviorPartialBoxControl" Grid.Row="3" Grid.Column="1" MinWidth="160" Text="Partial" />
+              <TextBlock Text="AABB" Grid.Column="0" HorizontalAlignment="Left" />
+              <TextBlock Text="OBB" Grid.Column="0" HorizontalAlignment="Right" />
+              <TextBlock Text="k-DOP" Grid.Column="1" HorizontalAlignment="Right" />
+              <TextBlock Text="Hull" Grid.Column="2" HorizontalAlignment="Right" />
             </Grid>
-          </StackPanel>
-          <CheckBox x:Name="EnableMultiZoneCheckControl" Content="Enable Multiple Zones" IsChecked="True" />
-        </StackPanel>
-      </Grid>
-    </ui:Card>
-
-    <ui:Card Grid.Row="2"
-             Padding="10"
-             Margin="0,0,0,8"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Top"
-             VerticalAlignment="Top">
-      <StackPanel>
-        <ui:TextBlock Text="Zone Offsets" FontSize="14" FontWeight="SemiBold" />
-
-        <UniformGrid Columns="2" Rows="3" Margin="0,8,0,0">
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-              <TextBlock Text="3D Offset:" VerticalAlignment="Center" />
-              <Button x:Name="Offset3DFlyoutButton"
-                      Style="{StaticResource HelpFlyoutButtonStyle}">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
+            <StackPanel x:Name="ZoneKDopVariantRowControl" Orientation="Horizontal" Margin="0,6,0,0" Visibility="Collapsed">
+              <TextBlock Text="k-DOP variant:" Width="120" VerticalAlignment="Center" />
+              <ComboBox x:Name="ZoneKDopVariantComboControl" Width="140" SelectedIndex="1">
+                <ComboBoxItem Content="8" />
+                <ComboBoxItem Content="14" />
+                <ComboBoxItem Content="18" />
+              </ComboBox>
             </StackPanel>
-            <ui:Flyout x:Name="Offset3DFlyout"
-                       Placement="Top"
-                       Opened="OnOffset3DFlyoutOpened"
-                       Closed="OnOffset3DFlyoutClosed">
-              <StackPanel x:Name="Offset3DFlyoutContent" Width="480">
-                <TextBlock Text="3D Offset"
-                           FontWeight="SemiBold"
-                           TextAlignment="Center"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,4" />
-                <TextBlock Text="Applies an overall 3D expansion to the zone volume before checking targets."
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,6" />
-                <Border CornerRadius="10"
-                        BorderBrush="#FFFFFFFF"
-                        BorderThickness="1"
-                        Width="432"
-                        Height="243"
-                        ClipToBounds="True">
-                  <MediaElement x:Name="Offset3DVideo"
-                                LoadedBehavior="Manual"
-                                UnloadedBehavior="Manual"
-                                Stretch="Uniform"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Loaded="OnHelpVideoLoaded"
-                                SizeChanged="OnHelpVideoSizeChanged"
-                                IsMuted="True"
-                                MediaOpened="OnHelpVideoOpened"
-                                MediaEnded="OnHelpVideoEnded"
-                                MediaFailed="OnHelpVideoFailed" />
-                </Border>
-              </StackPanel>
-            </ui:Flyout>
-            <TextBox x:Name="Offset3DBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-          </StackPanel>
 
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-              <TextBlock Text="Offset Sides:" VerticalAlignment="Center" />
-              <Button x:Name="OffsetSidesFlyoutButton"
-                      Style="{StaticResource HelpFlyoutButtonStyle}">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
-            </StackPanel>
-            <ui:Flyout x:Name="OffsetSidesFlyout"
-                       Placement="Top"
-                       Opened="OnOffsetSidesFlyoutOpened"
-                       Closed="OnOffsetSidesFlyoutClosed">
-              <StackPanel x:Name="OffsetSidesFlyoutContent" Width="480">
-                <TextBlock Text="Offset Sides"
-                           FontWeight="SemiBold"
-                           TextAlignment="Center"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,4" />
-                <TextBlock Text="Expands the zone horizontally on all sides before testing targets."
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,6" />
-                <Border CornerRadius="10"
-                        BorderBrush="#FFFFFFFF"
-                        BorderThickness="1"
-                        Width="432"
-                        Height="243"
-                        ClipToBounds="True">
-                  <MediaElement x:Name="OffsetSidesVideo"
-                                LoadedBehavior="Manual"
-                                UnloadedBehavior="Manual"
-                                Stretch="Uniform"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Loaded="OnHelpVideoLoaded"
-                                SizeChanged="OnHelpVideoSizeChanged"
-                                IsMuted="True"
-                                MediaOpened="OnHelpVideoOpened"
-                                MediaEnded="OnHelpVideoEnded"
-                                MediaFailed="OnHelpVideoFailed" />
-                </Border>
-              </StackPanel>
-            </ui:Flyout>
-            <TextBox x:Name="OffsetSidesBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-          </StackPanel>
-
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-              <TextBlock Text="Offset Bottom:" VerticalAlignment="Center" />
-              <Button x:Name="OffsetBottomFlyoutButton"
-                      Style="{StaticResource HelpFlyoutButtonStyle}">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
-            </StackPanel>
-            <ui:Flyout x:Name="OffsetBottomFlyout"
-                       Placement="Top"
-                       Opened="OnOffsetBottomFlyoutOpened"
-                       Closed="OnOffsetBottomFlyoutClosed">
-              <StackPanel x:Name="OffsetBottomFlyoutContent" Width="480">
-                <TextBlock Text="Offset Bottom"
-                           FontWeight="SemiBold"
-                           TextAlignment="Center"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,4" />
-                <TextBlock Text="Adds a vertical offset to the bottom of the zone before testing targets."
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,6" />
-                <Border CornerRadius="10"
-                        BorderBrush="#FFFFFFFF"
-                        BorderThickness="1"
-                        Width="432"
-                        Height="243"
-                        ClipToBounds="True">
-                  <MediaElement x:Name="OffsetBottomVideo"
-                                LoadedBehavior="Manual"
-                                UnloadedBehavior="Manual"
-                                Stretch="Uniform"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Loaded="OnHelpVideoLoaded"
-                                SizeChanged="OnHelpVideoSizeChanged"
-                                IsMuted="True"
-                                MediaOpened="OnHelpVideoOpened"
-                                MediaEnded="OnHelpVideoEnded"
-                                MediaFailed="OnHelpVideoFailed" />
-                </Border>
-              </StackPanel>
-            </ui:Flyout>
-            <TextBox x:Name="OffsetBottomBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-          </StackPanel>
-
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-              <TextBlock Text="Offset Top:" VerticalAlignment="Center" />
-              <Button x:Name="OffsetTopFlyoutButton"
-                      Style="{StaticResource HelpFlyoutButtonStyle}">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
-            </StackPanel>
-            <ui:Flyout x:Name="OffsetTopFlyout"
-                       Placement="Top"
-                       Opened="OnOffsetTopFlyoutOpened"
-                       Closed="OnOffsetTopFlyoutClosed">
-              <StackPanel x:Name="OffsetTopFlyoutContent" Width="480">
-                <TextBlock Text="Offset Top"
-                           FontWeight="SemiBold"
-                           TextAlignment="Center"
-                           HorizontalAlignment="Center"
-                           Margin="0,0,0,4" />
-                <TextBlock Text="Adds a vertical offset to the top of the zone before testing targets."
-                           TextWrapping="Wrap"
-                           Margin="0,0,0,6" />
-                <Border CornerRadius="10"
-                        BorderBrush="#FFFFFFFF"
-                        BorderThickness="1"
-                        Width="432"
-                        Height="243"
-                        ClipToBounds="True">
-                  <MediaElement x:Name="OffsetTopVideo"
-                                LoadedBehavior="Manual"
-                                UnloadedBehavior="Manual"
-                                Stretch="Uniform"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Loaded="OnHelpVideoLoaded"
-                                SizeChanged="OnHelpVideoSizeChanged"
-                                IsMuted="True"
-                                MediaOpened="OnHelpVideoOpened"
-                                MediaEnded="OnHelpVideoEnded"
-                                MediaFailed="OnHelpVideoFailed" />
-                </Border>
-              </StackPanel>
-            </ui:Flyout>
-            <TextBox x:Name="OffsetTopBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-          </StackPanel>
-
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-              <TextBlock Text="Units:" VerticalAlignment="Center" />
-              <Button x:Name="UnitsFlyoutButton"
-                      Style="{StaticResource HelpFlyoutButtonStyle}">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
-            </StackPanel>
-            <ui:Flyout x:Name="UnitsFlyout" Placement="Top">
-              <StackPanel x:Name="UnitsFlyoutContent" Width="240">
-                <TextBlock TextWrapping="Wrap"
-                           Text="Units used for all offset inputs." />
-              </StackPanel>
-            </ui:Flyout>
-            <TextBox x:Name="UnitsBoxControl" Width="140" Text="Millimeters" />
-          </StackPanel>
-
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-              <TextBlock Text="Offset Mode:" VerticalAlignment="Center" />
-              <Button x:Name="OffsetModeFlyoutButton"
-                      Style="{StaticResource HelpFlyoutButtonStyle}">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
-            </StackPanel>
-            <ui:Flyout x:Name="OffsetModeFlyout" Placement="Top">
-              <StackPanel x:Name="OffsetModeFlyoutContent" Width="260">
-                <TextBlock TextWrapping="Wrap"
-                           Text="Defines how offsets are applied relative to the zone geometry." />
-              </StackPanel>
-            </ui:Flyout>
-            <TextBox x:Name="OffsetModeBoxControl" Width="160" Text="From Zone Geometry" />
-          </StackPanel>
-        </UniformGrid>
-      </StackPanel>
-    </ui:Card>
-
-    <ui:Card Grid.Row="3"
-             Padding="10"
-             Margin="0,8,0,0"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Top"
-             VerticalAlignment="Top">
-      <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-
-        <StackPanel Grid.Column="0">
-          <ui:TextBlock Text="Estimate &amp; Performance" FontSize="14" FontWeight="SemiBold" />
-
-          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-            <TextBlock Text="Estimated runtime:" Width="160" />
-            <TextBlock x:Name="EstimateRuntimeTextControl" Text="-" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-            <TextBlock Text="Zones / Targets:" Width="160" />
-            <TextBlock x:Name="EstimateCountsTextControl" Text="-" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-            <TextBlock Text="Candidate pairs:" Width="160"
-                       ToolTip="Number of zone-target AABB overlaps to evaluate." />
-            <TextBlock x:Name="EstimatePairsTextControl" Text="-" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-            <TextBlock x:Name="EstimateAvgLabelTextControl" Text="Avg candidates/zone:" Width="160" />
-            <TextBlock x:Name="EstimateAvgTextControl" Text="-" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-            <TextBlock Text="Confidence:" Width="160" />
-            <TextBlock x:Name="EstimateConfidenceTextControl" Text="-" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-            <TextBlock Text="Cell size used:" Width="160" />
-            <TextBlock x:Name="EstimateCellSizeTextControl" Text="-" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
-            <TextBlock Text="Last preflight:" Width="160" />
-            <TextBlock x:Name="EstimatePreflightTimeTextControl" Text="-" />
-          </StackPanel>
-
-          <StackPanel Margin="0,8,0,0">
-            <TextBlock Text="Index Granularity" FontWeight="SemiBold" />
-            <Slider x:Name="IndexGranularitySliderControl"
+            <TextBlock Text="Target Representation"
+                       Margin="0,10,0,2"
+                       TextWrapping="Wrap" />
+            <Slider x:Name="TargetBoundsSliderControl"
                     Minimum="0"
                     Maximum="4"
-                    Value="0"
-                    TickPlacement="Both"
-                    Ticks="0,1,2,3,4"
+                    TickFrequency="1"
                     IsSnapToTickEnabled="True"
-                    SmallChange="1"
-                    LargeChange="1"
-                    Margin="0,6,0,0" />
+                    TickPlacement="Both"
+                    Value="1"
+                    Margin="0,4,0,0" />
             <Grid Margin="0,4,0,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
               </Grid.ColumnDefinitions>
-              <TextBlock Text="Auto" Grid.Column="0" HorizontalAlignment="Left" />
-              <TextBlock Text="Coarse" Grid.Column="1" HorizontalAlignment="Center" />
-              <TextBlock Text="Normal" Grid.Column="2" HorizontalAlignment="Center" />
-              <TextBlock Text="Fine" Grid.Column="3" HorizontalAlignment="Center" />
-              <TextBlock Text="Ultra" Grid.Column="4" HorizontalAlignment="Right" />
+              <TextBlock Text="Midpoint" Grid.Column="0" HorizontalAlignment="Left" />
+              <TextBlock Text="AABB" Grid.Column="0" HorizontalAlignment="Right" />
+              <TextBlock Text="OBB" Grid.Column="1" HorizontalAlignment="Right" />
+              <TextBlock Text="k-DOP" Grid.Column="2" HorizontalAlignment="Right" />
+              <TextBlock Text="Hull" Grid.Column="3" HorizontalAlignment="Right" />
             </Grid>
-            <TextBlock x:Name="IndexGranularityHintTextControl"
-                       Margin="0,6,0,0"
-                       Opacity="0.85"
-                       TextWrapping="Wrap"
-                       Text="Controls spatial grid cell size. Smaller cells reduce candidate pairs but increase index build cost." />
+            <StackPanel x:Name="TargetKDopVariantRowControl" Orientation="Horizontal" Margin="0,6,0,0" Visibility="Collapsed">
+              <TextBlock Text="k-DOP variant:" Width="120" VerticalAlignment="Center" />
+              <ComboBox x:Name="TargetKDopVariantComboControl" Width="140" SelectedIndex="1">
+                <ComboBoxItem Content="8" />
+                <ComboBoxItem Content="14" />
+                <ComboBoxItem Content="18" />
+              </ComboBox>
+            </StackPanel>
+            <StackPanel x:Name="TargetMidpointModeRowControl" Orientation="Horizontal" Margin="0,6,0,0" Visibility="Collapsed">
+              <TextBlock Text="Midpoint mode:" Width="120" VerticalAlignment="Center" />
+              <ComboBox x:Name="TargetMidpointModeComboControl" Width="200" SelectedIndex="0">
+                <ComboBoxItem Content="Bounding box center" />
+                <ComboBoxItem Content="Bounding box bottom center" />
+              </ComboBox>
+            </StackPanel>
           </StackPanel>
-        </StackPanel>
 
-        <StackPanel Grid.Column="1" Margin="12,0,0,0">
-          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <TextBlock Text="Preflight:" Margin="0,0,6,0" />
-            <TextBlock x:Name="PreflightStatusTextControl" Text="Idle" />
-          </StackPanel>
-          <ProgressBar x:Name="PreflightProgressBarControl"
-                       Width="180"
-                       Height="8"
-                       Margin="0,6,0,0"
-                       Minimum="0"
-                       Maximum="100"
-                       Value="0"
-                       IsIndeterminate="False" />
-          <ui:Button x:Name="RunPreflightButtonControl"
-                     Content="Run Preflight"
-                     Margin="0,8,0,0" />
-          <CheckBox x:Name="LiveEstimateToggleControl"
-                    Content="Live estimate"
-                    Margin="0,6,0,0" />
-          <CheckBox x:Name="ReusePreflightToggleControl"
-                    Content="Reuse preflight for Run"
-                    IsChecked="True"
-                    Margin="0,4,0,0" />
-        </StackPanel>
-      </Grid>
-    </ui:Card>
-
-    <ui:Card Grid.Row="4"
-             Padding="10"
-             Margin="0,8,0,0"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Top"
-             VerticalAlignment="Top">
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-
-        <ui:TextBlock Grid.Row="0"
-                      Grid.Column="0"
-                      Text="Benchmark &amp; Testing"
-                      FontSize="14"
-                      FontWeight="SemiBold" />
-
-        <ui:Button x:Name="ComparisonReportButtonControl"
-                   Grid.Row="0"
-                   Grid.Column="1"
-                   Content="Benchmark"
-                   Margin="8,0,0,0" />
-
-        <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,6,0,0">
-          <StackPanel Orientation="Horizontal">
-            <TextBlock Text="Mode:" Width="140" VerticalAlignment="Center" />
-            <ComboBox x:Name="BenchmarkModeComboControl" Width="260" SelectedIndex="0">
-              <ComboBoxItem Content="Compute only (no model changes)" />
-              <ComboBoxItem Content="Simulate writeback (no model changes)" />
-              <ComboBoxItem Content="Full run per preset (writes properties)" />
-            </ComboBox>
-          </StackPanel>
-          <TextBlock x:Name="BenchmarkModeHintTextControl"
-                     Margin="0,4,0,0"
+          <TextBlock x:Name="EffectiveMethodTextControl"
+                     Margin="0,10,0,0"
                      FontSize="11"
                      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                     TextWrapping="Wrap"
-                     Text="Full run writes properties to the model. Simulate writeback runs mapping logic without writing." />
-
-          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-            <TextBlock Text="Writeback strategy:" Width="140" VerticalAlignment="Center" />
-            <ComboBox x:Name="WritebackStrategyComboControl" Width="260" SelectedIndex="1">
-              <ComboBoxItem Content="Virtual (no bake)" />
-              <ComboBoxItem Content="Optimized (single category)" />
-              <ComboBoxItem Content="Legacy (per mapping)" />
-            </ComboBox>
-          </StackPanel>
-
-          <CheckBox x:Name="SkipUnchangedWritebackCheckControl"
-                    Content="Skip unchanged targets (signature)"
-                    Margin="0,6,0,0" />
-          <TextBlock Text="Stores a signature per target so repeat runs can skip unchanged items."
-                     FontSize="11"
-                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                     TextWrapping="Wrap"
-                     Margin="0,2,0,0" />
-
-          <CheckBox x:Name="PackWritebackCheckControl"
-                    Content="Pack outputs into a single property"
-                    Margin="0,6,0,0" />
-          <TextBlock Text="Replaces individual mapping properties with a packed value to reduce writes."
-                     FontSize="11"
-                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                     TextWrapping="Wrap"
-                     Margin="0,2,0,0" />
-
-          <CheckBox x:Name="ShowInternalWritebackCheckControl"
-                    Content="Show internal properties during writeback"
-                    Margin="0,6,0,0" />
-
-          <CheckBox x:Name="CloseDockPanesCheckControl"
-                    Content="Close other Navisworks panes during run (restore after)"
-                    Margin="0,6,0,0" />
-
-          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-            <TextBlock Text="Tip: Close Properties/Find Items windows for fastest writes."
-                       FontSize="11"
-                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <TextBlock Text="Why?"
-                       Margin="6,0,0,0"
-                       FontSize="11"
-                       Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                       ToolTip="Navisworks refreshes those panes on each COM write, which slows writeback." />
-          </StackPanel>
-        </StackPanel>
-
-        <Border Grid.Row="2"
-                Grid.ColumnSpan="2"
-                Margin="0,8,0,0"
-                Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="6"
-                Padding="8">
-          <StackPanel>
-            <TextBlock Text="Latest benchmark"
-                       FontSize="12"
-                       FontWeight="SemiBold"
-                       Margin="0,0,0,4" />
-            <TextBlock x:Name="ComparisonReportStatusTextControl"
-                       FontSize="11"
-                       TextWrapping="Wrap"
-                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-            <TextBlock x:Name="BenchmarkSummaryTextControl"
-                       Margin="0,4,0,0"
-                       FontSize="12"
-                       FontWeight="SemiBold"
-                       TextWrapping="Wrap" />
-            <TextBlock x:Name="BenchmarkSummaryDetailTextControl"
-                       Margin="0,2,0,0"
-                       FontSize="11"
-                       TextWrapping="Wrap"
-                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-          </StackPanel>
-        </Border>
-      </Grid>
-    </ui:Card>
-
-    <ui:Card Grid.Row="5"
-             Padding="10"
-             Margin="0,8,0,0"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Top"
-             VerticalAlignment="Top">
-      <Expander x:Name="AdvancedPerformanceExpanderControl"
-                Header="Advanced Performance"
-                IsExpanded="False">
-        <StackPanel Margin="0,6,0,0">
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <TextBlock Text="Fast Traversal:" Width="120" VerticalAlignment="Center" />
-            <ComboBox x:Name="FastTraversalComboControl" Width="140" SelectedIndex="0">
-              <ComboBoxItem Content="Auto" />
-              <ComboBoxItem Content="Zone-major" />
-              <ComboBoxItem Content="Target-major" />
-            </ComboBox>
-          </StackPanel>
-          <TextBlock x:Name="FastTraversalHintTextControl"
-                     Margin="0,2,0,0"
-                     FontSize="11"
-                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                     Text="Target-major is available only when partial options are disabled." />
-          <TextBlock x:Name="FastTraversalResolvedTextControl"
-                     Margin="0,2,0,6"
-                     FontSize="11"
-                     Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <TextBlock Text="Max Threads:" Width="120" VerticalAlignment="Center" />
-            <TextBox x:Name="MaxThreadsBoxControl" Width="80" Text="0" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Margin="0,4">
-            <TextBlock Text="Batch Size:" Width="120" VerticalAlignment="Center" />
-            <TextBox x:Name="BatchSizeBoxControl" Width="80" Text="0" />
-          </StackPanel>
-          <TextBlock Text="Use 0 to let Space Mapper choose automatically."
-                     Margin="0,4,0,0"
-                     Opacity="0.75"
                      TextWrapping="Wrap" />
         </StackPanel>
-      </Expander>
-    </ui:Card>
-  </Grid>
+      </ui:Card>
+
+      <ui:Card Padding="10"
+               Margin="0,0,0,12"
+               HorizontalAlignment="Stretch"
+               HorizontalContentAlignment="Stretch">
+        <StackPanel>
+          <ui:TextBlock Text="Zone Offsets" FontSize="14" FontWeight="SemiBold" />
+
+          <UniformGrid Columns="2" Rows="3" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal" Margin="0,4">
+              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                <TextBlock Text="3D Offset:" VerticalAlignment="Center" />
+                <Button x:Name="Offset3DFlyoutButton"
+                        Style="{StaticResource HelpFlyoutButtonStyle}">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:Flyout x:Name="Offset3DFlyout"
+                         Placement="Top"
+                         Opened="OnOffset3DFlyoutOpened"
+                         Closed="OnOffset3DFlyoutClosed">
+                <StackPanel x:Name="Offset3DFlyoutContent" Width="480">
+                  <TextBlock Text="3D Offset"
+                             FontWeight="SemiBold"
+                             TextAlignment="Center"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,4" />
+                  <TextBlock Text="Applies an overall 3D expansion to the zone volume before checking targets."
+                             TextWrapping="Wrap"
+                             Margin="0,0,0,6" />
+                  <Border CornerRadius="10"
+                          BorderBrush="#FFFFFFFF"
+                          BorderThickness="1"
+                          Width="432"
+                          Height="243"
+                          ClipToBounds="True">
+                    <MediaElement x:Name="Offset3DVideo"
+                                  LoadedBehavior="Manual"
+                                  UnloadedBehavior="Manual"
+                                  Stretch="Uniform"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Loaded="OnHelpVideoLoaded"
+                                  SizeChanged="OnHelpVideoSizeChanged"
+                                  IsMuted="True"
+                                  MediaOpened="OnHelpVideoOpened"
+                                  MediaEnded="OnHelpVideoEnded"
+                                  MediaFailed="OnHelpVideoFailed" />
+                  </Border>
+                </StackPanel>
+              </ui:Flyout>
+              <TextBox x:Name="Offset3DBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,4">
+              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                <TextBlock Text="Offset Sides:" VerticalAlignment="Center" />
+                <Button x:Name="OffsetSidesFlyoutButton"
+                        Style="{StaticResource HelpFlyoutButtonStyle}">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:Flyout x:Name="OffsetSidesFlyout"
+                         Placement="Top"
+                         Opened="OnOffsetSidesFlyoutOpened"
+                         Closed="OnOffsetSidesFlyoutClosed">
+                <StackPanel x:Name="OffsetSidesFlyoutContent" Width="480">
+                  <TextBlock Text="Offset Sides"
+                             FontWeight="SemiBold"
+                             TextAlignment="Center"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,4" />
+                  <TextBlock Text="Expands the zone horizontally on all sides before testing targets."
+                             TextWrapping="Wrap"
+                             Margin="0,0,0,6" />
+                  <Border CornerRadius="10"
+                          BorderBrush="#FFFFFFFF"
+                          BorderThickness="1"
+                          Width="432"
+                          Height="243"
+                          ClipToBounds="True">
+                    <MediaElement x:Name="OffsetSidesVideo"
+                                  LoadedBehavior="Manual"
+                                  UnloadedBehavior="Manual"
+                                  Stretch="Uniform"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Loaded="OnHelpVideoLoaded"
+                                  SizeChanged="OnHelpVideoSizeChanged"
+                                  IsMuted="True"
+                                  MediaOpened="OnHelpVideoOpened"
+                                  MediaEnded="OnHelpVideoEnded"
+                                  MediaFailed="OnHelpVideoFailed" />
+                  </Border>
+                </StackPanel>
+              </ui:Flyout>
+              <TextBox x:Name="OffsetSidesBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,4">
+              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                <TextBlock Text="Offset Bottom:" VerticalAlignment="Center" />
+                <Button x:Name="OffsetBottomFlyoutButton"
+                        Style="{StaticResource HelpFlyoutButtonStyle}">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:Flyout x:Name="OffsetBottomFlyout"
+                         Placement="Top"
+                         Opened="OnOffsetBottomFlyoutOpened"
+                         Closed="OnOffsetBottomFlyoutClosed">
+                <StackPanel x:Name="OffsetBottomFlyoutContent" Width="480">
+                  <TextBlock Text="Offset Bottom"
+                             FontWeight="SemiBold"
+                             TextAlignment="Center"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,4" />
+                  <TextBlock Text="Adds a vertical offset to the bottom of the zone before testing targets."
+                             TextWrapping="Wrap"
+                             Margin="0,0,0,6" />
+                  <Border CornerRadius="10"
+                          BorderBrush="#FFFFFFFF"
+                          BorderThickness="1"
+                          Width="432"
+                          Height="243"
+                          ClipToBounds="True">
+                    <MediaElement x:Name="OffsetBottomVideo"
+                                  LoadedBehavior="Manual"
+                                  UnloadedBehavior="Manual"
+                                  Stretch="Uniform"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Loaded="OnHelpVideoLoaded"
+                                  SizeChanged="OnHelpVideoSizeChanged"
+                                  IsMuted="True"
+                                  MediaOpened="OnHelpVideoOpened"
+                                  MediaEnded="OnHelpVideoEnded"
+                                  MediaFailed="OnHelpVideoFailed" />
+                  </Border>
+                </StackPanel>
+              </ui:Flyout>
+              <TextBox x:Name="OffsetBottomBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,4">
+              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                <TextBlock Text="Offset Top:" VerticalAlignment="Center" />
+                <Button x:Name="OffsetTopFlyoutButton"
+                        Style="{StaticResource HelpFlyoutButtonStyle}">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:Flyout x:Name="OffsetTopFlyout"
+                         Placement="Top"
+                         Opened="OnOffsetTopFlyoutOpened"
+                         Closed="OnOffsetTopFlyoutClosed">
+                <StackPanel x:Name="OffsetTopFlyoutContent" Width="480">
+                  <TextBlock Text="Offset Top"
+                             FontWeight="SemiBold"
+                             TextAlignment="Center"
+                             HorizontalAlignment="Center"
+                             Margin="0,0,0,4" />
+                  <TextBlock Text="Adds a vertical offset to the top of the zone before testing targets."
+                             TextWrapping="Wrap"
+                             Margin="0,0,0,6" />
+                  <Border CornerRadius="10"
+                          BorderBrush="#FFFFFFFF"
+                          BorderThickness="1"
+                          Width="432"
+                          Height="243"
+                          ClipToBounds="True">
+                    <MediaElement x:Name="OffsetTopVideo"
+                                  LoadedBehavior="Manual"
+                                  UnloadedBehavior="Manual"
+                                  Stretch="Uniform"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Loaded="OnHelpVideoLoaded"
+                                  SizeChanged="OnHelpVideoSizeChanged"
+                                  IsMuted="True"
+                                  MediaOpened="OnHelpVideoOpened"
+                                  MediaEnded="OnHelpVideoEnded"
+                                  MediaFailed="OnHelpVideoFailed" />
+                  </Border>
+                </StackPanel>
+              </ui:Flyout>
+              <TextBox x:Name="OffsetTopBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,4">
+              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                <TextBlock Text="Units:" VerticalAlignment="Center" />
+                <Button x:Name="UnitsFlyoutButton"
+                        Style="{StaticResource HelpFlyoutButtonStyle}">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:Flyout x:Name="UnitsFlyout" Placement="Top">
+                <StackPanel x:Name="UnitsFlyoutContent" Width="240">
+                  <TextBlock TextWrapping="Wrap"
+                             Text="Units used for all offset inputs." />
+                </StackPanel>
+              </ui:Flyout>
+              <TextBox x:Name="UnitsBoxControl" Width="140" Text="Millimeters" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Margin="0,4">
+              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                <TextBlock Text="Offset Mode:" VerticalAlignment="Center" />
+                <Button x:Name="OffsetModeFlyoutButton"
+                        Style="{StaticResource HelpFlyoutButtonStyle}">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:Flyout x:Name="OffsetModeFlyout" Placement="Top">
+                <StackPanel x:Name="OffsetModeFlyoutContent" Width="260">
+                  <TextBlock TextWrapping="Wrap"
+                             Text="Defines how offsets are applied relative to the zone geometry." />
+                </StackPanel>
+              </ui:Flyout>
+              <TextBox x:Name="OffsetModeBoxControl" Width="160" Text="From Zone Geometry" />
+            </StackPanel>
+          </UniformGrid>
+        </StackPanel>
+      </ui:Card>
+
+      <ui:Card Padding="10"
+               Margin="0,0,0,12"
+               HorizontalAlignment="Stretch"
+               HorizontalContentAlignment="Stretch">
+        <StackPanel>
+          <ui:TextBlock Text="Assignment &amp; Writeback" FontSize="14" FontWeight="SemiBold" />
+          <ui:TextBlock Text="Resolve zone matches and choose what gets written to the model."
+                        Margin="0,4,0,10"
+                        FontSize="12"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+          <TextBlock Text="Assignment" FontWeight="SemiBold" Margin="0,0,0,4" />
+          <TextBlock Text="How to resolve multiple matching zones and partial results."
+                     Margin="0,0,0,10"
+                     FontSize="12"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+          <StackPanel Margin="0,0,0,4">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="Resolution:" Width="140" VerticalAlignment="Center" />
+              <ComboBox x:Name="ZoneResolutionStrategyComboControl" Width="260" SelectedIndex="0">
+                <ComboBoxItem Content="Most specific wins" />
+                <ComboBoxItem Content="Largest overlap wins" />
+                <ComboBoxItem Content="First match wins" />
+              </ComboBox>
+            </StackPanel>
+            <TextBlock x:Name="ZoneResolutionHintTextControl"
+                       Margin="0,4,0,0"
+                       FontSize="11"
+                       Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       TextWrapping="Wrap"
+                       Visibility="Collapsed" />
+          </StackPanel>
+          <TextBlock x:Name="ZoneContainmentHintTextControl"
+                     Margin="0,4,0,0"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Text="Most specific picks the smallest enclosing zone when multiple zones contain a target." />
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <CheckBox x:Name="EnableMultiZoneCheckControl"
+                      Content="Enable Multiple Zones"
+                      IsChecked="True"
+                      VerticalAlignment="Center" />
+            <Button x:Name="EnableMultiZoneHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="EnableMultiZoneHelpFlyout" Placement="Top">
+              <TextBlock Width="260"
+                         TextWrapping="Wrap"
+                         Text="Allows targets to be assigned to more than one matching zone instead of picking only one." />
+            </ui:Flyout>
+          </StackPanel>
+
+          <StackPanel Margin="0,10,0,0">
+            <TextBlock Text="Target filtering" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <StackPanel Orientation="Horizontal">
+              <CheckBox x:Name="ExcludeZonesFromTargetsCheckControl"
+                        Content="Ignore zones that are also targets"
+                        VerticalAlignment="Center" />
+              <Button x:Name="ExcludeZonesFromTargetsHelpToggle"
+                      Style="{StaticResource HelpFlyoutButtonStyle}"
+                      Margin="6,0,0,0"
+                      VerticalAlignment="Center">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="ExcludeZonesFromTargetsHelpFlyout" Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Prevents zone items from being matched to themselves when they appear in target rules." />
+              </ui:Flyout>
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="PartialSectionControl" Margin="0,10,0,0">
+            <TextBlock Text="Partial handling" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+              <CheckBox x:Name="TreatPartialCheckControl"
+                        Content="Treat Partial as Contained"
+                        VerticalAlignment="Center" />
+              <Button x:Name="TreatPartialHelpToggle"
+                      Style="{StaticResource HelpFlyoutButtonStyle}"
+                      Margin="6,0,0,0"
+                      VerticalAlignment="Center">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="TreatPartialHelpFlyout" Placement="Top">
+                <TextBlock Width="240"
+                           TextWrapping="Wrap"
+                           Text="Counts partial overlaps as contained for assignment and tagging." />
+              </ui:Flyout>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+              <CheckBox x:Name="TagPartialCheckControl"
+                        Content="Tag Partial Separately"
+                        VerticalAlignment="Center" />
+              <Button x:Name="TagPartialHelpToggle"
+                      Style="{StaticResource HelpFlyoutButtonStyle}"
+                      Margin="6,0,0,0"
+                      VerticalAlignment="Center">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+              <ui:Flyout x:Name="TagPartialHelpFlyout" Placement="Top">
+                <TextBlock Width="260"
+                           TextWrapping="Wrap"
+                           Text="Keeps partial hits separate from contained results when resolving and reporting." />
+              </ui:Flyout>
+            </StackPanel>
+          </StackPanel>
+
+          <TextBlock x:Name="MidpointNoPartialNoteTextControl"
+                     Margin="0,10,0,0"
+                     FontSize="11"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     TextWrapping="Wrap"
+                     Text="Midpoint target mode is inside/outside only (no partial state)."
+                     Visibility="Collapsed" />
+
+          <TextBlock Text="Writeback Output" FontWeight="SemiBold" Margin="0,12,0,2" />
+          <TextBlock Text="Choose what properties get written to the model."
+                     Margin="0,0,0,10"
+                     FontSize="12"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+          <StackPanel Orientation="Horizontal">
+            <CheckBox x:Name="SkipUnchangedWritebackCheckControl"
+                      Content="Skip unchanged targets (signature)"
+                      VerticalAlignment="Center" />
+            <Button x:Name="SkipUnchangedHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="SkipUnchangedHelpFlyout" Placement="Top">
+              <TextBlock Width="260"
+                         TextWrapping="Wrap"
+                         Text="Stores a signature per target so repeat runs can skip unchanged items." />
+            </ui:Flyout>
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <CheckBox x:Name="PackWritebackCheckControl"
+                      Content="Pack outputs into a single property"
+                      VerticalAlignment="Center" />
+            <Button x:Name="PackWritebackHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="PackWritebackHelpFlyout" Placement="Top">
+              <TextBlock Width="260"
+                         TextWrapping="Wrap"
+                         Text="Replaces individual mapping properties with a packed value to reduce writes." />
+            </ui:Flyout>
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <CheckBox x:Name="ShowInternalWritebackCheckControl"
+                      Content="Show internal properties during writeback"
+                      VerticalAlignment="Center" />
+            <Button x:Name="ShowInternalHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="ShowInternalHelpFlyout" Placement="Top">
+              <TextBlock Width="260"
+                         TextWrapping="Wrap"
+                         Text="Uses internal or hidden property categories during writeback (advanced)." />
+            </ui:Flyout>
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <CheckBox x:Name="WriteZoneBehaviorCheckControl"
+                      Content="Write Zone Behaviour property"
+                      VerticalAlignment="Center" />
+            <Button x:Name="WriteZoneBehaviorHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="WriteZoneBehaviorHelpFlyout" Placement="Top">
+              <TextBlock Width="260"
+                         TextWrapping="Wrap"
+                         Text="Writes a Contained or Partial status property for each target." />
+            </ui:Flyout>
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <CheckBox x:Name="WriteContainmentPercentCheckControl"
+                      Content="Write containment % property"
+                      VerticalAlignment="Center" />
+            <Button x:Name="WriteContainmentPercentHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="WriteContainmentPercentHelpFlyout" Placement="Top">
+              <TextBlock Width="320"
+                         TextWrapping="Wrap"
+                         Text="Writes a Zone Containment % property (0-100). Mesh accurate uses sampling; bounds uses an AABB overlap approximation." />
+            </ui:Flyout>
+          </StackPanel>
+
+          <StackPanel x:Name="ContainmentCalculationPanelControl" Margin="0,6,0,0" IsEnabled="False" Visibility="Collapsed">
+            <StackPanel Margin="16,0,0,0">
+              <TextBlock Text="Containment calculation (affects Behaviour/% outputs)."
+                         FontSize="11"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                         Margin="0,0,0,4" />
+              <StackPanel Orientation="Horizontal">
+                <ComboBox x:Name="ContainmentCalculationComboControl" Width="240" SelectedIndex="0">
+                  <ComboBoxItem Content="Auto (engine default)" />
+                  <ComboBoxItem Content="Sample points (fast)" />
+                  <ComboBoxItem Content="Sample points (dense)" />
+                  <ComboBoxItem Content="Target geometry samples" />
+                  <ComboBoxItem Content="Bounds overlap (AABB)" />
+                </ComboBox>
+                <Button x:Name="ContainmentCalculationHelpToggle"
+                        Style="{StaticResource HelpFlyoutButtonStyle}"
+                        Margin="6,0,0,0"
+                        VerticalAlignment="Center">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+                <ui:Flyout x:Name="ContainmentCalculationHelpFlyout" Placement="Top">
+                  <TextBlock Width="320"
+                             TextWrapping="Wrap"
+                             Text="Controls how containment % and Zone Behaviour are computed. Auto uses mesh sampling for Mesh Accurate and AABB overlap for bounds. Target geometry samples triangles and is slower." />
+                </ui:Flyout>
+              </StackPanel>
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel x:Name="ZoneBehaviorFieldsPanelControl" Margin="0,8,0,0" IsEnabled="False" Visibility="Collapsed">
+            <StackPanel Margin="16,0,0,0">
+              <TextBlock Text="Writes Contained/Partial status to a separate property."
+                         FontSize="11"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                         Margin="0,0,0,6" />
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Text="Behaviour Category:" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6" />
+                <TextBox x:Name="ZoneBehaviorCategoryBoxControl" Grid.Row="0" Grid.Column="1" MinWidth="160" Margin="0,0,0,6" Text="ME_SpaceInfo" />
+
+                <TextBlock Text="Behaviour Property:" Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6" />
+                <TextBox x:Name="ZoneBehaviorPropertyBoxControl" Grid.Row="1" Grid.Column="1" MinWidth="160" Margin="0,0,0,6" Text="Zone Behaviour" />
+
+                <TextBlock Text="Contained Value:" Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6" />
+                <TextBox x:Name="ZoneBehaviorContainedBoxControl" Grid.Row="2" Grid.Column="1" MinWidth="160" Margin="0,0,0,6" Text="Contained" />
+
+                <TextBlock Text="Partial Value:" Grid.Row="3" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <TextBox x:Name="ZoneBehaviorPartialBoxControl" Grid.Row="3" Grid.Column="1" MinWidth="160" Text="Partial" />
+              </Grid>
+            </StackPanel>
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <CheckBox x:Name="CloseDockPanesCheckControl"
+                      Content="Close other Navisworks panes during run (restore after)"
+                      VerticalAlignment="Center" />
+            <Button x:Name="CloseDockPanesHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="CloseDockPanesHelpFlyout" Placement="Top">
+              <TextBlock Width="280"
+                         TextWrapping="Wrap"
+                         Text="Temporarily closes Selection Tree, Find Items, Properties, and add-in panes to reduce writeback overhead, then restores them." />
+            </ui:Flyout>
+          </StackPanel>
+        </StackPanel>
+      </ui:Card>
+
+    </StackPanel>
+  </ScrollViewer>
 </Page>

@@ -1,0 +1,240 @@
+<UserControl x:Class="MicroEng.Navisworks.Sequence4DControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:local="clr-namespace:MicroEng.Navisworks"
+             xmlns:system="clr-namespace:System;assembly=System"
+             mc:Ignorable="d"
+             d:DesignHeight="600"
+             d:DesignWidth="700"
+             Background="{DynamicResource ApplicationBackgroundBrush}"
+             Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+             FontSize="12">
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:Card Grid.Row="0"
+                 Padding="10"
+                 Margin="0,0,0,8"
+                 HorizontalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Top">
+            <StackPanel>
+                <ui:TextBlock Text="4D Sequence Builder"
+                              FontSize="16"
+                              FontWeight="SemiBold" />
+                <ui:TextBlock Text="Create a Timeliner task sequence from the current selection."
+                              Margin="0,4,0,0"
+                              FontSize="12"
+                              Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </ui:Card>
+
+        <ScrollViewer Grid.Row="1"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel>
+                <ui:Card Padding="10" Margin="0,0,0,8">
+                    <StackPanel>
+                        <ui:TextBlock Text="Selection"
+                                      FontWeight="SemiBold"
+                                      Margin="0,0,0,6" />
+                        <TextBlock x:Name="SelectionStatusText"
+                                   Text="Captured items: 0"
+                                   Margin="0,0,0,2" />
+                        <TextBlock x:Name="ReferenceStatusText"
+                                   Text="Reference: (none)"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Margin="0,0,0,8" />
+                        <WrapPanel>
+                            <ui:Button x:Name="CaptureSelectionButton"
+                                       Content="Capture Current Selection"
+                                       Margin="0,0,8,0"
+                                       Click="CaptureSelection_Click" />
+                            <ui:Button x:Name="SetReferenceButton"
+                                       Content="Set Reference (1 item selected)"
+                                       Click="SetReference_Click" />
+                        </WrapPanel>
+                    </StackPanel>
+                </ui:Card>
+
+                <ui:Card Padding="10" Margin="0,0,0,8">
+                    <StackPanel>
+                        <ui:TextBlock Text="Sequence Settings"
+                                      FontWeight="SemiBold"
+                                      Margin="0,0,0,6" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="170" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Ordering" VerticalAlignment="Center" />
+                            <ComboBox x:Name="OrderingCombo"
+                                      Grid.Row="0"
+                                      Grid.Column="1"
+                                      MinWidth="220"
+                                      SelectionChanged="OrderingCombo_SelectionChanged" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Property Path" VerticalAlignment="Center" />
+                            <TextBox x:Name="PropertyPathTextBox"
+                                     Grid.Row="1"
+                                     Grid.Column="1"
+                                     MinWidth="220"
+                                     Text="Item|Name" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Sequence Name" VerticalAlignment="Center" />
+                            <TextBox x:Name="SequenceNameTextBox"
+                                     Grid.Row="2"
+                                     Grid.Column="1"
+                                     MinWidth="220"
+                                     Text="ME 4D Sequence" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Task Prefix" VerticalAlignment="Center" />
+                            <TextBox x:Name="TaskPrefixTextBox"
+                                     Grid.Row="3"
+                                     Grid.Column="1"
+                                     MinWidth="160"
+                                     Text="Step " />
+
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Items Per Task" VerticalAlignment="Center" />
+                            <ui:NumberBox x:Name="ItemsPerTaskBox"
+                                          Grid.Row="4"
+                                          Grid.Column="1"
+                                          MinWidth="120"
+                                          Minimum="1"
+                                          Maximum="100000"
+                                          Value="1"
+                                          SpinButtonPlacementMode="Inline"
+                                          AcceptsExpression="False" />
+
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Duration (sec)" VerticalAlignment="Center" />
+                            <ui:NumberBox x:Name="DurationBox"
+                                          Grid.Row="5"
+                                          Grid.Column="1"
+                                          MinWidth="120"
+                                          Minimum="0.1"
+                                          Maximum="86400"
+                                          Value="10"
+                                          MaxDecimalPlaces="2"
+                                          SpinButtonPlacementMode="Inline"
+                                          AcceptsExpression="False" />
+
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Overlap (sec)" VerticalAlignment="Center" />
+                            <ui:NumberBox x:Name="OverlapBox"
+                                          Grid.Row="6"
+                                          Grid.Column="1"
+                                          MinWidth="120"
+                                          Minimum="0"
+                                          Maximum="86400"
+                                          Value="0"
+                                          MaxDecimalPlaces="2"
+                                          SpinButtonPlacementMode="Inline"
+                                          AcceptsExpression="False" />
+
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Start Date/Time" VerticalAlignment="Center" />
+                            <StackPanel Grid.Row="7" Grid.Column="1" Orientation="Horizontal">
+                                <DatePicker x:Name="StartDatePicker" Width="140" />
+                                <TextBox x:Name="StartTimeTextBox" Width="90" Margin="8,0,0,0" Text="08:00:00" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Row="8" Grid.Column="0" Text="Task Type" VerticalAlignment="Center" />
+                            <ComboBox x:Name="TaskTypeCombo"
+                                      Grid.Row="8"
+                                      Grid.Column="1"
+                                      MinWidth="160" />
+                        </Grid>
+                    </StackPanel>
+                </ui:Card>
+
+                <ui:Card Padding="10">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <ui:TextBlock Text="Actions"
+                                          FontWeight="SemiBold"
+                                          Margin="0,0,0,6" />
+                            <TextBlock Text="Generate tasks in Timeliner or remove an existing sequence by name."
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1"
+                                    Orientation="Horizontal"
+                                    VerticalAlignment="Center">
+                            <ui:Button x:Name="GenerateButton"
+                                       Content="Generate Timeliner Sequence"
+                                       Appearance="Primary"
+                                       Padding="12,6"
+                                       Margin="0,0,8,0"
+                                       Click="Generate_Click" />
+                            <ui:Button x:Name="DeleteButton"
+                                       Content="Delete Sequence"
+                                       Appearance="Secondary"
+                                       Padding="12,6"
+                                       Click="Delete_Click" />
+                        </StackPanel>
+                    </Grid>
+                </ui:Card>
+            </StackPanel>
+        </ScrollViewer>
+
+        <ui:Card Grid.Row="2"
+                 Padding="10"
+                 Margin="0,8,0,0"
+                 HorizontalAlignment="Stretch"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Stretch">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <ui:TextBlock Grid.Row="0"
+                              Text="Log"
+                              FontSize="13"
+                              FontWeight="SemiBold"
+                              Margin="0,0,0,8" />
+                <TextBox x:Name="LogTextBox"
+                         Grid.Row="1"
+                         Text="Ready"
+                         AcceptsReturn="True"
+                         IsReadOnly="True"
+                         VerticalScrollBarVisibility="Auto"
+                         FontFamily="Consolas"
+                         FontSize="12"
+                         Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                         BorderThickness="1"
+                         Padding="8" />
+            </Grid>
+        </ui:Card>
+    </Grid>
+</UserControl>

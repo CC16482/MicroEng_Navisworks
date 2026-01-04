@@ -40,6 +40,7 @@
                 <local:MultiZoneCombineMode>Min</local:MultiZoneCombineMode>
                 <local:MultiZoneCombineMode>Max</local:MultiZoneCombineMode>
                 <local:MultiZoneCombineMode>Average</local:MultiZoneCombineMode>
+                <local:MultiZoneCombineMode>Sequence</local:MultiZoneCombineMode>
             </x:Array>
         </ResourceDictionary>
     </UserControl.Resources>

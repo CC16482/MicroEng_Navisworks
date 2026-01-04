@@ -1,0 +1,536 @@
+Below is a concrete “Tier A + Tier B” implementation that keeps **Tier A (fast)** as the current Mesh‑Accurate **point/midpoint** behavior, but also unlocks **Tier B (more accurate)** by letting users choose **AABB/OBB/k‑DOP/Hull** while still using the **MeshAccurate** engine.
+
+Tier mapping (as a user sees it)
+
+* **Tier A (fast):** `ZoneContainmentEngine = MeshAccurate` **+** `TargetBoundsMode = Midpoint`
+
+  * Single point containment (your current mesh point-in-mesh path).
+* **Tier B (more accurate):** `ZoneContainmentEngine = MeshAccurate` **+** `TargetBoundsMode != Midpoint`
+
+  * Multi‑sample containment against the mesh (corners + more samples as the target bounds mode increases).
+
+This gives the user “full control” because today your UI and settings code forcibly collapses MeshAccurate into Midpoint (Tier A only). For example:
+
+* UI forces target slider disabled + sets it to Midpoint when MeshAccurate is selected.
+* BuildSettings overrides the selected target bounds mode to Midpoint when MeshAccurate is selected.
+* Core engine also forces Midpoint for MeshAccurate at runtime.
+* Reports and comparison runner assume MeshAccurate implies point mode.
+* Best-selection point logic also assumes MeshAccurate implies midpoint.
+
+---
+
+## Codex directions (do these in order)
+
+### 1) UI: stop locking MeshAccurate to Midpoint
+
+**File:** `SpaceMapperControl.xaml.cs`
+
+1. In `BuildSettings()`, remove the block that sets `targetBoundsMode = Midpoint` when `containmentEngine == MeshAccurate`.
+2. In `OnBoundsModesChanged()`, remove the block that disables the target bounds slider when MeshAccurate is selected.
+3. Update `GetZoneContainmentHintText()` so the hint explains Tier A vs Tier B.
+
+### 2) Engine: stop forcing Midpoint for MeshAccurate + add Tier‑B mesh sampling
+
+**File:** `SpaceMapperEngines.cs`
+
+1. In `ResolveTargetBoundsMode(...)`, remove the `MeshAccurate => Midpoint` override.
+2. In `ClassifyIntersection(...)`, add a new branch:
+
+   * If `containmentEngine == MeshAccurate` AND `targetBoundsMode != Midpoint`, classify using **multi-sample mesh containment**, not planes/AABB.
+3. Add helper `ClassifyByMeshAccurateSamples(...)` (code below).
+
+### 3) Service + comparison + report: stop assuming MeshAccurate implies point-only
+
+**Files:**
+
+* `SpaceMapperService.cs` – remove `containmentEngine == MeshAccurate` from `useMidpoint` logic.
+* `SpaceMapperComparisonRunner.cs` – remove `forcePoint` logic that overwrites target bounds mode to Midpoint.
+* `SpaceMapperRunReportWriter.cs` – remove MeshAccurate from `usePoint` computation.
+* `SpaceMapperPreflightService.cs` – only if you have a MeshAccurate->Midpoint override there (some versions do); remove it.
+
+---
+
+## Code to implement
+
+### A) `SpaceMapperControl.xaml.cs`
+
+#### A1) BuildSettings: do NOT force Midpoint for MeshAccurate
+
+Find this block and delete it:
+
+```csharp
+if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate)
+{
+    targetBoundsMode = SpaceMapperTargetBoundsMode.Midpoint;
+}
+```
+
+(That override exists in your current code.)
+
+Replace the top portion of `BuildSettings()` with this (keep the rest of your existing settings fields intact):
+
+```csharp
+private SpaceMapperProcessingSettings BuildSettings()
+{
+    var containmentEngine = GetSelectedZoneContainmentEngine();
+    var resolutionStrategy = GetSelectedZoneResolutionStrategy();
+    var zoneBoundsMode = GetSelectedZoneBoundsMode();
+    var targetBoundsMode = GetSelectedTargetBoundsMode();
+    var treatPartial = _processingPage.TreatPartialCheck.IsChecked == true;
+    var tagPartial = _processingPage.TagPartialCheck.IsChecked == true;
+    var writeBehavior = _processingPage.WriteZoneBehaviorCheck?.IsChecked == true;
+
+    // Tier A/B: user controls target representation even when MeshAccurate is selected.
+    if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+    {
+        treatPartial = false;
+        tagPartial = false;
+    }
+
+    return new SpaceMapperProcessingSettings
+    {
+        ProcessingMode = SpaceMapperProcessingMode.CpuNormal,
+        TreatPartialAsContained = treatPartial,
+        TagPartialSeparately = tagPartial,
+        EnableMultipleZones = _processingPage.EnableMultiZoneCheck.IsChecked == true,
+        ExcludeZonesFromTargets = _processingPage.ExcludeZonesFromTargetsCheck?.IsChecked == true,
+        Offset3D = ParseDouble(_processingPage.Offset3DBox.Text),
+        OffsetTop = ParseDouble(_processingPage.OffsetTopBox.Text),
+        OffsetBottom = ParseDouble(_processingPage.OffsetBottomBox.Text),
+        OffsetSides = ParseDouble(_processingPage.OffsetSidesBox.Text),
+        Units = _processingPage.UnitsBox.Text,
+        OffsetMode = _processingPage.OffsetModeBox.Text,
+        MaxThreads = null,
+        BatchSize = null,
+        IndexGranularity = 0,
+        PerformancePreset = InferPresetFromBounds(zoneBoundsMode, targetBoundsMode, containmentEngine),
+        FastTraversalMode = SpaceMapperFastTraversalMode.Auto,
+        WriteZoneBehaviorProperty = writeBehavior,
+        ZoneBehaviorCategory = _processingPage.ZoneBehaviorCategoryBox.Text?.Trim(),
+        ZoneBehaviorPropertyName = _processingPage.ZoneBehaviorPropertyBox.Text?.Trim(),
+        ZoneBehaviorContainedValue = _processingPage.ZoneBehaviorContainedBox.Text?.Trim(),
+        ZoneBehaviorPartialValue = _processingPage.ZoneBehaviorPartialBox.Text?.Trim(),
+        WritebackStrategy = SpaceMapperWritebackStrategy.OptimizedSingleCategory,
+        ShowInternalPropertiesDuringWriteback = _processingPage.ShowInternalWritebackCheck?.IsChecked == true,
+
+        // Critical: keep the user's selections (Tier A/B)
+        ZoneBoundsMode = zoneBoundsMode,
+        TargetBoundsMode = targetBoundsMode,
+        TargetMidpointMode = GetSelectedTargetMidpointMode(),
+        UseOriginPointOnly = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint,
+
+        ZoneContainmentEngine = containmentEngine,
+        ZoneResolutionStrategy = resolutionStrategy,
+        ZoneKDopVariant = GetSelectedZoneKDopVariant(),
+        TargetKDopVariant = GetSelectedTargetKDopVariant(),
+    };
+}
+```
+
+#### A2) OnBoundsModesChanged: do NOT disable the target bounds slider for MeshAccurate
+
+Your current code disables the slider when MeshAccurate is selected. Remove that special casing.
+
+Replace this block:
+
+```csharp
+var targetSliderEnabled = containmentEngine != SpaceMapperZoneContainmentEngine.MeshAccurate;
+if (_processingPage.TargetBoundsSlider != null)
+{
+    if (!targetSliderEnabled)
+    {
+        _processingPage.TargetBoundsSlider.Value = 0;
+    }
+    _processingPage.TargetBoundsSlider.IsEnabled = targetSliderEnabled;
+}
+```
+
+with:
+
+```csharp
+if (_processingPage.TargetBoundsSlider != null)
+{
+    // Tier A/B: allow user to choose target bounds even when MeshAccurate is selected.
+    _processingPage.TargetBoundsSlider.IsEnabled = true;
+}
+```
+
+#### A3) GetZoneContainmentHintText: explain Tier A vs Tier B
+
+In your current hint function, update the MeshAccurate prefix. Here is a safe replacement:
+
+```csharp
+private string GetZoneContainmentHintText()
+{
+    var containmentEngine = GetSelectedZoneContainmentEngine();
+
+    var prefix = containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate
+        ? "Mesh accurate engine: Tier A = Midpoint (single point); Tier B = AABB/OBB/k-DOP/Hull (multi-sample)."
+        : "Bounds engine: uses planes/AABB checks; Midpoint reduces targets to a single point.";
+
+    return prefix + Environment.NewLine + Environment.NewLine + GetZoneContainmentEngineNotes(containmentEngine);
+}
+```
+
+---
+
+### B) `SpaceMapperEngines.cs`
+
+#### B1) ResolveTargetBoundsMode: stop forcing Midpoint for MeshAccurate
+
+You currently do this. Replace the method with:
+
+```csharp
+private static SpaceMapperTargetBoundsMode ResolveTargetBoundsMode(
+    SpaceMapperProcessingSettings settings,
+    SpaceMapperZoneContainmentEngine containmentEngine)
+{
+    if (settings == null)
+    {
+        return SpaceMapperTargetBoundsMode.Aabb;
+    }
+
+    // Tier A/B: do not force Midpoint when MeshAccurate is selected.
+    _ = containmentEngine;
+
+    if (settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Aabb && settings.UseOriginPointOnly)
+    {
+        return SpaceMapperTargetBoundsMode.Midpoint;
+    }
+
+    return settings.TargetBoundsMode;
+}
+```
+
+#### B2) ClassifyIntersection: add MeshAccurate Tier‑B path
+
+Locate:
+
+```csharp
+private static ZoneTargetIntersection ClassifyIntersection(
+    ZoneGeometry zone,
+    in Aabb zoneBounds,
+    in Aabb targetBounds,
+    string targetKey,
+    SpaceMapperZoneBoundsMode zoneBoundsMode,
+    SpaceMapperZoneContainmentEngine containmentEngine,
+    SpaceMapperTargetBoundsMode targetBoundsMode,
+    bool needsPartial,
+    bool treatPartialAsContained)
+```
+
+Replace its body with this (keeping your existing `ClassifyPointTarget`, `ClassifyAabbOnly`, `ClassifyByPlanes`, `EstimateOverlap` methods):
+
+```csharp
+{
+    // Tier A: mesh accurate point-in-mesh (existing behavior)
+    if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+    {
+        return ClassifyPointTarget(
+            zone,
+            zoneBounds,
+            targetBounds,
+            targetKey,
+            zoneBoundsMode,
+            containmentEngine);
+    }
+
+    // Tier B: mesh accurate multi-sample classification (NEW)
+    if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate)
+    {
+        return ClassifyByMeshAccurateSamples(
+            zone,
+            zoneBounds,
+            targetBounds,
+            targetKey,
+            zoneBoundsMode,
+            containmentEngine,
+            targetBoundsMode,
+            needsPartial,
+            treatPartialAsContained);
+    }
+
+    // Existing bounds/planes path
+    var usePlanes = zoneBoundsMode != SpaceMapperZoneBoundsMode.Aabb
+        && zone?.Planes != null
+        && zone.Planes.Count > 0;
+
+    if (!usePlanes)
+    {
+        return ClassifyAabbOnly(zone, zoneBounds, targetBounds, targetKey);
+    }
+
+    var extraSamples = targetBoundsMode != SpaceMapperTargetBoundsMode.Aabb;
+    return ClassifyByPlanes(
+        zone,
+        zoneBounds,
+        targetBounds,
+        targetKey,
+        zoneBoundsMode,
+        needsPartial,
+        treatPartialAsContained,
+        extraSamples);
+}
+```
+
+#### B3) Add the helper: ClassifyByMeshAccurateSamples
+
+Add this method near your other `Classify*` helpers (same class):
+
+```csharp
+private static ZoneTargetIntersection ClassifyByMeshAccurateSamples(
+    ZoneGeometry zone,
+    in Aabb zoneBounds,
+    in Aabb targetBounds,
+    string targetKey,
+    SpaceMapperZoneBoundsMode zoneBoundsMode,
+    SpaceMapperZoneContainmentEngine containmentEngine,
+    SpaceMapperTargetBoundsMode targetBoundsMode,
+    bool needsPartial,
+    bool treatPartialAsContained)
+{
+    if (zone == null)
+    {
+        return null;
+    }
+
+    // Broad-phase reject
+    if (!zoneBounds.Intersects(targetBounds))
+    {
+        return null;
+    }
+
+    var anyInside = false;
+    var anyOutside = false;
+
+    ZoneTargetIntersection BuildResult()
+    {
+        if (!anyInside)
+        {
+            return null;
+        }
+
+        var isPartial = anyOutside;
+
+        // If we are not collecting partials, treat "partial" as non-hit
+        if (isPartial && !needsPartial)
+        {
+            return null;
+        }
+
+        return new ZoneTargetIntersection
+        {
+            ZoneId = zone.ZoneId,
+            TargetItemKey = targetKey,
+            IsContained = !isPartial || treatPartialAsContained,
+            IsPartial = isPartial,
+            OverlapVolume = EstimateOverlap(zoneBounds, targetBounds)
+        };
+    }
+
+    bool Sample(double x, double y, double z)
+    {
+        var inside = ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, x, y, z);
+
+        if (inside)
+        {
+            anyInside = true;
+        }
+        else
+        {
+            anyOutside = true;
+        }
+
+        // If partials are disabled, a single outside sample is enough to reject.
+        if (!needsPartial && anyOutside)
+        {
+            return false;
+        }
+
+        // If we have both inside and outside, we've proven partial; stop sampling.
+        if (anyInside && anyOutside)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    var minX = targetBounds.MinX;
+    var minY = targetBounds.MinY;
+    var minZ = targetBounds.MinZ;
+    var maxX = targetBounds.MaxX;
+    var maxY = targetBounds.MaxY;
+    var maxZ = targetBounds.MaxZ;
+
+    // Always sample corners (AABB)
+    if (!Sample(minX, minY, minZ)) return BuildResult();
+    if (!Sample(maxX, minY, minZ)) return BuildResult();
+    if (!Sample(minX, maxY, minZ)) return BuildResult();
+    if (!Sample(maxX, maxY, minZ)) return BuildResult();
+    if (!Sample(minX, minY, maxZ)) return BuildResult();
+    if (!Sample(maxX, minY, maxZ)) return BuildResult();
+    if (!Sample(minX, maxY, maxZ)) return BuildResult();
+    if (!Sample(maxX, maxY, maxZ)) return BuildResult();
+
+    // Increase sample density with target bounds mode (OBB -> KDop -> Hull)
+    if (targetBoundsMode != SpaceMapperTargetBoundsMode.Aabb && !(anyInside && anyOutside))
+    {
+        var cx = (minX + maxX) * 0.5;
+        var cy = (minY + maxY) * 0.5;
+        var cz = (minZ + maxZ) * 0.5;
+
+        // OBB+: add center
+        if (!Sample(cx, cy, cz)) return BuildResult();
+
+        // KDop/Hull: add face centers (6)
+        if ((targetBoundsMode == SpaceMapperTargetBoundsMode.KDop
+             || targetBoundsMode == SpaceMapperTargetBoundsMode.Hull)
+            && !(anyInside && anyOutside))
+        {
+            if (!Sample(minX, cy, cz)) return BuildResult();
+            if (!Sample(maxX, cy, cz)) return BuildResult();
+            if (!Sample(cx, minY, cz)) return BuildResult();
+            if (!Sample(cx, maxY, cz)) return BuildResult();
+            if (!Sample(cx, cy, minZ)) return BuildResult();
+            if (!Sample(cx, cy, maxZ)) return BuildResult();
+        }
+
+        // Hull: add edge centers (12) for maximum coverage
+        if (targetBoundsMode == SpaceMapperTargetBoundsMode.Hull && !(anyInside && anyOutside))
+        {
+            // X-edge centers
+            if (!Sample(cx, minY, minZ)) return BuildResult();
+            if (!Sample(cx, maxY, minZ)) return BuildResult();
+            if (!Sample(cx, minY, maxZ)) return BuildResult();
+            if (!Sample(cx, maxY, maxZ)) return BuildResult();
+
+            // Y-edge centers
+            if (!Sample(minX, cy, minZ)) return BuildResult();
+            if (!Sample(maxX, cy, minZ)) return BuildResult();
+            if (!Sample(minX, cy, maxZ)) return BuildResult();
+            if (!Sample(maxX, cy, maxZ)) return BuildResult();
+
+            // Z-edge centers
+            if (!Sample(minX, minY, cz)) return BuildResult();
+            if (!Sample(maxX, minY, cz)) return BuildResult();
+            if (!Sample(minX, maxY, cz)) return BuildResult();
+            if (!Sample(maxX, maxY, cz)) return BuildResult();
+        }
+    }
+
+    return BuildResult();
+}
+```
+
+This intentionally “scales up” mesh point tests with the target bounds mode:
+
+* AABB → 8 samples
+* OBB → 9 samples
+* k‑DOP → 15 samples
+* Hull → 27 samples
+
+---
+
+### C) `SpaceMapperService.cs` – TryGetTargetPoint: remove MeshAccurate midpoint forcing
+
+Right now `useMidpoint` includes `containmentEngine == MeshAccurate`, which breaks Tier B because it keeps behaving like Tier A.
+
+Replace:
+
+```csharp
+var useMidpoint = containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate
+    || (settings?.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+    || (settings?.UseOriginPointOnly == true);
+```
+
+with:
+
+```csharp
+var useMidpoint = (settings?.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+    || (settings?.UseOriginPointOnly == true);
+```
+
+---
+
+### D) `SpaceMapperComparisonRunner.cs` – stop forcing point for MeshAccurate variants
+
+You currently force target bounds to Midpoint if the engine is MeshAccurate. That eliminates Tier B in comparisons.
+
+Replace this portion:
+
+```csharp
+var forcePoint = settings.ZoneContainmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate;
+if (forcePoint)
+{
+    settings.TargetBoundsMode = SpaceMapperTargetBoundsMode.Midpoint;
+}
+settings.UseOriginPointOnly = forcePoint || settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
+var forcedPartialsOff = false;
+
+if (settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint || forcePoint)
+{
+    settings.TagPartialSeparately = false;
+    settings.TreatPartialAsContained = false;
+}
+```
+
+with:
+
+```csharp
+// Tier A/B: do not force point mode for MeshAccurate.
+settings.UseOriginPointOnly = settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
+
+var forcedPartialsOff = false;
+
+// Midpoint cannot produce partials; force partial flags OFF only in that case.
+if (settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+{
+    settings.TagPartialSeparately = false;
+    settings.TreatPartialAsContained = false;
+    forcedPartialsOff = true;
+}
+```
+
+(Keep your existing `def.RequiresNoPartial` block as-is; it is still valid.)
+
+---
+
+### E) `SpaceMapperRunReportWriter.cs` – don’t label MeshAccurate as point mode
+
+Your current report writer sets `usePoint` true whenever MeshAccurate is selected.
+
+Replace:
+
+```csharp
+var usePoint = settings.ZoneContainmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate
+    || settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint
+    || settings.UseOriginPointOnly;
+```
+
+with:
+
+```csharp
+var usePoint = settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint
+    || settings.UseOriginPointOnly;
+```
+
+---
+
+### F) `SpaceMapperPreflightService.cs`
+
+If your version has any `MeshAccurate => Midpoint` forcing, remove it. (Some copies of your codebase have this, some don’t; search for “MeshAccurate” inside Preflight and delete that override.)
+
+---
+
+## Quick validation checklist
+
+1. UI: Select **Mesh Accurate** → Target bounds slider should remain enabled (no auto-reset to Midpoint). Previously it was disabled/reset.
+2. Tier A run: MeshAccurate + Midpoint should behave exactly as before.
+3. Tier B run: MeshAccurate + AABB/OBB/k‑DOP/Hull:
+
+   * Partial options become available (your processing page already gates them on mesh-accurate + non-midpoint).
+   * You should see partials when expected (e.g., an object intersects zone boundary).
+4. Comparison runs: MeshAccurate variants should now include non-midpoint target bounds (previously forced to midpoint).
+
+If you want, I can also provide a minimal unit-test style harness for `ClassifyByMeshAccurateSamples(...)` (using synthetic AABBs + a mock `ZoneContainsPoint`) to ensure Tier A vs Tier B behavior is deterministic.

@@ -263,6 +263,28 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private void Sequence4D_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (IsDockPaneVisible("MicroEng.Sequence4D.DockPane.MENG"))
+                {
+                    UpdateToolButtonStates();
+                    return;
+                }
+
+                MicroEngActions.Sequence4D();
+                UpdateToolButtonStates();
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"[4D Sequence] failed to open: {ex}");
+                LogToPanel($"[4D Sequence] failed to open: {ex.Message}");
+                System.Windows.MessageBox.Show($"4D Sequence failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void Settings_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -330,11 +352,13 @@ namespace MicroEng.Navisworks
             var dataMapperOpen = MicroEngActions.IsDataMapperOpen;
             var dataMatrixOpen = IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG");
             var spaceMapperOpen = IsDockPaneVisible("MicroEng.SpaceMapper.DockPane.MENG");
+            var sequence4dOpen = IsDockPaneVisible("MicroEng.Sequence4D.DockPane.MENG");
 
             SetButton(DataScraperButton, dataScraperOpen);
             SetButton(DataMapperButton, dataMapperOpen);
             SetButton(DataMatrixButton, dataMatrixOpen);
             SetButton(SpaceMapperButton, spaceMapperOpen);
+            SetButton(Sequence4DButton, sequence4dOpen);
         }
 
         private void OnToolWindowStateChanged()

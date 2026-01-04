@@ -1,0 +1,778 @@
+Yes—GPU can help a lot, but only for the **narrow‑phase geometry math**, not for Navisworks COM/property writeback.
+
+In Space Mapper, the GPU win is specifically here:
+
+* **Mesh Accurate point‑in‑mesh / ray casting** (Tier A midpoint + Tier B multi‑sample)
+* **Containment % sampling** (lots of “is this point inside this zone mesh?” queries)
+
+It will **not** materially speed up:
+
+* Property writes (`DataProperty`, categories, model updates)
+* Geometry extraction via Navisworks COM (still main‑thread, CPU)
+* UI rendering / pane closing (separate)
+
+So the correct GPU strategy is:
+**Keep everything else CPU, but offload the “point(s) inside closed mesh?” batch tests to GPU.**
+
+Below is a staged implementation that matches your architecture (you already have `GpuQuick`/`GpuIntensive` and a `CudaIntersectionEngine` placeholder). I’m using **DirectCompute (D3D11 compute shader)** because:
+
+* Works on NVIDIA/AMD/Intel (not vendor‑locked like CUDA)
+* Can run inside net48 plugins
+* No external CUDA runtime/driver packaging complexity
+
+If you still want CUDA later, it can be added as an alternate backend behind the same interface.
+
+---
+
+## Stage plan (do this in order)
+
+### Stage 1 (big win, minimal risk): GPU batch point‑in‑mesh for Mesh Accurate
+
+* Use GPU to answer: **inside/outside** for **many points** against **one zone mesh at a time**.
+* Integrate into `CudaIntersectionEngine` for `GpuQuick` and `GpuIntensive`.
+* CPU keeps:
+
+  * Spatial hash candidate enumeration
+  * Multi‑zone resolution
+  * Writeback
+
+**Key performance detail:**
+Run **zone‑major** for GPU, because it amortizes uploading triangles and keeps memory coherent.
+
+### Stage 2 (bigger win): cache GPU resources per run
+
+* Reuse GPU buffers across zones (don’t allocate per zone)
+* Convert all coordinates to **zone‑local** floats (origin shift) to avoid float precision issues
+
+### Stage 3 (maximum throughput): BVH/AABB tree traversal on GPU (optional)
+
+* Instead of brute‑looping all triangles per ray, traverse a BVH
+* This matters when zones have thousands+ triangles
+  For your examples (~320 triangles), Stage 1 is often already very strong.
+
+---
+
+## What “fully optimized” means in your context
+
+To avoid “GPU added but slower” you must:
+
+1. **Batch work** (never do per‑point GPU calls)
+2. **Avoid readback of huge buffers** (read back small results; Stage 1 reads per point, OK; Stage 2/3 can reduce)
+3. **Use zone‑local floats** (float precision is the #1 “mysterious misclassifications” on GPU)
+4. **Skip GPU when workload is tiny** (threshold heuristic)
+
+---
+
+## Codex instructions (direct, implementable)
+
+### 0) Add GPU dependencies (net48‑safe)
+
+Use SharpDX for D3D11 compute (works well on .NET Framework). In your `MicroEng.Navisworks` project:
+
+**Add NuGet packages**
+
+* `SharpDX`
+* `SharpDX.Direct3D11`
+* `SharpDX.DXGI`
+* `SharpDX.D3DCompiler`
+
+Ensure the DLLs get deployed with the plugin:
+
+* Set **Copy Local = true** for SharpDX assemblies (or ensure your deploy-to-ProgramData copies them)
+
+---
+
+## 1) Add new GPU compute helper (new files)
+
+### File: `Gpu/D3D11PointInMeshGpu.cs`
+
+```csharp
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+using SharpDX;
+using SharpDX.Direct3D;
+using SharpDX.Direct3D11;
+using SharpDX.D3DCompiler;
+using SharpDX.DXGI;
+using Buffer = SharpDX.Direct3D11.Buffer;
+
+namespace MicroEng.Navisworks.SpaceMapper.Gpu
+{
+    internal sealed class D3D11PointInMeshGpu : IDisposable
+    {
+        // Result encoding:
+        // 0 = outside
+        // 1 = inside
+        // 2 = uncertain (ray degeneracy / mismatch in dual-ray mode) -> CPU fallback recommended
+        public const uint Outside = 0;
+        public const uint Inside = 1;
+        public const uint Uncertain = 2;
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Float4
+        {
+            public float X, Y, Z, W;
+            public Float4(float x, float y, float z, float w = 0) { X = x; Y = y; Z = z; W = w; }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct Triangle
+        {
+            public Float4 V0;
+            public Float4 V1;
+            public Float4 V2;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct Constants
+        {
+            public uint TriangleCount;
+            public uint PointCount;
+            public uint UseSecondRay; // 0/1
+            public uint Pad0;
+        }
+
+        private readonly Device _device;
+        private readonly DeviceContext _ctx;
+        private readonly ComputeShader _cs;
+
+        private Buffer _cbConstants;
+
+        private Buffer _triBuffer;
+        private ShaderResourceView _triSrv;
+        private int _triCapacity;
+
+        private Buffer _ptBuffer;
+        private ShaderResourceView _ptSrv;
+        private int _ptCapacity;
+
+        private Buffer _outBuffer;
+        private UnorderedAccessView _outUav;
+        private Buffer _outStaging;
+        private int _outCapacity;
+
+        private const int Threads = 256;
+
+        private D3D11PointInMeshGpu(Device device, ComputeShader cs)
+        {
+            _device = device;
+            _ctx = device.ImmediateContext;
+            _cs = cs;
+
+            _cbConstants = new Buffer(_device,
+                Utilities.SizeOf<Constants>(),
+                ResourceUsage.Dynamic,
+                BindFlags.ConstantBuffer,
+                CpuAccessFlags.Write,
+                ResourceOptionFlags.None,
+                0);
+        }
+
+        public static bool TryCreate(out D3D11PointInMeshGpu gpu, out string reason)
+        {
+            gpu = null;
+            reason = null;
+
+            try
+            {
+                var device = new Device(DriverType.Hardware, DeviceCreationFlags.None, FeatureLevel.Level_11_0);
+                if (device.FeatureLevel < FeatureLevel.Level_11_0)
+                {
+                    reason = $"D3D11 feature level {device.FeatureLevel} does not support compute shaders.";
+                    device.Dispose();
+                    return false;
+                }
+
+                var bytecode = ShaderBytecode.Compile(ShaderSource, "CSMain", "cs_5_0",
+                    ShaderFlags.OptimizationLevel3, EffectFlags.None);
+
+                var cs = new ComputeShader(device, bytecode);
+
+                gpu = new D3D11PointInMeshGpu(device, cs);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = ex.Message;
+                return false;
+            }
+        }
+
+        public uint[] TestPoints(Triangle[] trianglesLocal, Float4[] pointsLocal, bool intensiveTwoRays, CancellationToken token)
+        {
+            if (trianglesLocal == null) throw new ArgumentNullException(nameof(trianglesLocal));
+            if (pointsLocal == null) throw new ArgumentNullException(nameof(pointsLocal));
+
+            token.ThrowIfCancellationRequested();
+
+            EnsureTriangleCapacity(trianglesLocal.Length);
+            EnsurePointCapacity(pointsLocal.Length);
+            EnsureOutputCapacity(pointsLocal.Length);
+
+            UpdateDynamicStructured(_triBuffer, trianglesLocal);
+            UpdateDynamicStructured(_ptBuffer, pointsLocal);
+
+            // constants
+            var c = new Constants
+            {
+                TriangleCount = (uint)trianglesLocal.Length,
+                PointCount = (uint)pointsLocal.Length,
+                UseSecondRay = intensiveTwoRays ? 1u : 0u,
+                Pad0 = 0
+            };
+            UpdateConstants(c);
+
+            // bind
+            _ctx.ComputeShader.Set(_cs);
+            _ctx.ComputeShader.SetConstantBuffer(0, _cbConstants);
+            _ctx.ComputeShader.SetShaderResource(0, _triSrv);
+            _ctx.ComputeShader.SetShaderResource(1, _ptSrv);
+            _ctx.ComputeShader.SetUnorderedAccessView(0, _outUav);
+
+            int groups = (pointsLocal.Length + Threads - 1) / Threads;
+            _ctx.Dispatch(groups, 1, 1);
+
+            // unbind to avoid D3D warnings when copying resources
+            _ctx.ComputeShader.SetUnorderedAccessView(0, null);
+            _ctx.ComputeShader.SetShaderResource(0, null);
+            _ctx.ComputeShader.SetShaderResource(1, null);
+            _ctx.ComputeShader.Set(null);
+
+            // readback
+            _ctx.CopyResource(_outBuffer, _outStaging);
+
+            var result = new uint[pointsLocal.Length];
+            DataStream ds;
+            _ctx.MapSubresource(_outStaging, 0, MapMode.Read, MapFlags.None, out ds);
+            ds.ReadRange(result, 0, result.Length);
+            _ctx.UnmapSubresource(_outStaging, 0);
+            ds.Dispose();
+
+            return result;
+        }
+
+        private void EnsureTriangleCapacity(int triCount)
+        {
+            if (triCount <= _triCapacity) return;
+
+            DisposeTriangles();
+
+            _triCapacity = NextPow2(triCount);
+
+            _triBuffer = CreateDynamicStructuredBuffer<Triangle>(_triCapacity, BindFlags.ShaderResource);
+            _triSrv = new ShaderResourceView(_device, _triBuffer);
+        }
+
+        private void EnsurePointCapacity(int pointCount)
+        {
+            if (pointCount <= _ptCapacity) return;
+
+            DisposePoints();
+
+            _ptCapacity = NextPow2(pointCount);
+
+            _ptBuffer = CreateDynamicStructuredBuffer<Float4>(_ptCapacity, BindFlags.ShaderResource);
+            _ptSrv = new ShaderResourceView(_device, _ptBuffer);
+        }
+
+        private void EnsureOutputCapacity(int pointCount)
+        {
+            if (pointCount <= _outCapacity) return;
+
+            DisposeOutput();
+
+            _outCapacity = NextPow2(pointCount);
+
+            _outBuffer = CreateDefaultStructuredBuffer<uint>(_outCapacity, BindFlags.UnorderedAccess);
+            _outUav = new UnorderedAccessView(_device, _outBuffer);
+
+            _outStaging = new Buffer(_device, new BufferDescription
+            {
+                SizeInBytes = sizeof(uint) * _outCapacity,
+                Usage = ResourceUsage.Staging,
+                BindFlags = BindFlags.None,
+                CpuAccessFlags = CpuAccessFlags.Read,
+                OptionFlags = ResourceOptionFlags.None,
+                StructureByteStride = 0
+            });
+        }
+
+        private Buffer CreateDynamicStructuredBuffer<T>(int elementCount, BindFlags bind) where T : struct
+        {
+            return new Buffer(_device, new BufferDescription
+            {
+                SizeInBytes = Utilities.SizeOf<T>() * elementCount,
+                Usage = ResourceUsage.Dynamic,
+                BindFlags = bind,
+                CpuAccessFlags = CpuAccessFlags.Write,
+                OptionFlags = ResourceOptionFlags.BufferStructured,
+                StructureByteStride = Utilities.SizeOf<T>()
+            });
+        }
+
+        private Buffer CreateDefaultStructuredBuffer<T>(int elementCount, BindFlags bind) where T : struct
+        {
+            return new Buffer(_device, new BufferDescription
+            {
+                SizeInBytes = Utilities.SizeOf<T>() * elementCount,
+                Usage = ResourceUsage.Default,
+                BindFlags = bind,
+                CpuAccessFlags = CpuAccessFlags.None,
+                OptionFlags = ResourceOptionFlags.BufferStructured,
+                StructureByteStride = Utilities.SizeOf<T>()
+            });
+        }
+
+        private void UpdateDynamicStructured<T>(Buffer buffer, T[] data) where T : struct
+        {
+            DataStream ds;
+            _ctx.MapSubresource(buffer, 0, MapMode.WriteDiscard, MapFlags.None, out ds);
+            ds.WriteRange(data, 0, data.Length);
+            _ctx.UnmapSubresource(buffer, 0);
+            ds.Dispose();
+        }
+
+        private void UpdateConstants(Constants c)
+        {
+            DataStream ds;
+            _ctx.MapSubresource(_cbConstants, 0, MapMode.WriteDiscard, MapFlags.None, out ds);
+            ds.Write(c);
+            _ctx.UnmapSubresource(_cbConstants, 0);
+            ds.Dispose();
+        }
+
+        private static int NextPow2(int v)
+        {
+            int p = 1;
+            while (p < v) p <<= 1;
+            return p;
+        }
+
+        private void DisposeTriangles()
+        {
+            _triSrv?.Dispose(); _triSrv = null;
+            _triBuffer?.Dispose(); _triBuffer = null;
+            _triCapacity = 0;
+        }
+
+        private void DisposePoints()
+        {
+            _ptSrv?.Dispose(); _ptSrv = null;
+            _ptBuffer?.Dispose(); _ptBuffer = null;
+            _ptCapacity = 0;
+        }
+
+        private void DisposeOutput()
+        {
+            _outUav?.Dispose(); _outUav = null;
+            _outBuffer?.Dispose(); _outBuffer = null;
+            _outStaging?.Dispose(); _outStaging = null;
+            _outCapacity = 0;
+        }
+
+        public void Dispose()
+        {
+            DisposeOutput();
+            DisposePoints();
+            DisposeTriangles();
+
+            _cbConstants?.Dispose(); _cbConstants = null;
+            _cs?.Dispose();
+            _ctx?.Dispose();
+            _device?.Dispose();
+        }
+
+        // Single shader source, dual-ray optional (UseSecondRay constant)
+        private const string ShaderSource = @"
+struct Triangle
+{
+    float4 v0;
+    float4 v1;
+    float4 v2;
+};
+
+cbuffer Constants : register(b0)
+{
+    uint TriangleCount;
+    uint PointCount;
+    uint UseSecondRay;
+    uint Pad0;
+};
+
+StructuredBuffer<Triangle> Triangles : register(t0);
+StructuredBuffer<float4> Points : register(t1);
+RWStructuredBuffer<uint> InsideOut : register(u0);
+
+bool RayTri(float3 orig, float3 dir, Triangle t)
+{
+    float3 v0 = t.v0.xyz;
+    float3 v1 = t.v1.xyz;
+    float3 v2 = t.v2.xyz;
+
+    float3 e1 = v1 - v0;
+    float3 e2 = v2 - v0;
+
+    float3 p = cross(dir, e2);
+    float det = dot(e1, p);
+
+    // parallel or degenerate
+    if (abs(det) < 1e-8) return false;
+
+    float invDet = 1.0 / det;
+
+    float3 tv = orig - v0;
+    float u = dot(tv, p) * invDet;
+    if (u < 0.0 || u > 1.0) return false;
+
+    float3 q = cross(tv, e1);
+    float v = dot(dir, q) * invDet;
+    if (v < 0.0 || (u + v) > 1.0) return false;
+
+    float dist = dot(e2, q) * invDet;
+    return dist > 1e-5;
+}
+
+uint Parity(float3 p, float3 dir)
+{
+    uint hits = 0;
+    [loop]
+    for (uint i = 0; i < TriangleCount; i++)
+    {
+        if (RayTri(p, dir, Triangles[i])) hits++;
+    }
+    return hits & 1;
+}
+
+float3 Jitter(uint idx, float3 baseDir)
+{
+    // tiny deterministic jitter to avoid edge/vertex degeneracies
+    float jx = (float)((idx * 17u) % 97u) * 1e-6;
+    float jy = (float)((idx * 23u) % 89u) * 1e-6;
+    float jz = (float)((idx * 31u) % 83u) * 1e-6;
+    return normalize(baseDir + float3(jx, jy, jz));
+}
+
+[numthreads(256, 1, 1)]
+void CSMain(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= PointCount) return;
+
+    float3 p = Points[idx].xyz;
+
+    float3 d1 = Jitter(idx, float3(1.0, 0.123, 0.456));
+    uint inside1 = Parity(p, d1);
+
+    if (UseSecondRay == 0)
+    {
+        InsideOut[idx] = inside1;
+        return;
+    }
+
+    float3 d2 = Jitter(idx, float3(-0.357, 1.0, 0.789));
+    uint inside2 = Parity(p, d2);
+
+    InsideOut[idx] = (inside1 == inside2) ? inside1 : 2u;
+}";
+    }
+}
+```
+
+---
+
+## 2) Implement `CudaIntersectionEngine` to use GPU for Mesh Accurate narrow‑phase
+
+### File: `SpaceMapperEngines.cs` (replace the placeholder `CudaIntersectionEngine`)
+
+**Core idea:**
+
+* Reuse the existing CPU engine’s spatial index / candidate enumeration.
+* For each zone (zone‑major), batch all candidate target sample points.
+* GPU returns inside flags per point.
+* CPU reduces inside counts per target → determines contained/partial and %.
+
+**Codex must:**
+
+* Find the section where mesh‑accurate does point-in-mesh/raycast per point
+* Replace that inner loop with a per-zone GPU batch call.
+
+Here is the *minimum* structure to paste in for the engine (Codex adapts exact types/fields like “zone triangles”, “target sample points”):
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using Autodesk.Navisworks.Api;
+using MicroEng.Navisworks.SpaceMapper.Gpu;
+
+namespace MicroEng.Navisworks.SpaceMapper
+{
+    internal sealed class CudaIntersectionEngine : ISpatialIntersectionEngine
+    {
+        private readonly SpaceMapperProcessingMode _mode;
+        private readonly CpuIntersectionEngine _cpuFallback;
+
+        public CudaIntersectionEngine(SpaceMapperProcessingMode mode)
+        {
+            _mode = mode;
+            _cpuFallback = new CpuIntersectionEngine(SpaceMapperProcessingMode.CpuNormal);
+        }
+
+        public IList<ZoneTargetIntersection> ComputeIntersections(
+            IReadOnlyList<ZoneGeometry> zones,
+            IReadOnlyList<TargetGeometry> targets,
+            SpaceMapperProcessingSettings settings,
+            SpaceMapperPreflightCache preflightCache,
+            SpaceMapperRunProgressState runProgress,
+            CancellationToken cancellationToken)
+        {
+            // IMPORTANT: GPU is only worth it for Mesh Accurate.
+            // If user selected GPU mode but not Mesh Accurate, fall back to CPU.
+            if (settings.ZoneContainmentEngine != SpaceMapperZoneContainmentEngine.MeshAccurate)
+                return _cpuFallback.ComputeIntersections(zones, targets, settings, preflightCache, runProgress, cancellationToken);
+
+            if (!D3D11PointInMeshGpu.TryCreate(out var gpu, out var reason))
+            {
+                // Optional: record reason in diagnostics/report
+                return _cpuFallback.ComputeIntersections(zones, targets, settings, preflightCache, runProgress, cancellationToken);
+            }
+
+            using (gpu)
+            {
+                // Force zone-major traversal for GPU (best batching).
+                // If your CPU engine already has a zone-major path, reuse it here.
+                return ComputeZoneMajorGpu(zones, targets, settings, preflightCache, runProgress, gpu, cancellationToken);
+            }
+        }
+
+        private IList<ZoneTargetIntersection> ComputeZoneMajorGpu(
+            IReadOnlyList<ZoneGeometry> zones,
+            IReadOnlyList<TargetGeometry> targets,
+            SpaceMapperProcessingSettings settings,
+            SpaceMapperPreflightCache preflightCache,
+            SpaceMapperRunProgressState runProgress,
+            D3D11PointInMeshGpu gpu,
+            CancellationToken token)
+        {
+            token.ThrowIfCancellationRequested();
+
+            // 1) Build/reuse spatial index (use your existing code here)
+            // NOTE: This must be identical to CPU engine indexing so results match.
+            var index = preflightCache?.SpatialIndex
+                        ?? SpatialHashGrid.Build(targets.Select(t => Aabb.FromBoundingBox(t.BoundingBox)).ToArray(),
+                            SpatialGridSizing.CalculateGridSize(targets.Count, zones.Count, SpaceMapperPerformancePreset.Accurate));
+
+            // 2) Precompute target sample points once (Tier A/B already exists in your codebase)
+            // Replace this with your existing sampling method.
+            var targetSamples = BuildTargetSamples(targets, settings);
+
+            // 3) For each zone: gather candidates → batch points → GPU test → reduce counts.
+            var intersections = new List<ZoneTargetIntersection>(capacity: 4096);
+
+            bool intensive = (_mode == SpaceMapperProcessingMode.GpuIntensive);
+
+            for (int zi = 0; zi < zones.Count; zi++)
+            {
+                token.ThrowIfCancellationRequested();
+
+                // Update progress sparsely (don’t spam UI)
+                if ((zi % 5) == 0) runProgress?.SetStage($"GPU narrow-phase: zone {zi + 1}/{zones.Count}");
+
+                var zone = zones[zi];
+
+                // MUST use your real “zone has closed mesh triangles” check.
+                if (!zone.HasClosedMesh || zone.MeshTriangles == null || zone.MeshTriangles.Count == 0)
+                {
+                    // fallback to your existing bounds/planes classifier
+                    continue;
+                }
+
+                var zoneAabb = Aabb.FromBoundingBox(zone.BoundingBox);
+                var candidates = index.Query(zoneAabb); // returns indices of targets whose AABB overlaps zone cell region
+                if (candidates.Count == 0) continue;
+
+                // Heuristic: if very small workload, CPU can be faster than GPU overhead.
+                int estimatedPoints = 0;
+                foreach (var ti in candidates) estimatedPoints += targetSamples[ti].Count;
+                if (estimatedPoints < 512)
+                {
+                    // fallback to CPU per-point method (existing)
+                    continue;
+                }
+
+                // Build zone-local triangles (float)
+                var origin = zoneAabb.Center.ToVector3D(); // or your chosen origin (AABB center)
+                var triLocal = ToGpuTrianglesLocal(zone.MeshTriangles, origin);
+
+                // Build flattened points list (zone-local)
+                var pointsLocal = new List<D3D11PointInMeshGpu.Float4>(estimatedPoints);
+                var perTargetStart = new int[candidates.Count];
+                var perTargetCount = new int[candidates.Count];
+
+                for (int ci = 0; ci < candidates.Count; ci++)
+                {
+                    int ti = candidates[ci];
+                    var samples = targetSamples[ti];
+
+                    perTargetStart[ci] = pointsLocal.Count;
+                    perTargetCount[ci] = samples.Count;
+
+                    foreach (var p in samples)
+                    {
+                        // zone-local float coords
+                        var lp = p - origin;
+                        pointsLocal.Add(new D3D11PointInMeshGpu.Float4((float)lp.X, (float)lp.Y, (float)lp.Z));
+                    }
+                }
+
+                var insideFlags = gpu.TestPoints(triLocal, pointsLocal.ToArray(), intensive, token);
+
+                // Reduce + emit intersections
+                for (int ci = 0; ci < candidates.Count; ci++)
+                {
+                    int ti = candidates[ci];
+                    int start = perTargetStart[ci];
+                    int count = perTargetCount[ci];
+                    if (count <= 0) continue;
+
+                    int inside = 0;
+                    bool hasUncertain = false;
+
+                    for (int k = 0; k < count; k++)
+                    {
+                        uint r = insideFlags[start + k];
+                        if (r == D3D11PointInMeshGpu.Inside) inside++;
+                        else if (r == D3D11PointInMeshGpu.Uncertain) hasUncertain = true;
+                    }
+
+                    // Optional: handle uncertain points by CPU fallback for correctness
+                    // (Only if hasUncertain)
+
+                    if (inside == 0) continue;
+
+                    bool isPartial = inside < count;
+                    if (isPartial && !settings.TagPartialSeparately && !settings.TreatPartialAsContained)
+                    {
+                        // If your pipeline drops partials unless configured, honor it here.
+                        // Otherwise remove this block.
+                    }
+
+                    var hit = new ZoneTargetIntersection
+                    {
+                        ZoneIndex = zi,
+                        TargetIndex = ti,
+                        IsPartial = isPartial,
+                        // If you already store fraction, set it:
+                        ContainmentFraction = (double)inside / (double)count
+                    };
+
+                    intersections.Add(hit);
+                }
+            }
+
+            return intersections;
+        }
+
+        // Replace with your real sampler. Must return world-space points per target.
+        private static List<Vector3D>[] BuildTargetSamples(IReadOnlyList<TargetGeometry> targets, SpaceMapperProcessingSettings settings)
+        {
+            var result = new List<Vector3D>[targets.Count];
+            for (int i = 0; i < targets.Count; i++)
+            {
+                // Tier A: midpoint (1 point)
+                // Tier B: multi-sample (grid / hull / geometry) -> your existing method
+                result[i] = new List<Vector3D> { targets[i].BoundingBox.Center }; // placeholder
+            }
+            return result;
+        }
+
+        // Replace with your real triangle source type. Must be world-space triangle vertices.
+        private static D3D11PointInMeshGpu.Triangle[] ToGpuTrianglesLocal(IReadOnlyList<Vector3D> triVertsWorld, Vector3D origin)
+        {
+            // triVertsWorld is assumed length = 3*N (v0,v1,v2,...)
+            int triCount = triVertsWorld.Count / 3;
+            var outTris = new D3D11PointInMeshGpu.Triangle[triCount];
+
+            for (int i = 0; i < triCount; i++)
+            {
+                var v0 = triVertsWorld[i * 3 + 0] - origin;
+                var v1 = triVertsWorld[i * 3 + 1] - origin;
+                var v2 = triVertsWorld[i * 3 + 2] - origin;
+
+                outTris[i] = new D3D11PointInMeshGpu.Triangle
+                {
+                    V0 = new D3D11PointInMeshGpu.Float4((float)v0.X, (float)v0.Y, (float)v0.Z),
+                    V1 = new D3D11PointInMeshGpu.Float4((float)v1.X, (float)v1.Y, (float)v1.Z),
+                    V2 = new D3D11PointInMeshGpu.Float4((float)v2.X, (float)v2.Y, (float)v2.Z)
+                };
+            }
+
+            return outTris;
+        }
+    }
+}
+```
+
+**What Codex must adapt in your real code:**
+
+* Replace `zone.HasClosedMesh` / `zone.MeshTriangles` with whatever your current mesh‑accurate zone solid stores.
+* Replace `BuildTargetSamples` with your actual Tier A/B sampling logic (you already have this in engine logic today).
+* Replace the spatial index creation/query with your existing `preflightCache` path (so caching still works).
+
+---
+
+## 3) Wire GPU modes properly
+
+You already have:
+
+* `SpaceMapperProcessingMode.GpuQuick`
+* `SpaceMapperProcessingMode.GpuIntensive`
+* `SpaceMapperEngineFactory.Create(...)` returning `CudaIntersectionEngine` for those modes
+
+So you should not need UI changes—just make sure:
+
+* **Auto** still chooses CPU unless GPU is available + mesh accurate + workload big enough
+* Quick vs Intensive sets `intensiveTwoRays` in the GPU tester
+
+---
+
+## 4) Correctness safeguards (do not skip)
+
+GPU ray casting can have edge/vertex degeneracy cases. Your code should:
+
+* Use **Intensive** mode dual-ray (already in shader)
+* If GPU returns `Uncertain` for any point:
+
+  * **Fallback to CPU ray cast** for those points only
+    This preserves correctness and keeps GPU acceleration fast because `Uncertain` should be rare.
+
+---
+
+## 5) Add performance telemetry (so you can prove it’s faster)
+
+Add to your diagnostics/run report:
+
+* GPU backend: `"D3D11 compute"`
+* Points tested
+* Triangles per zone
+* GPU dispatch time + readback time
+
+This is how you’ll know if you’re actually improving end-to-end runtime or just moving time around.
+
+---
+
+# Codex prompt (copy/paste)
+
+> Implement DirectCompute GPU acceleration for Mesh Accurate point-in-mesh tests in Space Mapper.
+> Use SharpDX D3D11 compute shaders. Add new file `Gpu/D3D11PointInMeshGpu.cs` (code provided) which exposes `TestPoints(trianglesLocal, pointsLocal, intensiveTwoRays)` returning uint flags (0 outside, 1 inside, 2 uncertain).
+> Replace the current placeholder `CudaIntersectionEngine` in `SpaceMapperEngines.cs` so that when `ProcessingMode` is `GpuQuick` or `GpuIntensive` AND `ZoneContainmentEngine == MeshAccurate`, it runs narrow-phase containment on GPU: for each zone (zone-major traversal), flatten all target sample points (Tier A/B) for candidate targets, shift to zone-local coords, dispatch GPU `TestPoints`, reduce inside counts per target, set `IsPartial` and `ContainmentFraction`.
+> If any GPU result is `2 (uncertain)`, fallback to existing CPU ray-cast for those points only.
+> If GPU device/shader init fails, fall back to CPU engine with no behavior changes.
+> Keep preflight spatial index reuse intact. Add minimal telemetry (counts + timings) to diagnostics/report.
+> Ensure SharpDX assemblies deploy with the plugin to ProgramData.
+
+---
+
+If you want, I can also give you the **Stage 3 BVH-on-GPU** kernel design (node layout + traversal shader + CPU BVH builder). That’s the next step once Stage 1 is verified and benchmarked.

@@ -49,8 +49,13 @@
       <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Interop.ComApi.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Autodesk.Navisworks.Timeliner">
+      <HintPath>$(NavisApiDir)\Autodesk.Navisworks.Timeliner.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UIAutomationClient" />
     <Reference Include="UIAutomationTypes" />
+    <Reference Include="System.Management" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Drawing" />
     <Reference Include="WindowsFormsIntegration" />
@@ -83,6 +88,15 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="WPF-UI" Version="4.1.0" />
+    <PackageReference Include="SharpDX" Version="4.2.0" />
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+    <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
+    <PackageReference Include="SharpDX.D3DCompiler" Version="4.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <CudaNativeDll Include="..\Native\MicroEng.CudaPointInMesh\**\MicroEng.CudaPointInMesh.dll" />
+    <CudaNativeDll Include="..\Native\MicroEng.CudaBvhPointInMesh\**\MicroEng.CudaBvhPointInMesh.dll" />
   </ItemGroup>
 
   <!-- Ensure theme dictionaries are compiled as Page resources -->
@@ -96,6 +110,9 @@
   <!-- After build, copy dll to Navisworks Plugins\<AssemblyName>\ -->
   <!-- Folder name must match dll name for simple side-loading. -->
   <!-- This follows the typical "side-loading" pattern many devs use. :contentReference[oaicite:4]{index=4} -->
+  <Target Name="CopyCudaNativeDll" AfterTargets="Build" Condition="'@(CudaNativeDll)' != ''">
+    <Copy SourceFiles="@(CudaNativeDll)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+  </Target>
   <Target Name="MicroEngDeploy" AfterTargets="Build">
     <Message Text="MicroEngDeploy: DeployToProgramData=$(DeployToProgramData); DeployToProgramFiles=$(DeployToProgramFiles); DeployToAppBundle=$(DeployToAppBundle)" Importance="high" />
     <ItemGroup>

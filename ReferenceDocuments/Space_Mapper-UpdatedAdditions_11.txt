@@ -1,0 +1,253 @@
+Below is an updated, implementation-oriented design for your **two zone-calculation approaches**, explicitly aligned with the architecture you now have in place (notably: `SpatialHashGrid` + point candidate queries, preflight caching, runtime estimator/calibration, and preset logic).
+
+You want **both**:
+
+1. **True correctness**: zone solid/mesh containment that correctly handles **holes/voids**.
+2. **Best practical now**: point containment + **“most specific zone wins”** tie-breaker.
+
+These should coexist as two selectable **Zone Containment Engines**, with a shared **Zone Resolution Strategy**.
+
+---
+
+# A. Best practical method now
+
+## Point containment + “most specific zone wins”
+
+### What this means (precisely)
+
+* Determine a representative **point** for each target (typically bbox center or bottom-center).
+* Determine which zones **contain that point** using a lightweight test (initially AABB; later OBB/k‑DOP can be plugged in).
+* If multiple zones contain the point:
+
+  * either return them all (multi-zone), or
+  * return just one via **most-specific winner**.
+
+This method is fast, and for your “large room with inner rooms in a hole” scenario, it behaves well because:
+
+* the inner rooms also contain the point, and
+* most-specific selection picks them over the outer large zone.
+
+### Why your new files make this easier / better
+
+Your `SpatialHashGrid` already has **point candidate queries** (`CountPointCandidates` / `VisitPointCandidates`). That’s exactly what you want for target-point → candidate-zones lookups (target-major traversal), instead of doing zone-major AABB queries for everything.
+
+This is the ideal structure:
+
+**Build once per run (or reuse from preflight):**
+
+* A grid index of **zone AABBs** (or a generic “bounds list”).
+* Cell size from `SpatialGridSizing` and `IndexGranularity`.
+
+**For each target:**
+
+* Compute point P.
+* `VisitPointCandidates(P)` → candidate zones in that cell.
+* Filter candidates by: `ZoneBounds.Contains(P)` (or OBB/k‑DOP later).
+* Resolve winner if needed.
+
+This becomes extremely fast because:
+
+* point candidates hit **one cell**,
+* you do a small number of “contains point” tests,
+* and you avoid “candidate explosion” caused by large target AABBs spanning many cells.
+
+### “Most specific zone wins”: define it so it’s deterministic
+
+Add a **Zone Resolution Strategy** that is independent of how containment is computed.
+
+Recommended order of precedence for “most specific”:
+
+1. **Deepest zone in hierarchy** (if you can compute parent/child)
+2. **Smallest zone volume** (fast proxy; AABB volume works well)
+3. **Closest zone centroid to point** (tie-break)
+4. Stable tie-break (ZoneId sort)
+
+**Hierarchy depth** can be computed cheaply using bounds containment relationships:
+
+* Zone A contains Zone B if `AABB_A` fully contains `AABB_B`.
+* Use spatial index to avoid O(n²) checks (query candidate parents for each zone).
+
+Even if you don’t compute hierarchy initially, **smallest-volume** alone gives you the behavior you want for nested rooms.
+
+### Where this plugs into your current pipeline
+
+* **Containment check:** in engine (classification stage) for speed; or in service just before writeback (but that means you still computed/kept extra intersections).
+* **Best-zone selection:** currently you select “best” by `OverlapVolume`. That’s great for AABB overlap methods, but it is wrong for point methods (overlap volume is ~0 and nested zones won’t resolve well).
+  You want this to become strategy-driven: Overlap-based vs Most-specific.
+
+---
+
+# B. True correctness method
+
+## Zone solid/mesh containment that handles holes/voids
+
+### What “true correctness” requires
+
+To correctly represent a “big room with a hole containing smaller rooms,” the zone cannot be modeled as a single convex bound. You need a **solid boundary representation** that supports cavities/holes.
+
+Practically, this means each zone needs a **closed mesh/solid** (watertight boundary) that includes:
+
+* the outer boundary surface, and
+* any inner cavity surfaces (with opposite orientation).
+
+If you have that, a proper point-in-solid test will correctly classify:
+
+* points inside the outer room BUT in the void region → **outside**
+* points inside the inner rooms → **inside those inner solids**
+
+### The reliable containment test for meshes with holes
+
+Use a **ray-cast parity test** (even/odd intersections):
+
+* Cast a ray from point P to infinity in a fixed direction.
+* Count intersections of the ray with the zone’s triangle mesh.
+* Odd → inside; even → outside.
+
+Holes/cavities are naturally handled if the mesh represents them as part of the boundary (the ray toggles inside/outside as it crosses outer and inner surfaces).
+
+To make it robust:
+
+* If you hit a triangle edge/vertex (degenerate), perturb direction or use multiple ray directions and take a majority vote.
+
+### Performance: you must accelerate the ray test
+
+A naïve ray-vs-all-triangles per candidate is too slow. You need:
+
+* a per-zone **BVH / AABB tree** over triangles, or
+* a per-zone uniform grid over triangles.
+
+Given your existing grid work, either is fine, but a BVH is typically better for irregular triangle distributions.
+
+### Extracting zone triangles: Navisworks reality
+
+Your current `GeometryExtractor.ExtractVertices(...)` is explicitly TODO and falls back to bbox corners today. To implement mesh-accurate containment, you need a real triangle extraction path.
+
+Two practical realities from Navisworks API discussions:
+
+* Autodesk forum guidance has stated that `GenerateSimplePrimitives()` is effectively the supported/confirmed way to extract triangle primitives in Navisworks (at least in that context).
+* Many implementations use the COM API fragment objects (e.g., `InwOaFragment3`) to access mesh-like data.
+* The official `ComApiBridge` exists to bridge .NET `ModelItem` ↔ COM `InwOaPath` for this kind of work. ([apidocs.co][1])
+
+So architecturally: keep your compute engine managed, but allow a **geometry extraction module** that can use:
+
+* managed `GenerateSimplePrimitives()` where possible, or
+* COM fragment geometry via `ComApiBridge` where needed. ([apidocs.co][1])
+
+### Robustness fallback (must-have)
+
+In the real world you will encounter zones that:
+
+* have no geometry,
+* have open meshes (not watertight),
+* are faceted weirdly,
+* or are just metadata containers.
+
+So your “Mesh Accurate” engine must have per-zone fallback behavior:
+
+* If zone solid is not buildable/valid → fall back to bounds-based containment **for that zone**, and report it in diagnostics.
+
+### How to integrate with your existing estimator/calibration
+
+Your preflight and estimator assume “work ≈ CandidatePairs × SecondsPerCandidatePair + Writes × SecondsPerWrite”.
+
+In mesh-accurate mode, “work per candidate pair” is no longer constant; it depends on triangle complexity. You can still use the same structure, but you should extend preflight to capture zone mesh complexity:
+
+Add (recommended):
+
+* total zone triangles
+* avg triangles/zone
+* max triangles/zone
+* count of zones with valid watertight solids
+
+Then calibrate separately for:
+
+* bounds engine vs mesh engine (at minimum)
+* and ideally per chosen ray-test method (1-ray vs 3-ray)
+
+Without this separation, your estimator will mispredict heavily as soon as someone switches to mesh mode.
+
+---
+
+# C. How to expose both methods in Space Mapper (clean UX)
+
+Add two explicit options (Step 3 Processing, or Step 1 Setup if you want it “profile-level”):
+
+## 1) Zone Containment Engine
+
+* **Bounds (Fast)**
+  Uses point containment / AABB (and later OBB/k‑DOP), good for most models.
+* **Mesh Accurate (Holes / Voids)**
+  Builds zone solids and uses point-in-solid. Slow to build zone bounds, but correct.
+
+## 2) Zone Resolution Strategy
+
+* **Most specific wins** (recommended default)
+* **Largest overlap wins** (legacy behavior; good for overlap-based AABB methods)
+* **First match wins** (fastest, deterministic, but least correct)
+
+This way:
+
+* Your current workflows keep working (AABB-style).
+* You gain a “true correctness” engine for the hole/void cases.
+* Users can choose “Most specific wins” even in bounds mode as a practical fix until mesh mode is available/validated.
+
+---
+
+# D. Implementation sequencing (min-risk path)
+
+1. **Implement Most-specific winner selection** (works immediately, improves nested zones today).
+2. Add **bounds-based point containment** as the Fast/default classifier (leveraging `VisitPointCandidates`).
+3. Add **mesh accurate zone solid build** (precompute step with caching + validity checks).
+4. Add **point-in-solid containment** + fallback diagnostics.
+5. Extend estimator/calibration with mesh complexity metrics.
+
+This sequencing ensures you get visible user value early, and you don’t block on mesh extraction complexity.
+
+---
+
+# E. Codex-ready change request prompt
+
+If you want to hand this to Codex as the next scoped feature set, paste the following:
+
+**Codex prompt:**
+
+> We need two zone containment approaches in Space Mapper and they must coexist:
+>
+> 1. Bounds-based containment (fast) using target-point containment and SpatialHashGrid point candidate queries; supports “Most specific zone wins” tie-breaker.
+> 2. Mesh-accurate containment (correct with holes/voids) by building per-zone triangle solids and using a point-in-solid test (ray parity) with acceleration (BVH or triangle grid). Must gracefully fall back to bounds method per-zone when mesh is invalid or unavailable.
+>
+> Implement new settings:
+>
+> * ZoneContainmentEngine: BoundsFast, MeshAccurate
+> * ZoneResolutionStrategy: MostSpecific, LargestOverlap, FirstMatch
+>
+> BoundsFast implementation:
+>
+> * Build an index of zone bounds and use SpatialHashGrid.VisitPointCandidates for each target point.
+> * Containment is “point inside zone bounds.”
+> * If multiple zones contain point and EnableMultipleZones==false, select winner using ZoneResolutionStrategy (MostSpecific uses smallest volume and/or hierarchy depth).
+>
+> MeshAccurate implementation:
+>
+> * Add ZoneSolid representation with triangles + acceleration structure.
+> * Add zone-solid precompute step (slow but cached for session; keyed by zone id + signature).
+> * Implement PointInSolid via ray parity with robustness (multiple rays fallback).
+> * Use bounds AABB to generate candidates first; then do point-in-solid on candidates.
+> * If zone solid not available/valid, fallback to bounds containment for that zone and record diagnostics.
+>
+> Update preflight + estimator:
+>
+> * Extend preflight result with zone mesh stats (triangles total/avg/max, count of valid solids).
+> * Store separate calibration coefficients per ZoneContainmentEngine (and possibly per ray strategy).
+> * Ensure the preflight signature includes ZoneContainmentEngine and ZoneResolutionStrategy.
+>
+> Update compare report runner to include both engines and report mismatches and timing.
+
+---
+
+If you want, next message tell me which of these you want to implement first:
+
+* **Most specific wins + point containment** (fast win), or
+* go straight to **mesh accurate zone solids** (bigger build but solves holes properly).
+
+[1]: https://apidocs.co/apps/navisworks/2018/M_Autodesk_Navisworks_Api_ComApi_ComApiBridge_ToInwOaPath_1_ab1e7098.htm "ApiDocs.co · Navisworks · ComApiBridge.ToInwOaPath Method"

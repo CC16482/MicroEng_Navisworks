@@ -21,9 +21,11 @@ namespace MicroEng.Navisworks
         public int MaxTargets { get; set; } = 100000;
         public int MismatchSampleCount { get; set; } = 10;
         public bool IncludeLegacyFastAabb { get; set; }
+        public bool IncludeAllBoundsVariants { get; set; }
         public bool ReusePreflightForRun { get; set; } = true;
         public SpaceMapperBenchmarkMode BenchmarkMode { get; set; } = SpaceMapperBenchmarkMode.ComputeOnly;
         public int? SampleSeed { get; set; }
+        public bool IncludeCpuGpuComparison { get; set; }
     }
 
     internal sealed class SpaceMapperComparisonInput
@@ -143,9 +145,14 @@ namespace MicroEng.Navisworks
 
             var targetBoundsData = BuildTargetBounds(targets);
             var zoneBoundsData = BuildZoneBounds(zones, input.Request?.ProcessingSettings);
+            var zoneOrderById = BuildZoneOrderLookup(zones);
             var zoneNameById = BuildZoneNameLookup(zones);
 
-            var variantDefinitions = BuildVariantDefinitions(options.IncludeLegacyFastAabb);
+            var variantDefinitions = BuildVariantDefinitions(
+                options.IncludeLegacyFastAabb,
+                options.IncludeAllBoundsVariants,
+                options.IncludeCpuGpuComparison,
+                input.Request?.ProcessingSettings);
             var variantResults = new List<VariantRunResult>(variantDefinitions.Count);
 
             var zonesWithoutPlanes = zones.Count(z => z?.Planes == null || z.Planes.Count == 0);
@@ -159,17 +166,38 @@ namespace MicroEng.Navisworks
                 var settings = CloneSettings(baseSettings);
                 settings.PerformancePreset = def.Preset;
                 settings.FastTraversalMode = def.Traversal;
-                settings.UseOriginPointOnly = def.UseOriginPointOnly;
+                settings.ZoneBoundsMode = def.ZoneBoundsMode;
+                settings.ZoneKDopVariant = def.ZoneKDopVariant;
+                settings.TargetBoundsMode = def.TargetBoundsMode;
+                settings.TargetKDopVariant = def.TargetKDopVariant;
+                settings.TargetMidpointMode = def.TargetMidpointMode;
+                if (def.ProcessingModeOverride.HasValue)
+                {
+                    settings.ProcessingMode = def.ProcessingModeOverride.Value;
+                }
                 var forcedPartialsOff = false;
+
+                // Tier A/B: do not force point mode for MeshAccurate.
+                settings.UseOriginPointOnly = settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
+
+                // Midpoint cannot produce partials; force partial flags OFF only in that case.
+                if (settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+                {
+                    settings.TagPartialSeparately = false;
+                    settings.TreatPartialAsContained = false;
+                    forcedPartialsOff = true;
+                }
 
                 var stagePrefix = $"[{i + 1}/{variantDefinitions.Count}] {def.Name}";
                 ReportProgress(progress, $"{stagePrefix}: preflight", ComputePercent(i, variantDefinitions.Count, 0.05));
 
-                if (def.RequiresNoPartial && (settings.TagPartialSeparately || settings.TreatPartialAsContained))
+                if (def.RequiresNoPartial
+                    && (settings.TagPartialSeparately || settings.TreatPartialAsContained || settings.WriteZoneBehaviorProperty))
                 {
                     forcedPartialsOff = true;
                     settings.TagPartialSeparately = false;
                     settings.TreatPartialAsContained = false;
+                    settings.WriteZoneBehaviorProperty = false;
                 }
 
                 if (def.LegacyFastAabbOnly)
@@ -206,7 +234,7 @@ namespace MicroEng.Navisworks
                 ReportProgress(progress, $"{stagePrefix}: postprocess", ComputePercent(i, variantDefinitions.Count, 0.75));
 
                 var postSw = Stopwatch.StartNew();
-                var assignmentSummary = BuildAssignments(targets, targetsByRule, intersections, settings);
+                var assignmentSummary = BuildAssignments(targets, targetsByRule, intersections, settings, zoneBoundsData.ById, zoneOrderById);
                 postSw.Stop();
 
                 SpaceMapperWritebackResult writeback = null;
@@ -244,7 +272,16 @@ namespace MicroEng.Navisworks
 
                 if (forcedPartialsOff)
                 {
-                    report.Warnings.Add($"{def.Name}: partial options forced OFF to allow target-major benchmark.");
+                    report.Warnings.Add($"{def.Name}: partial options forced OFF (midpoint or benchmark constraints).");
+                }
+
+                var needsPartial = settings.TagPartialSeparately
+                    || settings.TreatPartialAsContained
+                    || settings.WriteZoneBehaviorProperty
+                    || settings.WriteZoneContainmentPercentProperty;
+                if (settings.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+                {
+                    needsPartial = false;
                 }
 
                 variantResults.Add(new VariantRunResult
@@ -257,7 +294,7 @@ namespace MicroEng.Navisworks
                     TargetsProcessed = targets.Count,
                     ZonesProcessed = zones.Count,
                     MaxIntersectionsPerTarget = assignmentSummary.MaxIntersectionsPerTarget,
-                    NeedsPartial = settings.TagPartialSeparately || settings.TreatPartialAsContained
+                    NeedsPartial = needsPartial
                 });
 
                 ReportProgress(progress, $"{stagePrefix}: done", ComputePercent(i + 1, variantDefinitions.Count, 0.0));
@@ -339,6 +376,7 @@ namespace MicroEng.Navisworks
                 ProcessingMode = settings.ProcessingMode,
                 TreatPartialAsContained = settings.TreatPartialAsContained,
                 TagPartialSeparately = settings.TagPartialSeparately,
+                WriteZoneBehaviorProperty = settings.WriteZoneBehaviorProperty,
                 EnableMultipleZones = settings.EnableMultipleZones,
                 Offset3D = settings.Offset3D,
                 OffsetTop = settings.OffsetTop,
@@ -360,26 +398,272 @@ namespace MicroEng.Navisworks
                 ShowInternalPropertiesDuringWriteback = settings.ShowInternalPropertiesDuringWriteback,
                 CloseDockPanesDuringRun = settings.CloseDockPanesDuringRun,
                 SkipUnchangedWriteback = settings.SkipUnchangedWriteback,
-                PackWritebackProperties = settings.PackWritebackProperties
+                PackWritebackProperties = settings.PackWritebackProperties,
+                ZoneBoundsMode = settings.ZoneBoundsMode,
+                ZoneKDopVariant = settings.ZoneKDopVariant,
+                TargetBoundsMode = settings.TargetBoundsMode,
+                TargetKDopVariant = settings.TargetKDopVariant,
+                TargetMidpointMode = settings.TargetMidpointMode,
+                ZoneContainmentEngine = settings.ZoneContainmentEngine,
+                ZoneResolutionStrategy = settings.ZoneResolutionStrategy,
+                WriteZoneContainmentPercentProperty = settings.WriteZoneContainmentPercentProperty,
+                ContainmentCalculationMode = settings.ContainmentCalculationMode,
+                GpuRayCount = settings.GpuRayCount
             };
         }
 
-        private static List<VariantDefinition> BuildVariantDefinitions(bool includeLegacyFastAabb)
+        private static List<VariantDefinition> BuildVariantDefinitions(
+            bool includeLegacyFastAabb,
+            bool includeAllBoundsVariants,
+            bool includeCpuGpuComparison,
+            SpaceMapperProcessingSettings baseSettings)
         {
+            if (includeAllBoundsVariants)
+            {
+                return BuildAllBoundsVariants(baseSettings, includeCpuGpuComparison);
+            }
+
             var list = new List<VariantDefinition>
             {
-                new VariantDefinition("Normal / Zone-major", SpaceMapperPerformancePreset.Normal, SpaceMapperFastTraversalMode.ZoneMajor, useOriginPointOnly: false, isBaseline: true),
-                new VariantDefinition("Fast / Zone-major", SpaceMapperPerformancePreset.Fast, SpaceMapperFastTraversalMode.ZoneMajor, useOriginPointOnly: true),
-                new VariantDefinition("Accurate / Zone-major", SpaceMapperPerformancePreset.Accurate, SpaceMapperFastTraversalMode.ZoneMajor, useOriginPointOnly: false),
-                new VariantDefinition("Fast / Target-major", SpaceMapperPerformancePreset.Fast, SpaceMapperFastTraversalMode.TargetMajor, useOriginPointOnly: true, requiresNoPartial: true)
+                new VariantDefinition(
+                    "Normal / Zone-major",
+                    SpaceMapperPerformancePreset.Normal,
+                    SpaceMapperFastTraversalMode.ZoneMajor,
+                    SpaceMapperZoneBoundsMode.Aabb,
+                    SpaceMapperTargetBoundsMode.Aabb,
+                    isBaseline: true),
+                new VariantDefinition(
+                    "Fast / Zone-major",
+                    SpaceMapperPerformancePreset.Fast,
+                    SpaceMapperFastTraversalMode.ZoneMajor,
+                    SpaceMapperZoneBoundsMode.Aabb,
+                    SpaceMapperTargetBoundsMode.Midpoint),
+                new VariantDefinition(
+                    "Accurate / Zone-major",
+                    SpaceMapperPerformancePreset.Accurate,
+                    SpaceMapperFastTraversalMode.ZoneMajor,
+                    SpaceMapperZoneBoundsMode.Hull,
+                    SpaceMapperTargetBoundsMode.Hull),
+                new VariantDefinition(
+                    "Fast / Target-major",
+                    SpaceMapperPerformancePreset.Fast,
+                    SpaceMapperFastTraversalMode.TargetMajor,
+                    SpaceMapperZoneBoundsMode.Aabb,
+                    SpaceMapperTargetBoundsMode.Midpoint,
+                    requiresNoPartial: true)
             };
 
             if (includeLegacyFastAabb)
             {
-                list.Add(new VariantDefinition("Fast (Legacy AABB) / Zone-major", SpaceMapperPerformancePreset.Fast, SpaceMapperFastTraversalMode.ZoneMajor, useOriginPointOnly: false, legacyFastAabbOnly: true));
+                list.Add(new VariantDefinition(
+                    "Fast (Legacy AABB) / Zone-major",
+                    SpaceMapperPerformancePreset.Fast,
+                    SpaceMapperFastTraversalMode.ZoneMajor,
+                    SpaceMapperZoneBoundsMode.Aabb,
+                    SpaceMapperTargetBoundsMode.Aabb,
+                    legacyFastAabbOnly: true));
             }
 
-            return list;
+            return ApplyCpuGpuComparison(list, includeCpuGpuComparison, baseSettings);
+        }
+
+        private static List<VariantDefinition> BuildAllBoundsVariants(
+            SpaceMapperProcessingSettings baseSettings,
+            bool includeCpuGpuComparison)
+        {
+            var hasBaseSettings = baseSettings != null;
+            baseSettings ??= new SpaceMapperProcessingSettings();
+
+            var traversal = baseSettings.FastTraversalMode;
+            var zoneKdopVariant = baseSettings.ZoneKDopVariant;
+            var targetKdopVariant = baseSettings.TargetKDopVariant;
+            var midpointMode = baseSettings.TargetMidpointMode;
+            var containmentEngine = baseSettings.ZoneContainmentEngine;
+
+            var zoneModes = new[]
+            {
+                SpaceMapperZoneBoundsMode.Aabb,
+                SpaceMapperZoneBoundsMode.Obb,
+                SpaceMapperZoneBoundsMode.KDop,
+                SpaceMapperZoneBoundsMode.Hull
+            };
+
+            var targetModes = new[]
+            {
+                SpaceMapperTargetBoundsMode.Midpoint,
+                SpaceMapperTargetBoundsMode.Aabb,
+                SpaceMapperTargetBoundsMode.Obb,
+                SpaceMapperTargetBoundsMode.KDop,
+                SpaceMapperTargetBoundsMode.Hull
+            };
+
+            var list = new List<VariantDefinition>();
+            foreach (var zoneMode in zoneModes)
+            {
+                foreach (var targetMode in targetModes)
+                {
+                    var isBaseline = hasBaseSettings
+                        && zoneMode == baseSettings.ZoneBoundsMode
+                        && targetMode == baseSettings.TargetBoundsMode;
+
+                    if (!hasBaseSettings && list.Count == 0)
+                    {
+                        isBaseline = true;
+                    }
+
+                    var zoneLabel = GetZoneBoundsLabel(zoneMode, zoneKdopVariant);
+                    var targetLabel = GetTargetBoundsLabel(targetMode, targetKdopVariant, midpointMode);
+                    var preset = InferPresetFromBounds(zoneMode, targetMode, containmentEngine);
+
+                    list.Add(new VariantDefinition(
+                        $"Zone {zoneLabel} / Target {targetLabel}",
+                        preset,
+                        traversal,
+                        zoneMode,
+                        targetMode,
+                        zoneKdopVariant,
+                        targetKdopVariant,
+                        midpointMode,
+                        isBaseline: isBaseline));
+                }
+            }
+
+            return ApplyCpuGpuComparison(list, includeCpuGpuComparison, baseSettings);
+        }
+
+        private static string GetZoneBoundsLabel(SpaceMapperZoneBoundsMode mode, SpaceMapperKDopVariant kdopVariant)
+        {
+            return mode switch
+            {
+                SpaceMapperZoneBoundsMode.Obb => "OBB",
+                SpaceMapperZoneBoundsMode.KDop => $"k-DOP({GetKdopLabel(kdopVariant)})",
+                SpaceMapperZoneBoundsMode.Hull => "Hull",
+                _ => "AABB"
+            };
+        }
+
+        private static string GetTargetBoundsLabel(
+            SpaceMapperTargetBoundsMode mode,
+            SpaceMapperKDopVariant kdopVariant,
+            SpaceMapperMidpointMode midpointMode)
+        {
+            return mode switch
+            {
+                SpaceMapperTargetBoundsMode.Midpoint => midpointMode == SpaceMapperMidpointMode.BoundingBoxBottomCenter
+                    ? "Midpoint (bottom center)"
+                    : "Midpoint (center)",
+                SpaceMapperTargetBoundsMode.Obb => "OBB",
+                SpaceMapperTargetBoundsMode.KDop => $"k-DOP({GetKdopLabel(kdopVariant)})",
+                SpaceMapperTargetBoundsMode.Hull => "Hull",
+                _ => "AABB"
+            };
+        }
+
+        private static string GetKdopLabel(SpaceMapperKDopVariant variant)
+        {
+            return variant switch
+            {
+                SpaceMapperKDopVariant.KDop8 => "8",
+                SpaceMapperKDopVariant.KDop18 => "18",
+                _ => "14"
+            };
+        }
+
+        private static List<VariantDefinition> ApplyCpuGpuComparison(
+            List<VariantDefinition> variants,
+            bool includeCpuGpuComparison,
+            SpaceMapperProcessingSettings baseSettings)
+        {
+            if (!includeCpuGpuComparison || variants == null || variants.Count == 0)
+            {
+                return variants ?? new List<VariantDefinition>();
+            }
+
+            var cpuMode = SpaceMapperProcessingMode.CpuNormal;
+            var gpuMode = ResolveGpuComparisonMode(baseSettings?.ProcessingMode ?? SpaceMapperProcessingMode.Auto);
+
+            var expanded = new List<VariantDefinition>(variants.Count + 1);
+            foreach (var variant in variants)
+            {
+                if (!variant.IsBaseline)
+                {
+                    expanded.Add(variant);
+                    continue;
+                }
+
+                expanded.Add(CloneVariantDefinition(
+                    variant,
+                    $"{variant.Name} (CPU)",
+                    isBaseline: true,
+                    processingModeOverride: cpuMode));
+
+                expanded.Add(CloneVariantDefinition(
+                    variant,
+                    $"{variant.Name} (GPU)",
+                    isBaseline: false,
+                    processingModeOverride: gpuMode));
+            }
+
+            return expanded;
+        }
+
+        private static VariantDefinition CloneVariantDefinition(
+            VariantDefinition variant,
+            string name,
+            bool isBaseline,
+            SpaceMapperProcessingMode? processingModeOverride)
+        {
+            return new VariantDefinition(
+                name,
+                variant.Preset,
+                variant.Traversal,
+                variant.ZoneBoundsMode,
+                variant.TargetBoundsMode,
+                variant.ZoneKDopVariant,
+                variant.TargetKDopVariant,
+                variant.TargetMidpointMode,
+                variant.RequiresNoPartial,
+                isBaseline,
+                variant.LegacyFastAabbOnly,
+                processingModeOverride);
+        }
+
+        private static SpaceMapperProcessingMode ResolveGpuComparisonMode(SpaceMapperProcessingMode mode)
+        {
+            return mode switch
+            {
+                SpaceMapperProcessingMode.CpuNormal => SpaceMapperProcessingMode.Auto,
+                SpaceMapperProcessingMode.Debug => SpaceMapperProcessingMode.Auto,
+                _ => mode
+            };
+        }
+
+        private static SpaceMapperPerformancePreset InferPresetFromBounds(
+            SpaceMapperZoneBoundsMode zoneMode,
+            SpaceMapperTargetBoundsMode targetMode,
+            SpaceMapperZoneContainmentEngine containmentEngine)
+        {
+            if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate)
+            {
+                return SpaceMapperPerformancePreset.Accurate;
+            }
+
+            if (targetMode == SpaceMapperTargetBoundsMode.Midpoint)
+            {
+                return SpaceMapperPerformancePreset.Fast;
+            }
+
+            if (zoneMode == SpaceMapperZoneBoundsMode.Hull
+                || targetMode == SpaceMapperTargetBoundsMode.Hull
+                || zoneMode == SpaceMapperZoneBoundsMode.KDop
+                || targetMode == SpaceMapperTargetBoundsMode.KDop
+                || zoneMode == SpaceMapperZoneBoundsMode.Obb
+                || targetMode == SpaceMapperTargetBoundsMode.Obb)
+            {
+                return SpaceMapperPerformancePreset.Accurate;
+            }
+
+            return SpaceMapperPerformancePreset.Normal;
         }
 
         private static SpaceMapperComparisonVariant BuildVariantReport(
@@ -421,12 +705,23 @@ namespace MicroEng.Navisworks
                     TraversalRequested = def.Traversal.ToString(),
                     TraversalResolved = diagnostics.TraversalUsed ?? string.Empty,
                     ProcessingMode = engine.Mode.ToString(),
+                    GpuRayCount = Math.Max(settings.GpuRayCount, 1),
                     IndexGranularity = settings.IndexGranularity,
                     MaxThreads = settings.MaxThreads ?? 0,
                     BatchSize = settings.BatchSize ?? 0,
                     UseOriginPointOnly = settings.UseOriginPointOnly,
+                    ZoneBoundsMode = settings.ZoneBoundsMode.ToString(),
+                    ZoneKDopVariant = settings.ZoneKDopVariant.ToString(),
+                    TargetBoundsMode = settings.TargetBoundsMode.ToString(),
+                    TargetKDopVariant = settings.TargetKDopVariant.ToString(),
+                    TargetMidpointMode = settings.TargetMidpointMode.ToString(),
+                    ZoneContainmentEngine = settings.ZoneContainmentEngine.ToString(),
+                    ZoneResolutionStrategy = settings.ZoneResolutionStrategy.ToString(),
                     TreatPartialAsContained = settings.TreatPartialAsContained,
                     TagPartialSeparately = settings.TagPartialSeparately,
+                    WriteZoneBehaviorProperty = settings.WriteZoneBehaviorProperty,
+                    WriteZoneContainmentPercentProperty = settings.WriteZoneContainmentPercentProperty,
+                    ContainmentCalculationMode = settings.ContainmentCalculationMode.ToString(),
                     EnableMultipleZones = settings.EnableMultipleZones,
                     Offset3D = settings.Offset3D,
                     OffsetTop = settings.OffsetTop,
@@ -489,7 +784,9 @@ namespace MicroEng.Navisworks
             IReadOnlyList<TargetGeometry> targets,
             Dictionary<string, List<SpaceMapperTargetRule>> targetsByRule,
             IEnumerable<ZoneTargetIntersection> intersections,
-            SpaceMapperProcessingSettings settings)
+            SpaceMapperProcessingSettings settings,
+            Dictionary<string, Aabb> zoneBoundsById,
+            Dictionary<string, int> zoneOrderById)
         {
             var summary = new VariantAssignmentSummary();
             var byTarget = new Dictionary<string, List<ZoneTargetIntersection>>(StringComparer.OrdinalIgnoreCase);
@@ -552,7 +849,7 @@ namespace MicroEng.Navisworks
                 }
                 else
                 {
-                    var best = SelectBestIntersection(relevant);
+                    var best = SelectBestIntersection(relevant, settings, zoneBoundsById, zoneOrderById, target);
                     if (best != null)
                     {
                         if (best.IsContained) summary.ContainedHits++;
@@ -561,7 +858,7 @@ namespace MicroEng.Navisworks
                     }
                 }
 
-                var bestForCompare = SelectBestIntersection(relevant);
+                var bestForCompare = SelectBestIntersection(relevant, settings, zoneBoundsById, zoneOrderById, target);
                 if (bestForCompare != null)
                 {
                     summary.Assignments[target.ItemKey] = new Assignment
@@ -597,7 +894,8 @@ namespace MicroEng.Navisworks
                         TargetItemKey = inter.TargetItemKey,
                         IsContained = true,
                         IsPartial = inter.IsPartial,
-                        OverlapVolume = inter.OverlapVolume
+                        OverlapVolume = inter.OverlapVolume,
+                        ContainmentFraction = inter.ContainmentFraction
                     };
                 }
                 else if (partial && allowPartial)
@@ -607,26 +905,158 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private static ZoneTargetIntersection SelectBestIntersection(IReadOnlyList<ZoneTargetIntersection> intersections)
+        private struct BestZoneCandidate
+        {
+            public ZoneTargetIntersection Intersection;
+            public int ZoneOrder;
+            public double Volume;
+            public double DistanceSq;
+        }
+
+        private static ZoneTargetIntersection SelectBestIntersection(
+            IReadOnlyList<ZoneTargetIntersection> intersections,
+            SpaceMapperProcessingSettings settings,
+            Dictionary<string, Aabb> zoneBoundsById,
+            Dictionary<string, int> zoneOrderById,
+            TargetGeometry target)
         {
             if (intersections == null || intersections.Count == 0)
             {
                 return null;
             }
 
-            var bestContained = intersections
-                .Where(i => i.IsContained)
-                .OrderByDescending(i => i.OverlapVolume)
-                .FirstOrDefault();
+            var strategy = settings?.ZoneResolutionStrategy ?? SpaceMapperZoneResolutionStrategy.MostSpecific;
+            var containmentEngine = settings?.ZoneContainmentEngine ?? SpaceMapperZoneContainmentEngine.BoundsFast;
 
-            if (bestContained != null)
+            var hasTargetPoint = TryGetTargetPoint(target, settings, containmentEngine, out var tx, out var ty, out var tz);
+            BestZoneCandidate best = default;
+            var hasBest = false;
+
+            foreach (var inter in intersections)
             {
-                return bestContained;
+                if (inter == null || string.IsNullOrWhiteSpace(inter.ZoneId))
+                {
+                    continue;
+                }
+
+                var candidate = new BestZoneCandidate
+                {
+                    Intersection = inter,
+                    ZoneOrder = zoneOrderById != null && zoneOrderById.TryGetValue(inter.ZoneId, out var order)
+                        ? order
+                        : int.MaxValue,
+                    Volume = double.PositiveInfinity,
+                    DistanceSq = double.PositiveInfinity
+                };
+
+                if (zoneBoundsById != null && zoneBoundsById.TryGetValue(inter.ZoneId, out var bounds))
+                {
+                    candidate.Volume = bounds.SizeX * bounds.SizeY * bounds.SizeZ;
+
+                    if (hasTargetPoint)
+                    {
+                        var cx = (bounds.MinX + bounds.MaxX) * 0.5;
+                        var cy = (bounds.MinY + bounds.MaxY) * 0.5;
+                        var cz = (bounds.MinZ + bounds.MaxZ) * 0.5;
+                        var dx = tx - cx;
+                        var dy = ty - cy;
+                        var dz = tz - cz;
+                        candidate.DistanceSq = (dx * dx) + (dy * dy) + (dz * dz);
+                    }
+                }
+
+                if (!hasBest || IsBetterCandidate(candidate, best, strategy))
+                {
+                    best = candidate;
+                    hasBest = true;
+                }
             }
 
-            return intersections
-                .OrderByDescending(i => i.OverlapVolume)
-                .First();
+            return hasBest ? best.Intersection : null;
+        }
+
+        private static bool IsBetterCandidate(
+            in BestZoneCandidate candidate,
+            in BestZoneCandidate current,
+            SpaceMapperZoneResolutionStrategy strategy)
+        {
+            if (candidate.Intersection.IsContained != current.Intersection.IsContained)
+            {
+                return candidate.Intersection.IsContained;
+            }
+
+            switch (strategy)
+            {
+                case SpaceMapperZoneResolutionStrategy.FirstMatch:
+                    return candidate.ZoneOrder < current.ZoneOrder;
+                case SpaceMapperZoneResolutionStrategy.LargestOverlap:
+                    if (candidate.Intersection.OverlapVolume > current.Intersection.OverlapVolume)
+                    {
+                        return true;
+                    }
+                    if (candidate.Intersection.OverlapVolume < current.Intersection.OverlapVolume)
+                    {
+                        return false;
+                    }
+                    break;
+            }
+
+            if (candidate.Volume < current.Volume)
+            {
+                return true;
+            }
+
+            if (candidate.Volume > current.Volume)
+            {
+                return false;
+            }
+
+            if (candidate.DistanceSq < current.DistanceSq)
+            {
+                return true;
+            }
+
+            if (candidate.DistanceSq > current.DistanceSq)
+            {
+                return false;
+            }
+
+            return candidate.ZoneOrder < current.ZoneOrder;
+        }
+
+        private static bool TryGetTargetPoint(
+            TargetGeometry target,
+            SpaceMapperProcessingSettings settings,
+            SpaceMapperZoneContainmentEngine containmentEngine,
+            out double x,
+            out double y,
+            out double z)
+        {
+            x = 0;
+            y = 0;
+            z = 0;
+
+            var bbox = target?.BoundingBox;
+            if (bbox == null)
+            {
+                return false;
+            }
+
+            _ = containmentEngine;
+
+            var min = bbox.Min;
+            var max = bbox.Max;
+            var useBottom = settings?.TargetMidpointMode == SpaceMapperMidpointMode.BoundingBoxBottomCenter;
+            var useMidpoint = (settings?.TargetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
+                || (settings?.UseOriginPointOnly == true);
+
+            x = (min.X + max.X) * 0.5;
+            y = (min.Y + max.Y) * 0.5;
+            z = useMidpoint && useBottom
+                ? min.Z
+                : (min.Z + max.Z) * 0.5;
+
+            return true;
         }
 
         private static SpaceMapperComparisonAgreement CompareAssignments(
@@ -806,12 +1236,12 @@ namespace MicroEng.Navisworks
 
             if (zonesWithoutPlanes > 0)
             {
-                var anyNormalOrAccurate = variants.Any(v => !v.Report.Skipped &&
-                    (v.Definition.Preset == SpaceMapperPerformancePreset.Normal || v.Definition.Preset == SpaceMapperPerformancePreset.Accurate));
+                var anyPlaneBounds = variants.Any(v => !v.Report.Skipped
+                    && v.Definition.ZoneBoundsMode != SpaceMapperZoneBoundsMode.Aabb);
 
-                if (anyNormalOrAccurate)
+                if (anyPlaneBounds)
                 {
-                    warnings.Add("Normal/Accurate ran but some zones had 0 planes. Plane extraction may be incomplete.");
+                    warnings.Add("Plane-based zone bounds selected but some zones had 0 planes. Plane extraction may be incomplete.");
                 }
             }
 
@@ -922,12 +1352,20 @@ namespace MicroEng.Navisworks
                         sb.AppendLine($"  - Preset: {variant.Settings.Preset} (resolved: {variant.Settings.PresetResolved})");
                         sb.AppendLine($"  - Traversal: {variant.Settings.TraversalRequested} (resolved: {variant.Settings.TraversalResolved})");
                         sb.AppendLine($"  - Processing mode: {variant.Settings.ProcessingMode}");
+                        sb.AppendLine($"  - GPU ray count: {variant.Settings.GpuRayCount}");
                         sb.AppendLine($"  - Index granularity: {variant.Settings.IndexGranularity}");
                         sb.AppendLine($"  - Max threads: {variant.Settings.MaxThreads}");
                         sb.AppendLine($"  - Batch size: {variant.Settings.BatchSize}");
                         sb.AppendLine($"  - Use origin point only: {variant.Settings.UseOriginPointOnly}");
+                        sb.AppendLine($"  - Zone bounds: {variant.Settings.ZoneBoundsMode} (k-DOP: {variant.Settings.ZoneKDopVariant})");
+                        sb.AppendLine($"  - Target bounds: {variant.Settings.TargetBoundsMode} (k-DOP: {variant.Settings.TargetKDopVariant}, midpoint: {variant.Settings.TargetMidpointMode})");
+                        sb.AppendLine($"  - Zone containment engine: {variant.Settings.ZoneContainmentEngine}");
+                        sb.AppendLine($"  - Zone resolution strategy: {variant.Settings.ZoneResolutionStrategy}");
                         sb.AppendLine($"  - Treat partial as contained: {variant.Settings.TreatPartialAsContained}");
                         sb.AppendLine($"  - Tag partial separately: {variant.Settings.TagPartialSeparately}");
+                        sb.AppendLine($"  - Write zone behavior property: {variant.Settings.WriteZoneBehaviorProperty}");
+                        sb.AppendLine($"  - Write containment % property: {variant.Settings.WriteZoneContainmentPercentProperty}");
+                        sb.AppendLine($"  - Containment calculation mode: {variant.Settings.ContainmentCalculationMode}");
                         sb.AppendLine($"  - Enable multiple zones: {variant.Settings.EnableMultipleZones}");
                         sb.AppendLine($"  - Best zone behavior: {variant.Settings.BestZoneBehavior}");
                         sb.AppendLine($"  - Benchmark mode: {variant.Settings.BenchmarkMode}");
@@ -1209,6 +1647,21 @@ namespace MicroEng.Navisworks
             return byId;
         }
 
+        private static Dictionary<string, int> BuildZoneOrderLookup(IReadOnlyList<ZoneGeometry> zones)
+        {
+            var byId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < zones.Count; i++)
+            {
+                var zoneId = zones[i]?.ZoneId;
+                if (!string.IsNullOrWhiteSpace(zoneId) && !byId.ContainsKey(zoneId))
+                {
+                    byId[zoneId] = i;
+                }
+            }
+
+            return byId;
+        }
+
         private static Aabb GetZoneQueryBounds(ZoneGeometry zone, SpaceMapperProcessingSettings settings)
         {
             if (zone == null)
@@ -1264,27 +1717,42 @@ namespace MicroEng.Navisworks
                 string name,
                 SpaceMapperPerformancePreset preset,
                 SpaceMapperFastTraversalMode traversal,
-                bool useOriginPointOnly,
+                SpaceMapperZoneBoundsMode zoneBoundsMode,
+                SpaceMapperTargetBoundsMode targetBoundsMode,
+                SpaceMapperKDopVariant zoneKDopVariant = SpaceMapperKDopVariant.KDop14,
+                SpaceMapperKDopVariant targetKDopVariant = SpaceMapperKDopVariant.KDop14,
+                SpaceMapperMidpointMode targetMidpointMode = SpaceMapperMidpointMode.BoundingBoxCenter,
                 bool requiresNoPartial = false,
                 bool isBaseline = false,
-                bool legacyFastAabbOnly = false)
+                bool legacyFastAabbOnly = false,
+                SpaceMapperProcessingMode? processingModeOverride = null)
             {
                 Name = name;
                 Preset = preset;
                 Traversal = traversal;
-                UseOriginPointOnly = useOriginPointOnly;
+                ZoneBoundsMode = zoneBoundsMode;
+                TargetBoundsMode = targetBoundsMode;
+                ZoneKDopVariant = zoneKDopVariant;
+                TargetKDopVariant = targetKDopVariant;
+                TargetMidpointMode = targetMidpointMode;
                 RequiresNoPartial = requiresNoPartial;
                 IsBaseline = isBaseline;
                 LegacyFastAabbOnly = legacyFastAabbOnly;
+                ProcessingModeOverride = processingModeOverride;
             }
 
             public string Name { get; }
             public SpaceMapperPerformancePreset Preset { get; }
             public SpaceMapperFastTraversalMode Traversal { get; }
-            public bool UseOriginPointOnly { get; }
+            public SpaceMapperZoneBoundsMode ZoneBoundsMode { get; }
+            public SpaceMapperTargetBoundsMode TargetBoundsMode { get; }
+            public SpaceMapperKDopVariant ZoneKDopVariant { get; }
+            public SpaceMapperKDopVariant TargetKDopVariant { get; }
+            public SpaceMapperMidpointMode TargetMidpointMode { get; }
             public bool RequiresNoPartial { get; }
             public bool IsBaseline { get; }
             public bool LegacyFastAabbOnly { get; }
+            public SpaceMapperProcessingMode? ProcessingModeOverride { get; }
         }
 
         private sealed class Assignment
@@ -1340,12 +1808,23 @@ namespace MicroEng.Navisworks
                             TraversalRequested = definition.Traversal.ToString(),
                             TraversalResolved = string.Empty,
                             ProcessingMode = settings?.ProcessingMode.ToString() ?? string.Empty,
+                            GpuRayCount = Math.Max(settings?.GpuRayCount ?? 2, 1),
                             IndexGranularity = settings?.IndexGranularity ?? 0,
                             MaxThreads = settings?.MaxThreads ?? 0,
                             BatchSize = settings?.BatchSize ?? 0,
                             UseOriginPointOnly = settings?.UseOriginPointOnly ?? false,
+                            ZoneBoundsMode = settings?.ZoneBoundsMode.ToString() ?? SpaceMapperZoneBoundsMode.Aabb.ToString(),
+                            ZoneKDopVariant = settings?.ZoneKDopVariant.ToString() ?? SpaceMapperKDopVariant.KDop14.ToString(),
+                            TargetBoundsMode = settings?.TargetBoundsMode.ToString() ?? SpaceMapperTargetBoundsMode.Aabb.ToString(),
+                            TargetKDopVariant = settings?.TargetKDopVariant.ToString() ?? SpaceMapperKDopVariant.KDop14.ToString(),
+                            TargetMidpointMode = settings?.TargetMidpointMode.ToString() ?? SpaceMapperMidpointMode.BoundingBoxCenter.ToString(),
+                            ZoneContainmentEngine = settings?.ZoneContainmentEngine.ToString() ?? SpaceMapperZoneContainmentEngine.BoundsFast.ToString(),
+                            ZoneResolutionStrategy = settings?.ZoneResolutionStrategy.ToString() ?? SpaceMapperZoneResolutionStrategy.MostSpecific.ToString(),
                             TreatPartialAsContained = settings?.TreatPartialAsContained ?? false,
                             TagPartialSeparately = settings?.TagPartialSeparately ?? false,
+                            WriteZoneBehaviorProperty = settings?.WriteZoneBehaviorProperty ?? false,
+                            WriteZoneContainmentPercentProperty = settings?.WriteZoneContainmentPercentProperty ?? false,
+                            ContainmentCalculationMode = settings?.ContainmentCalculationMode.ToString() ?? SpaceMapperContainmentCalculationMode.Auto.ToString(),
                             EnableMultipleZones = settings?.EnableMultipleZones ?? false,
                             BestZoneBehavior = settings?.EnableMultipleZones == true ? "Multiple" : "Single",
                             BenchmarkMode = benchmarkMode.ToString(),
@@ -1573,6 +2052,39 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 24)]
         public bool PackWritebackProperties { get; set; }
+
+        [DataMember(Order = 25)]
+        public string ZoneBoundsMode { get; set; }
+
+        [DataMember(Order = 26)]
+        public string ZoneKDopVariant { get; set; }
+
+        [DataMember(Order = 27)]
+        public string TargetBoundsMode { get; set; }
+
+        [DataMember(Order = 28)]
+        public string TargetKDopVariant { get; set; }
+
+        [DataMember(Order = 29)]
+        public string TargetMidpointMode { get; set; }
+
+        [DataMember(Order = 30)]
+        public string ZoneContainmentEngine { get; set; }
+
+        [DataMember(Order = 31)]
+        public string ZoneResolutionStrategy { get; set; }
+
+        [DataMember(Order = 32)]
+        public bool WriteZoneBehaviorProperty { get; set; }
+
+        [DataMember(Order = 33)]
+        public bool WriteZoneContainmentPercentProperty { get; set; }
+
+        [DataMember(Order = 34)]
+        public string ContainmentCalculationMode { get; set; }
+
+        [DataMember(Order = 35)]
+        public int GpuRayCount { get; set; }
     }
 
     [DataContract]

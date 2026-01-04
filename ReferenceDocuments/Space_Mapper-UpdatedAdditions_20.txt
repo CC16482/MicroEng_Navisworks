@@ -1,0 +1,285 @@
+Understood. What you’re asking for is **not** a new containment/assignment feature — it’s a **writeback/output formatting mode** for Step 4 (Mapping Builder) so that *when multiple zones match*, Space Mapper can write **N separate properties** instead of collapsing them into one string.
+
+Today, your `MultiZoneCombineMode` is designed to return **one combined value** (First / Concatenate / Min / Max / Average). That’s why it cannot currently emit:
+
+* `Zone Name`
+* `Zone Name(1)`
+* `Zone Name(2)`
+  …and similarly for behaviour.
+
+To implement “Sequence”, we must let the writeback stage produce **multiple `WritebackEntry` rows per mapping** (and also sequence the Zone Behaviour property when enabled).
+
+Below is a Codex-ready change request with concrete code.
+
+---
+
+## What “Sequence” should do
+
+When a target has multiple matching zones (e.g., door partial in Room A + Room B), and a mapping has **Multi-zone = Sequence**, Space Mapper writes:
+
+* `TargetPropertyName` = value for best/first zone
+* `TargetPropertyName(1)` = value for second zone
+* `TargetPropertyName(2)` = value for third zone
+* …
+
+Example (your request):
+
+* `Zone Behaviour` = `Partial`
+* `Zone Name` = `DAMPER ACCESS ROOM 1 250.11.284`
+* `Zone Behaviour(1)` = `Partial`
+* `Zone Name(1)` = `EMERGENCY EGRESS 1 250.05.205`
+
+Important: This will increase property writes (COM/API cost). So we should cap max outputs (e.g., 8) to prevent pathological runs.
+
+---
+
+## Where to implement
+
+### 1) Add the enum value
+
+`MultiZoneCombineMode` currently contains: `First, Concatenate, Min, Max, Average`.
+Add `Sequence`.
+
+### 2) Modify writeback generation (core)
+
+Your writeback entries are created here:
+
+* `BuildWritebackEntries(...)` in `SpaceMapperService.cs`
+
+Currently it always produces **one** entry per mapping by calling `CombineValues(...)`.
+
+We need:
+
+* If mapping is `Sequence`, generate multiple entries instead.
+* Also, if `WriteZoneBehaviorProperty` is enabled, optionally generate `BehaviourProperty(1)`, etc.
+
+### 3) UI: the dropdown will pick up the new enum automatically
+
+Your UI mapping builder reads the selected enum and stores it into `SpaceMapperMappingDefinition.MultiZoneCombineMode`.
+Because it’s an enum-bound combo, adding the enum value is typically enough for it to appear.
+
+---
+
+## Code changes
+
+### A) SpaceMapperModels.cs — add Sequence
+
+Find:
+
+```csharp
+public enum MultiZoneCombineMode
+{
+    First,
+    Concatenate,
+    Min,
+    Max,
+    Average
+}
+```
+
+Change to:
+
+```csharp
+public enum MultiZoneCombineMode
+{
+    First = 0,
+    Concatenate = 1,
+    Min = 2,
+    Max = 3,
+    Average = 4,
+
+    // Writes separate properties: Property, Property(1), Property(2)...
+    Sequence = 5
+}
+```
+
+(Keeping explicit numeric values avoids surprises if templates/settings persist enum integers.)
+
+---
+
+### B) SpaceMapperService.cs — implement sequenced writeback output
+
+**Patch `BuildWritebackEntries(...)`** (shown in your latest file).
+
+Add these helpers inside `SpaceMapperService` (near `BuildWritebackEntries`):
+
+```csharp
+private const int MaxSequenceOutputsPerMapping = 8;
+
+private static string SequencedPropertyName(string baseName, int index)
+{
+    return index <= 0 ? baseName : $"{baseName}({index})";
+}
+
+private static bool ShouldSequenceBehaviour(
+    IReadOnlyList<ZoneTargetIntersection> relevant,
+    IEnumerable<SpaceMapperMappingDefinition> mappings,
+    SpaceMapperProcessingSettings settings)
+{
+    if (settings?.WriteZoneBehaviorProperty != true) return false;
+    if (settings?.EnableMultipleZones != true) return false;
+    if (relevant == null || relevant.Count <= 1) return false;
+
+    // Only sequence behaviour if the user is clearly opting into sequenced multi-zone output.
+    // (Otherwise keep the existing “Partial if any partial” behaviour.)
+    return mappings != null && mappings.Any(m => m != null && m.MultiZoneCombineMode == MultiZoneCombineMode.Sequence);
+}
+```
+
+Now replace the behaviour-property block in `BuildWritebackEntries`:
+
+Current code (single value):
+
+```csharp
+if (settings?.WriteZoneBehaviorProperty == true)
+{
+    var hasPartial = relevantIntersections.Any(i => i.IsPartial);
+    var behaviorValue = hasPartial ? settings.PartialValue : settings.ContainedValue;
+    if (!string.IsNullOrWhiteSpace(behaviorValue))
+    {
+        entries.Add(new WritebackEntry(settings.BehaviourCategory, settings.BehaviourProperty, behaviorValue, WriteMode.Overwrite, string.Empty));
+    }
+}
+```
+
+Replace with:
+
+```csharp
+if (settings?.WriteZoneBehaviorProperty == true)
+{
+    if (ShouldSequenceBehaviour(relevantIntersections, mappings, settings))
+    {
+        var count = Math.Min(relevantIntersections.Count, MaxSequenceOutputsPerMapping);
+        for (var i = 0; i < count; i++)
+        {
+            var inter = relevantIntersections[i];
+            var behaviorValue = inter.IsPartial ? settings.PartialValue : settings.ContainedValue;
+            if (string.IsNullOrWhiteSpace(behaviorValue)) continue;
+
+            var propName = SequencedPropertyName(settings.BehaviourProperty, i);
+            entries.Add(new WritebackEntry(settings.BehaviourCategory, propName, behaviorValue, WriteMode.Overwrite, string.Empty));
+        }
+    }
+    else
+    {
+        // Keep current behaviour: single flag for the target
+        var hasPartial = relevantIntersections.Any(i => i.IsPartial);
+        var behaviorValue = hasPartial ? settings.PartialValue : settings.ContainedValue;
+        if (!string.IsNullOrWhiteSpace(behaviorValue))
+        {
+            entries.Add(new WritebackEntry(settings.BehaviourCategory, settings.BehaviourProperty, behaviorValue, WriteMode.Overwrite, string.Empty));
+        }
+    }
+}
+```
+
+Now update the per-mapping loop. Current logic builds `zoneVals` and combines into one string.
+
+Replace just the “combine” section with a Sequence branch:
+
+Find this block:
+
+```csharp
+if (zoneVals.Count == 0)
+{
+    continue;
+}
+
+var combined = CombineValues(zoneVals, mapping.MultiZoneCombineMode, mapping.AppendSeparator);
+if (string.IsNullOrWhiteSpace(combined))
+{
+    continue;
+}
+
+entries.Add(new WritebackEntry(targetCategory, targetProperty, combined, mapping.WriteMode, mapping.AppendSeparator));
+```
+
+Replace with:
+
+```csharp
+if (zoneVals.Count == 0)
+{
+    continue;
+}
+
+if (mapping.MultiZoneCombineMode == MultiZoneCombineMode.Sequence
+    && settings?.EnableMultipleZones == true
+    && relevantIntersections.Count > 1)
+{
+    // Sequence: write Property, Property(1), Property(2)...
+    var count = Math.Min(zoneVals.Count, MaxSequenceOutputsPerMapping);
+    for (var i = 0; i < count; i++)
+    {
+        var value = zoneVals[i] ?? string.Empty;
+
+        // If you prefer to avoid creating empty properties, keep this guard.
+        // If you prefer "clear unused slots", remove this guard and also write blanks for trailing indices.
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            continue;
+        }
+
+        var propName = SequencedPropertyName(targetProperty, i);
+        entries.Add(new WritebackEntry(targetCategory, propName, value, mapping.WriteMode, mapping.AppendSeparator));
+    }
+
+    continue;
+}
+
+// Existing single-value modes
+var combined = CombineValues(zoneVals, mapping.MultiZoneCombineMode, mapping.AppendSeparator);
+if (string.IsNullOrWhiteSpace(combined))
+{
+    continue;
+}
+
+entries.Add(new WritebackEntry(targetCategory, targetProperty, combined, mapping.WriteMode, mapping.AppendSeparator));
+```
+
+That’s enough to generate the properties you want.
+
+---
+
+## Optional but recommended: ensure deterministic ordering for “Sequence”
+
+Right now, the order of `relevantIntersections` comes from the engine traversal/grouping. For “Sequence”, users will expect the ordering to match **your Step 3 resolution strategy** (e.g., “Most specific wins”).
+
+You already have access to the `ZoneResolutionStrategy` in `SpaceMapperProcessingSettings` and you already compute “best” when multi-zone is disabled.
+
+**Codex instruction (recommended):**
+Before calling `BuildWritebackEntries(...)`, if multi-zone is enabled and `relevant.Count > 1`, sort `relevant` using the same criteria as `SelectBestIntersection(...)` (contained-first, then strategy, then volume/distance tie-breakers). That makes `Sequence` output stable and intuitive.
+
+---
+
+## Codex-ready prompt (copy/paste)
+
+> **Task:** Add a new Mapping Builder “Multi-zone” output option that writes sequential properties per matched zone.
+>
+> **Desired UX:** In Step 4 Mapping Builder, Multi-zone dropdown gains “Sequence”. When selected, mapping outputs become multiple properties: `TargetProperty`, `TargetProperty(1)`, `TargetProperty(2)`… instead of a combined string.
+>
+> **Behaviour property:** If Step 3 “Write Zone Behaviour property” is enabled and multi-zone has multiple zones, ALSO write `Zone Behaviour(1)`, `Zone Behaviour(2)`… **but only if at least one mapping is using Multi-zone = Sequence** (so we don’t change existing default behaviour).
+>
+> **Files:**
+>
+> 1. `SpaceMapperModels.cs`: add `Sequence` to `MultiZoneCombineMode` enum (keep explicit numeric values).
+> 2. `SpaceMapperService.cs`: modify `BuildWritebackEntries(...)` to emit multiple `WritebackEntry` rows per mapping when `MultiZoneCombineMode.Sequence`. Add helper `SequencedPropertyName(baseName, index)` producing `Name` or `Name(1)` etc. Add a cap constant like `MaxSequenceOutputsPerMapping = 8`. Update behaviour property write to also emit sequenced properties when sequencing is active.
+> 3. Ensure build passes (`dotnet build`).
+>
+> **Acceptance test:**
+>
+> * A door intersecting two rooms with multi-zone enabled and a mapping `Zone Name` with Multi-zone=Sequence produces: `Zone Name` and `Zone Name(1)` in the model.
+> * With “Write Zone Behaviour property” enabled, also produces `Zone Behaviour` and `Zone Behaviour(1)`.
+> * Existing modes (First/Concatenate/Min/Max/Average) unchanged.
+
+---
+
+## One caution (performance)
+
+This feature increases writes per target (and you’ve already identified writes as the bottleneck). So:
+
+* Keep `MaxSequenceOutputsPerMapping` low (e.g., 4–8)
+* Consider using this mainly for **debugging/validation** or for limited target sets.
+
+---
+
+If you want, I can also provide a “Clear unused sequence slots” option (so if a target used to have 3 zone hits and now only has 1, it clears `Zone Name(1)`/`Zone Name(2)`), but that will add extra writes and may slow runs further.

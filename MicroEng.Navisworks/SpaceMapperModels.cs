@@ -41,6 +41,58 @@ namespace MicroEng.Navisworks
         Auto = 3
     }
 
+    internal enum SpaceMapperZoneBoundsMode
+    {
+        Aabb = 0,
+        Obb = 1,
+        KDop = 2,
+        Hull = 3
+    }
+
+    internal enum SpaceMapperTargetBoundsMode
+    {
+        Midpoint = 0,
+        Aabb = 1,
+        Obb = 2,
+        KDop = 3,
+        Hull = 4
+    }
+
+    internal enum SpaceMapperMidpointMode
+    {
+        BoundingBoxCenter = 0,
+        BoundingBoxBottomCenter = 1
+    }
+
+    internal enum SpaceMapperKDopVariant
+    {
+        KDop8 = 8,
+        KDop14 = 14,
+        KDop18 = 18
+    }
+
+    internal enum SpaceMapperZoneContainmentEngine
+    {
+        BoundsFast = 0,
+        MeshAccurate = 1
+    }
+
+    internal enum SpaceMapperZoneResolutionStrategy
+    {
+        MostSpecific = 0,
+        LargestOverlap = 1,
+        FirstMatch = 2
+    }
+
+    internal enum SpaceMapperContainmentCalculationMode
+    {
+        Auto = 0,
+        SamplePoints = 1,
+        SamplePointsDense = 2,
+        TargetGeometry = 3,
+        BoundsOverlap = 4
+    }
+
     public enum SpaceMapperFastTraversalMode
     {
         Auto = 0,
@@ -71,11 +123,13 @@ namespace MicroEng.Navisworks
 
     public enum MultiZoneCombineMode
     {
-        First,
-        Concatenate,
-        Min,
-        Max,
-        Average
+        First = 0,
+        Concatenate = 1,
+        Min = 2,
+        Max = 3,
+        Average = 4,
+        // Writes separate properties: Property, Property(1), Property(2)...
+        Sequence = 5
     }
 
     public enum WriteMode
@@ -105,7 +159,7 @@ namespace MicroEng.Navisworks
     internal class SpaceMapperProcessingSettings
     {
         [DataMember(Order = 0)]
-        public SpaceMapperProcessingMode ProcessingMode { get; set; } = SpaceMapperProcessingMode.CpuNormal;
+        public SpaceMapperProcessingMode ProcessingMode { get; set; } = SpaceMapperProcessingMode.Auto;
 
         [DataMember(Order = 1)]
         public bool TreatPartialAsContained { get; set; }
@@ -178,6 +232,42 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 24)]
         public bool PackWritebackProperties { get; set; }
+
+        [DataMember(Order = 25)]
+        public SpaceMapperZoneBoundsMode ZoneBoundsMode { get; set; } = SpaceMapperZoneBoundsMode.Aabb;
+
+        [DataMember(Order = 26)]
+        public SpaceMapperKDopVariant ZoneKDopVariant { get; set; } = SpaceMapperKDopVariant.KDop14;
+
+        [DataMember(Order = 27)]
+        public SpaceMapperTargetBoundsMode TargetBoundsMode { get; set; } = SpaceMapperTargetBoundsMode.Aabb;
+
+        [DataMember(Order = 28)]
+        public SpaceMapperKDopVariant TargetKDopVariant { get; set; } = SpaceMapperKDopVariant.KDop14;
+
+        [DataMember(Order = 29)]
+        public SpaceMapperMidpointMode TargetMidpointMode { get; set; } = SpaceMapperMidpointMode.BoundingBoxCenter;
+
+        [DataMember(Order = 30)]
+        public SpaceMapperZoneContainmentEngine ZoneContainmentEngine { get; set; } = SpaceMapperZoneContainmentEngine.BoundsFast;
+
+        [DataMember(Order = 31)]
+        public SpaceMapperZoneResolutionStrategy ZoneResolutionStrategy { get; set; } = SpaceMapperZoneResolutionStrategy.MostSpecific;
+
+        [DataMember(Order = 32)]
+        public bool ExcludeZonesFromTargets { get; set; }
+
+        [DataMember(Order = 33)]
+        public bool WriteZoneBehaviorProperty { get; set; }
+
+        [DataMember(Order = 34)]
+        public bool WriteZoneContainmentPercentProperty { get; set; }
+
+        [DataMember(Order = 35)]
+        public SpaceMapperContainmentCalculationMode ContainmentCalculationMode { get; set; } = SpaceMapperContainmentCalculationMode.Auto;
+
+        [DataMember(Order = 36)]
+        public int GpuRayCount { get; set; } = 2;
     }
 
     [DataContract]
@@ -251,6 +341,16 @@ namespace MicroEng.Navisworks
         public Autodesk.Navisworks.Api.BoundingBox3D BoundingBox { get; set; }
         public List<Autodesk.Navisworks.Api.Vector3D> Vertices { get; set; } = new();
         public List<PlaneEquation> Planes { get; set; } = new();
+        public IReadOnlyList<Autodesk.Navisworks.Api.Vector3D> TriangleVertices { get; set; }
+        public int TriangleCount { get; set; }
+        public bool HasTriangleMesh { get; set; }
+        public bool MeshExtractionFailed { get; set; }
+        public string MeshExtractionError { get; set; }
+        public bool MeshIsClosed { get; set; }
+        public int MeshBoundaryEdgeCount { get; set; }
+        public int MeshNonManifoldEdgeCount { get; set; }
+        public string MeshFallbackReason { get; set; }
+        public string MeshFallbackDetail { get; set; }
     }
 
     internal class TargetGeometry
@@ -260,6 +360,8 @@ namespace MicroEng.Navisworks
         public Autodesk.Navisworks.Api.ModelItem ModelItem { get; set; }
         public Autodesk.Navisworks.Api.BoundingBox3D BoundingBox { get; set; }
         public List<Autodesk.Navisworks.Api.Vector3D> Vertices { get; set; } = new();
+        public IReadOnlyList<Autodesk.Navisworks.Api.Vector3D> TriangleVertices { get; set; }
+        public int TriangleCount { get; set; }
     }
 
     internal class SpaceMapperResolvedItem
@@ -276,6 +378,8 @@ namespace MicroEng.Navisworks
         public bool IsContained { get; set; }
         public bool IsPartial { get; set; }
         public double OverlapVolume { get; set; }
+        [DataMember(Order = 5, EmitDefaultValue = false)]
+        public double? ContainmentFraction { get; set; }
     }
 
     internal struct PlaneEquation
@@ -293,6 +397,36 @@ namespace MicroEng.Navisworks
         public int Percentage => TotalPairs <= 0 ? 0 : (int)(ProcessedPairs * 100.0 / TotalPairs);
     }
 
+    internal sealed class SpaceMapperSlowZoneInfo
+    {
+        public int ZoneIndex { get; set; }
+        public string ZoneId { get; set; }
+        public string ZoneName { get; set; }
+        public int CandidateCount { get; set; }
+        public TimeSpan Elapsed { get; set; }
+    }
+
+    internal sealed class SpaceMapperGpuZoneDiagnostic
+    {
+        public int ZoneIndex { get; set; }
+        public string ZoneId { get; set; }
+        public string ZoneName { get; set; }
+        public int CandidateCount { get; set; }
+        public int EstimatedPoints { get; set; }
+        public int TriangleCount { get; set; }
+        public long WorkEstimate { get; set; }
+        public int PointThreshold { get; set; }
+        public long WorkThreshold { get; set; }
+        public bool HasMesh { get; set; }
+        public bool IsOpenMesh { get; set; }
+        public bool AllowOpenMeshGpu { get; set; }
+        public bool EligibleForGpu { get; set; }
+        public bool UsedGpu { get; set; }
+        public bool UsedOpenMeshRetry { get; set; }
+        public bool PackedThresholds { get; set; }
+        public string SkipReason { get; set; }
+    }
+
     internal sealed class SpaceMapperEngineDiagnostics
     {
         public bool UsedPreflightIndex { get; set; }
@@ -306,12 +440,103 @@ namespace MicroEng.Navisworks
         public TimeSpan BuildIndexTime { get; set; }
         public TimeSpan CandidateQueryTime { get; set; }
         public TimeSpan NarrowPhaseTime { get; set; }
+        public long MeshPointTests;
+        public long BoundsPointTests;
+        public long MeshFallbackPointTests;
+        public string GpuBackend { get; set; }
+        public string GpuInitFailureReason { get; set; }
+        public int GpuZonesProcessed { get; set; }
+        public long GpuPointsTested { get; set; }
+        public long GpuTrianglesTested { get; set; }
+        public TimeSpan GpuDispatchTime { get; set; }
+        public TimeSpan GpuReadbackTime { get; set; }
+        public string GpuAdapterName { get; set; }
+        public string GpuAdapterLuid { get; set; }
+        public int? GpuVendorId { get; set; }
+        public int? GpuDeviceId { get; set; }
+        public int? GpuSubSysId { get; set; }
+        public int? GpuRevision { get; set; }
+        public long? GpuDedicatedVideoMemory { get; set; }
+        public long? GpuDedicatedSystemMemory { get; set; }
+        public long? GpuSharedSystemMemory { get; set; }
+        public string GpuFeatureLevel { get; set; }
+        public int GpuPointThreshold { get; set; }
+        public int GpuSamplePointsPerTarget { get; set; }
+        public int GpuZonesEligible { get; set; }
+        public int GpuZonesSkippedNoMesh { get; set; }
+        public int GpuZonesSkippedMissingTriangles { get; set; }
+        public int GpuZonesSkippedOpenMesh { get; set; }
+        public int GpuZonesSkippedLowPoints { get; set; }
+        public long GpuUncertainPoints { get; set; }
+        public int GpuMaxTrianglesPerZone { get; set; }
+        public int GpuMaxPointsPerZone { get; set; }
+        public int GpuOpenMeshZonesEligible { get; set; }
+        public int GpuOpenMeshZonesProcessed { get; set; }
+        public int GpuOpenMeshBoundaryEdgeLimit { get; set; }
+        public int GpuOpenMeshNonManifoldEdgeLimit { get; set; }
+        public int GpuOpenMeshOutsideTolerance { get; set; }
+        public double GpuOpenMeshNudge { get; set; }
+        public int GpuBatchDispatchCount { get; set; }
+        public int GpuBatchMaxZones { get; set; }
+        public int GpuBatchMaxPoints { get; set; }
+        public int GpuBatchMaxTriangles { get; set; }
+        public double GpuBatchAvgZonesPerDispatch { get; set; }
+        public List<SpaceMapperGpuZoneDiagnostic> GpuZoneDiagnostics { get; set; } = new();
+        public double SlowZoneThresholdSeconds { get; set; }
+        public List<SpaceMapperSlowZoneInfo> SlowZones { get; set; } = new();
     }
 
     internal class SpaceMapperRunStats
     {
         public int ZonesProcessed { get; set; }
         public int TargetsProcessed { get; set; }
+        public int ZonesWithMesh { get; set; }
+        public int ZonesMeshFallback { get; set; }
+        public int MeshExtractionErrors { get; set; }
+        public long MeshPointTests { get; set; }
+        public long BoundsPointTests { get; set; }
+        public long MeshFallbackPointTests { get; set; }
+        public string GpuBackend { get; set; }
+        public string GpuInitFailureReason { get; set; }
+        public int GpuZonesProcessed { get; set; }
+        public long GpuPointsTested { get; set; }
+        public long GpuTrianglesTested { get; set; }
+        public TimeSpan GpuDispatchTime { get; set; }
+        public TimeSpan GpuReadbackTime { get; set; }
+        public string GpuAdapterName { get; set; }
+        public string GpuAdapterLuid { get; set; }
+        public int? GpuVendorId { get; set; }
+        public int? GpuDeviceId { get; set; }
+        public int? GpuSubSysId { get; set; }
+        public int? GpuRevision { get; set; }
+        public long? GpuDedicatedVideoMemory { get; set; }
+        public long? GpuDedicatedSystemMemory { get; set; }
+        public long? GpuSharedSystemMemory { get; set; }
+        public string GpuFeatureLevel { get; set; }
+        public int GpuPointThreshold { get; set; }
+        public int GpuSamplePointsPerTarget { get; set; }
+        public int GpuZonesEligible { get; set; }
+        public int GpuZonesSkippedNoMesh { get; set; }
+        public int GpuZonesSkippedMissingTriangles { get; set; }
+        public int GpuZonesSkippedOpenMesh { get; set; }
+        public int GpuZonesSkippedLowPoints { get; set; }
+        public long GpuUncertainPoints { get; set; }
+        public int GpuMaxTrianglesPerZone { get; set; }
+        public int GpuMaxPointsPerZone { get; set; }
+        public int GpuOpenMeshZonesEligible { get; set; }
+        public int GpuOpenMeshZonesProcessed { get; set; }
+        public int GpuOpenMeshBoundaryEdgeLimit { get; set; }
+        public int GpuOpenMeshNonManifoldEdgeLimit { get; set; }
+        public int GpuOpenMeshOutsideTolerance { get; set; }
+        public double GpuOpenMeshNudge { get; set; }
+        public int GpuBatchDispatchCount { get; set; }
+        public int GpuBatchMaxZones { get; set; }
+        public int GpuBatchMaxPoints { get; set; }
+        public int GpuBatchMaxTriangles { get; set; }
+        public double GpuBatchAvgZonesPerDispatch { get; set; }
+        public List<SpaceMapperGpuZoneDiagnostic> GpuZoneDiagnostics { get; set; } = new();
+        public double SlowZoneThresholdSeconds { get; set; }
+        public List<SpaceMapperSlowZoneInfo> SlowZones { get; set; } = new();
         public int ContainedTagged { get; set; }
         public int PartialTagged { get; set; }
         public int MultiZoneTagged { get; set; }

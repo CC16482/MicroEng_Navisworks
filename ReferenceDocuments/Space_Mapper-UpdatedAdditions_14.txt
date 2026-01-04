@@ -1,0 +1,705 @@
+Below is an implementation plan (and Codex-ready prompt) that fits your current codebase:
+
+* **Run Space Mapper is synchronous** (it currently calls `service.Run(...)` inside `RunSpaceMapper()` and then navigates to results), so a progress UI hosted on the **same** Navisworks UI thread will *not* animate.
+* To give the user smooth feedback **without slowing the run**, the best pattern is:
+
+  1. Create a lightweight, thread-safe **progress state object** (atomic counters + stage text).
+  2. Show a **WPF UI window (Wpf.Ui ProgressRing)** on a **separate STA UI thread**.
+  3. The progress window uses a `DispatcherTimer` to **poll** the progress state every ~250 ms (no per-candidate UI dispatch, minimal overhead).
+  4. Extend the engine/service to update progress state only at **stage boundaries** + **coarse counters** (zones processed / targets processed / writeback processed).
+  5. On completion, close the window and navigate to **Results** (you already do this in `RunSpaceMapper`).
+
+---
+
+## 1) Add: `SpaceMapperRunProgressState.cs`
+
+Create a new file in the same namespace as your other SpaceMapper UI/service code (`MicroEng.Navisworks`).
+
+```csharp
+using System;
+using System.Diagnostics;
+using System.Threading;
+
+namespace MicroEng.Navisworks
+{
+    internal enum SpaceMapperRunStage
+    {
+        Starting,
+        ResolvingInputs,
+        ExtractingGeometry,
+        BuildingIndex,
+        ComputingIntersections,
+        ResolvingAssignments,
+        WritingProperties,
+        Finalizing,
+        Completed,
+        Cancelled,
+        Failed
+    }
+
+    /// <summary>
+    /// Thread-safe progress state. Writers (run thread / worker threads) update via Interlocked.
+    /// The progress window polls this state periodically (no heavy progress callbacks).
+    /// </summary>
+    internal sealed class SpaceMapperRunProgressState
+    {
+        // Stage / messages (atomic reference writes are fine)
+        public volatile SpaceMapperRunStage Stage = SpaceMapperRunStage.Starting;
+        public volatile string StageText = "Starting...";
+        public volatile string DetailText = string.Empty;
+
+        // Totals (written once early, read many times)
+        public int ZonesTotal;
+        public int TargetsTotal;
+
+        // Coarse counters (updated via Interlocked)
+        public int ZonesProcessed;
+        public int TargetsProcessed;
+
+        public int WriteTargetsTotal;
+        public int WriteTargetsProcessed;
+
+        public long CandidatePairs;
+
+        // Terminal state flags
+        public volatile bool IsFinished;
+        public volatile bool IsFailed;
+        public volatile bool IsCancelled;
+        public volatile string ErrorText = string.Empty;
+
+        private readonly Stopwatch _sw = new Stopwatch();
+
+        public void Start()
+        {
+            ZonesTotal = 0;
+            TargetsTotal = 0;
+            CandidatePairs = 0;
+
+            Interlocked.Exchange(ref ZonesProcessed, 0);
+            Interlocked.Exchange(ref TargetsProcessed, 0);
+            Interlocked.Exchange(ref WriteTargetsProcessed, 0);
+            WriteTargetsTotal = 0;
+
+            IsFinished = false;
+            IsFailed = false;
+            IsCancelled = false;
+            ErrorText = string.Empty;
+
+            Stage = SpaceMapperRunStage.Starting;
+            StageText = "Starting...";
+            DetailText = string.Empty;
+
+            _sw.Restart();
+        }
+
+        public TimeSpan Elapsed => _sw.Elapsed;
+
+        public void SetStage(SpaceMapperRunStage stage, string stageText, string detailText = null)
+        {
+            Stage = stage;
+            StageText = stageText ?? stage.ToString();
+            if (detailText != null)
+                DetailText = detailText;
+        }
+
+        public void SetTotals(int zonesTotal, int targetsTotal)
+        {
+            ZonesTotal = zonesTotal;
+            TargetsTotal = targetsTotal;
+        }
+
+        public void SetWriteTotals(int writeTargetsTotal)
+        {
+            WriteTargetsTotal = writeTargetsTotal;
+        }
+
+        public void MarkCompleted()
+        {
+            Stage = SpaceMapperRunStage.Completed;
+            StageText = "Completed";
+            IsFinished = true;
+        }
+
+        public void MarkCancelled()
+        {
+            Stage = SpaceMapperRunStage.Cancelled;
+            StageText = "Cancelled";
+            IsFinished = true;
+            IsCancelled = true;
+        }
+
+        public void MarkFailed(Exception ex)
+        {
+            Stage = SpaceMapperRunStage.Failed;
+            StageText = "Failed";
+            IsFinished = true;
+            IsFailed = true;
+            ErrorText = ex?.Message ?? "Unknown error";
+        }
+    }
+}
+```
+
+---
+
+## 2) Add: `SpaceMapperRunProgressWindow.xaml` + `.xaml.cs` (WPF UI ProgressRing)
+
+### `SpaceMapperRunProgressWindow.xaml`
+
+```xml
+<ui:FluentWindow x:Class="MicroEng.Navisworks.SpaceMapperRunProgressWindow"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:ui="http://schemas.lepoco.dev/wpfui/2022/xaml"
+                 Title="Space Mapper"
+                 Width="520"
+                 Height="240"
+                 ResizeMode="NoResize"
+                 WindowStartupLocation="CenterScreen">
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock x:Name="HeaderText"
+                       Text="Running Space Mapper"
+                       FontSize="18"
+                       FontWeight="SemiBold"/>
+            <TextBlock x:Name="SubHeaderText"
+                       Text="Please wait. You can leave this window open while processing completes."
+                       Opacity="0.75"
+                       TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <ui:Card Grid.Row="1" Padding="14">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <ui:ProgressRing Width="52"
+                                 Height="52"
+                                 IsIndeterminate="True"
+                                 VerticalAlignment="Top"/>
+
+                <StackPanel Grid.Column="1" Margin="16,0,0,0">
+                    <TextBlock x:Name="StageTextBlock"
+                               Text="Starting..."
+                               FontSize="14"
+                               FontWeight="SemiBold"/>
+
+                    <TextBlock x:Name="DetailTextBlock"
+                               Text="-"
+                               Margin="0,6,0,0"
+                               Opacity="0.75"
+                               TextWrapping="Wrap"/>
+
+                    <TextBlock x:Name="StatsTextBlock"
+                               Text="-"
+                               Margin="0,10,0,0"
+                               Opacity="0.75"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
+            </Grid>
+        </ui:Card>
+
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,12,0,0">
+            <ui:Button x:Name="CancelButton"
+                       Content="Cancel"
+                       Appearance="Secondary"
+                       Click="CancelButton_OnClick"/>
+        </StackPanel>
+    </Grid>
+</ui:FluentWindow>
+```
+
+### `SpaceMapperRunProgressWindow.xaml.cs`
+
+```csharp
+using System;
+using System.ComponentModel;
+using System.Windows.Threading;
+
+namespace MicroEng.Navisworks
+{
+    public partial class SpaceMapperRunProgressWindow
+    {
+        private readonly SpaceMapperRunProgressState _state;
+        private readonly Action _cancelAction;
+        private readonly DispatcherTimer _timer;
+        private bool _allowClose;
+
+        public SpaceMapperRunProgressWindow(SpaceMapperRunProgressState state, Action cancelAction)
+        {
+            InitializeComponent();
+
+            // Keep consistent with your other pages/windows
+            MicroEngWpfUiTheme.ApplyTo(this);
+
+            _state = state ?? throw new ArgumentNullException(nameof(state));
+            _cancelAction = cancelAction;
+
+            _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+            _timer.Tick += (_, __) => RefreshUi();
+            _timer.Start();
+
+            RefreshUi();
+        }
+
+        public void AllowClose()
+        {
+            _allowClose = true;
+        }
+
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            // Prevent "X" from silently hiding the only progress feedback.
+            // If the user wants to stop, use Cancel.
+            if (!_allowClose && !_state.IsFinished)
+            {
+                e.Cancel = true;
+                TriggerCancel();
+                return;
+            }
+
+            base.OnClosing(e);
+        }
+
+        private void CancelButton_OnClick(object sender, System.Windows.RoutedEventArgs e)
+        {
+            TriggerCancel();
+        }
+
+        private void TriggerCancel()
+        {
+            if (_state.IsFinished)
+                return;
+
+            CancelButton.IsEnabled = false;
+            _state.SetStage(SpaceMapperRunStage.Cancelled, "Cancelling...", "Waiting for the current operation to stop...");
+            _cancelAction?.Invoke();
+        }
+
+        private void RefreshUi()
+        {
+            StageTextBlock.Text = _state.StageText ?? _state.Stage.ToString();
+
+            var detail = _state.DetailText;
+            if (string.IsNullOrWhiteSpace(detail))
+                detail = "-";
+            DetailTextBlock.Text = detail;
+
+            var elapsed = _state.Elapsed;
+            string elapsedText = $"{elapsed:hh\\:mm\\:ss}";
+
+            string zonesLine = _state.ZonesTotal > 0
+                ? $"Zones: {_state.ZonesProcessed}/{_state.ZonesTotal}"
+                : "Zones: -";
+
+            string targetsLine = _state.TargetsTotal > 0
+                ? $"Targets: {_state.TargetsProcessed}/{_state.TargetsTotal}"
+                : "Targets: -";
+
+            string writeLine = _state.WriteTargetsTotal > 0
+                ? $"Writeback: {_state.WriteTargetsProcessed}/{_state.WriteTargetsTotal}"
+                : "Writeback: -";
+
+            StatsTextBlock.Text = $"{zonesLine}   |   {targetsLine}\n{writeLine}   |   Elapsed: {elapsedText}";
+
+            if (_state.IsFinished)
+            {
+                CancelButton.IsEnabled = false;
+                _timer.Stop();
+            }
+        }
+    }
+}
+```
+
+---
+
+## 3) Add: `SpaceMapperRunProgressHost.cs` (shows the window on its own STA dispatcher thread)
+
+```csharp
+using System;
+using System.Threading;
+using System.Windows.Threading;
+
+namespace MicroEng.Navisworks
+{
+    internal sealed class SpaceMapperRunProgressHost : IDisposable
+    {
+        private Thread _thread;
+        private Dispatcher _dispatcher;
+        private SpaceMapperRunProgressWindow _window;
+        private readonly ManualResetEventSlim _ready = new ManualResetEventSlim(false);
+
+        public static SpaceMapperRunProgressHost Show(SpaceMapperRunProgressState state, Action cancelAction)
+        {
+            var host = new SpaceMapperRunProgressHost();
+            host.Start(state, cancelAction);
+            return host;
+        }
+
+        private void Start(SpaceMapperRunProgressState state, Action cancelAction)
+        {
+            _thread = new Thread(() =>
+            {
+                _dispatcher = Dispatcher.CurrentDispatcher;
+
+                _window = new SpaceMapperRunProgressWindow(state, cancelAction)
+                {
+                    Topmost = true,
+                    ShowInTaskbar = false
+                };
+
+                _window.Closed += (_, __) =>
+                {
+                    try { Dispatcher.CurrentDispatcher.BeginInvokeShutdown(DispatcherPriority.Background); }
+                    catch { /* ignore */ }
+                };
+
+                _ready.Set();
+                _window.Show();
+
+                Dispatcher.Run();
+            });
+
+            _thread.IsBackground = true;
+            _thread.SetApartmentState(ApartmentState.STA);
+            _thread.Start();
+
+            _ready.Wait();
+        }
+
+        public void Close()
+        {
+            if (_dispatcher == null)
+                return;
+
+            try
+            {
+                _dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (_window != null)
+                    {
+                        _window.AllowClose();
+                        _window.Close();
+                    }
+                }));
+            }
+            catch
+            {
+                // ignore teardown issues
+            }
+        }
+
+        public void Dispose()
+        {
+            Close();
+        }
+    }
+}
+```
+
+---
+
+## 4) Modify: `SpaceMapperEngines.cs` to support coarse progress counters (fast traversal + zone-major)
+
+Your `CpuIntersectionEngine` already chooses traversal mode and has a zone-major path. Add an **optional** `SpaceMapperRunProgressState runProgress = null` parameter to the engine interface and implementations, and update counters with **very low-frequency** writes (bitmask gating).
+
+### Change interface signature
+
+In `ISpatialIntersectionEngine`:
+
+```diff
+ IList<ZoneTargetIntersection> ComputeIntersections(
+     IReadOnlyList<ZoneGeometry> zones,
+     IReadOnlyList<TargetGeometry> targets,
+     SpaceMapperProcessingSettings settings,
+     SpaceMapperPreflightCache preflightCache,
+     SpaceMapperEngineDiagnostics diagnostics,
+     IProgress<SpaceMapperProgress> progress = null,
+-    CancellationToken cancellationToken = default);
++    CancellationToken cancellationToken = default,
++    SpaceMapperRunProgressState runProgress = null);
+```
+
+Update `CpuIntersectionEngine` and `CudaIntersectionEngine` signatures similarly.
+
+### Zone-major loop update (inside CpuIntersectionEngine zone-major path)
+
+Locate where `processedZones` is incremented (you have `var totalZones = zones.Count; var processedZones = 0;` in the zone-major branch).
+
+After `Interlocked.Increment(ref processedZones)`, add:
+
+```csharp
+var done = Interlocked.Increment(ref processedZones);
+
+// ultra-cheap gating: update every 64 zones + last zone
+if (runProgress != null && (((done & 63) == 0) || done == totalZones))
+{
+    runProgress.SetTotals(totalZones, targets.Count);
+    Interlocked.Exchange(ref runProgress.ZonesProcessed, done);
+}
+```
+
+### Target-major loop update
+
+In `ComputeTargetMajorIntersections(...)` (you already track `processedTargets` and call `progress.Report(...)` every 256 targets). Add:
+
+```csharp
+if (runProgress != null && (((processedTargets & 255) == 0) || processedTargets == targets.Count))
+{
+    runProgress.SetTotals(zones.Count, targets.Count);
+    Interlocked.Exchange(ref runProgress.TargetsProcessed, processedTargets);
+}
+```
+
+Also, when compute starts, you can set:
+
+```csharp
+runProgress?.SetStage(SpaceMapperRunStage.ComputingIntersections, "Computing intersections...", "Classifying targets into zones...");
+```
+
+…but keep stage changes mostly in the service (next section) so they’re consistent.
+
+---
+
+## 5) Modify: `SpaceMapperService.cs` to update stage + writeback progress
+
+Your `Run` already has a cancellation token parameter and calls into writeback logic. Add a **new overload** that accepts `SpaceMapperRunProgressState`, while preserving existing callers (comparison runner, etc.).
+
+### Add overload + internal helper
+
+```csharp
+public SpaceMapperRunResult RunWithProgress(
+    SpaceMapperRequest request,
+    SpaceMapperPreflightCache preflightCache,
+    SpaceMapperRunProgressState runProgress,
+    CancellationToken cancellationToken = default)
+{
+    return RunInternal(request, preflightCache, cancellationToken, runProgress);
+}
+
+public SpaceMapperRunResult Run(
+    SpaceMapperRequest request,
+    SpaceMapperPreflightCache preflightCache = null,
+    CancellationToken cancellationToken = default)
+{
+    return RunInternal(request, preflightCache, cancellationToken, null);
+}
+
+private SpaceMapperRunResult RunInternal(
+    SpaceMapperRequest request,
+    SpaceMapperPreflightCache preflightCache,
+    CancellationToken cancellationToken,
+    SpaceMapperRunProgressState runProgress)
+{
+    runProgress?.Start();
+    runProgress?.SetStage(SpaceMapperRunStage.ResolvingInputs, "Resolving zones and targets...");
+
+    // Keep your existing logic, but sprinkle stage updates:
+    // - after resolve models: runProgress.SetTotals(zoneCount, targetCount)
+    // - before BuildGeometryData: ExtractingGeometry
+    // - before engine.ComputeIntersections: ComputingIntersections
+    // - before assignment resolution: ResolvingAssignments
+    // - before ExecuteWriteback: WritingProperties
+    // - end: Completed
+    // - catch: Cancelled/Failed
+    ...
+}
+```
+
+### Writeback progress inside ExecuteWriteback
+
+Your `ExecuteWriteback(...)` loops and writes per target/group. Add an optional `SpaceMapperRunProgressState runProgress` parameter and:
+
+* Set total once: `runProgress.SetWriteTotals(writeTargetsTotal)`
+* Increment after each target write attempt: `Interlocked.Increment(ref runProgress.WriteTargetsProcessed)`
+* Add occasional cancellation checks: `cancellationToken.ThrowIfCancellationRequested()` in loops (this won’t slow you down meaningfully versus COM writes).
+
+---
+
+## 6) Modify: `SpaceMapperControl.xaml.cs` to show the popup window and then navigate to results
+
+Your current `RunSpaceMapper()` is synchronous and navigates to results when done. Add:
+
+* `CancellationTokenSource _runCts;`
+* create `SpaceMapperRunProgressState`
+* show progress host before calling service
+* call `service.RunWithProgress(...)`
+* close progress window in `finally`
+* keep your existing results navigation (already correct)
+
+### Patch outline
+
+Inside `RunSpaceMapper()`:
+
+```csharp
+private CancellationTokenSource _runCts;
+
+private void RunSpaceMapper()
+{
+    SpaceMapperRunResult result = null;
+    DockPaneVisibilitySnapshot paneSnapshot = null;
+
+    var runProgress = new SpaceMapperRunProgressState();
+    _runCts?.Cancel();
+    _runCts?.Dispose();
+    _runCts = new CancellationTokenSource();
+
+    using var progressHost = SpaceMapperRunProgressHost.Show(
+        runProgress,
+        cancelAction: () => _runCts.Cancel());
+
+    try
+    {
+        // your existing close-pane logic (if enabled)
+        if (ResolveClosePanesDuringBenchmark())
+        {
+            paneSnapshot = NavisworksDockPaneManager.HideDockPanes(restoreLater: true);
+        }
+
+        runProgress.SetStage(SpaceMapperRunStage.ResolvingInputs, "Resolving inputs...");
+
+        var request = BuildRequest();
+        if (request == null)
+        {
+            runProgress.MarkCancelled();
+            return;
+        }
+
+        // Decide preflight cache reuse exactly as you already do
+        var cache = ResolveOptionalPreflightCacheForRun();
+
+        var service = new SpaceMapperService(MicroEngActions.Log);
+        runProgress.SetStage(SpaceMapperRunStage.ExtractingGeometry, "Preparing geometry...");
+
+        // New overload (with progress)
+        result = service.RunWithProgress(request, cache, runProgress, _runCts.Token);
+
+        runProgress.MarkCompleted();
+
+        // IMPORTANT: close progress window BEFORE navigation
+        progressHost.Close();
+
+        ShowResults(result);
+        SpaceMapperNav.Navigate(typeof(SpaceMapperStepResultsPage));
+    }
+    catch (OperationCanceledException)
+    {
+        runProgress.MarkCancelled();
+        PromptText("Run cancelled.");
+    }
+    catch (Exception ex)
+    {
+        runProgress.MarkFailed(ex);
+        PromptText($"Run failed: {ex.Message}");
+    }
+    finally
+    {
+        paneSnapshot?.Restore();
+    }
+}
+```
+
+(You’ll wire `ResolveOptionalPreflightCacheForRun()` by reusing your existing `Reuse preflight for run` logic in the method you already have.)
+
+---
+
+# Codex-ready prompt (paste into GPT-5.1-Codex-Max)
+
+```text
+You are working in a Navisworks Manage plugin (WPF hosted in ElementHost) project.
+Implement a new WPF UI progress popup shown when the user clicks “Run Space Mapper”.
+
+Goal:
+- When Run starts, show a new WPF window with Wpf.Ui ProgressRing (indeterminate) + title + live status text.
+- The progress window must stay responsive even though RunSpaceMapper() currently runs synchronously on the Navisworks UI thread.
+- Do NOT slow the algorithm down: no per-candidate UI updates. Use a shared progress state + polling timer in the progress window.
+- On successful completion, close the progress window and automatically navigate the user to the Results page (SpaceMapperStepResultsPage).
+
+Constraints / integration:
+- RunSpaceMapper() is in SpaceMapperControl.xaml.cs and currently calls SpaceMapperService.Run(...) and then navigates to results.
+- SpaceMapperService.Run already accepts CancellationToken and calls engine.ComputeIntersections(...).
+- CpuIntersectionEngine supports ZoneMajor and TargetMajor traversal and already tracks processedZones/processedTargets.
+- There is a CudaIntersectionEngine stub that must keep compiling.
+
+Tasks:
+1) Add a new internal progress model:
+   - File: SpaceMapperRunProgressState.cs
+   - Namespace: MicroEng.Navisworks
+   - Includes enum SpaceMapperRunStage and class SpaceMapperRunProgressState:
+     * volatile Stage/StageText/DetailText
+     * totals: ZonesTotal, TargetsTotal, WriteTargetsTotal
+     * counters: ZonesProcessed, TargetsProcessed, WriteTargetsProcessed (update via Interlocked)
+     * Stopwatch for elapsed
+     * terminal flags and MarkCompleted/MarkCancelled/MarkFailed methods.
+
+2) Add WPF UI progress window:
+   - Files: SpaceMapperRunProgressWindow.xaml and SpaceMapperRunProgressWindow.xaml.cs
+   - Base window: ui:FluentWindow
+   - UI: Title “Running Space Mapper”, ProgressRing IsIndeterminate=True, Stage text, Detail text, Stats text, Cancel button.
+   - Code-behind:
+     * Apply MicroEngWpfUiTheme.ApplyTo(this);
+     * Poll SpaceMapperRunProgressState every 250ms via DispatcherTimer and update labels.
+     * Cancel button triggers provided Action cancelAction; disables itself; updates state to “Cancelling…”.
+     * Block user closing via “X” while not finished (unless AllowClose() is called).
+
+3) Add helper host that shows the progress window on its own STA dispatcher thread:
+   - File: SpaceMapperRunProgressHost.cs
+   - Namespace: MicroEng.Navisworks
+   - Public API: static SpaceMapperRunProgressHost Show(SpaceMapperRunProgressState state, Action cancelAction)
+   - Internals: create STA thread, create window, show, Dispatcher.Run, close by dispatcher BeginInvoke; call window.AllowClose() before Close().
+
+4) Extend engine signatures to allow coarse progress updates without heavy IProgress:
+   - In SpaceMapperEngines.cs:
+     * Update ISpatialIntersectionEngine.ComputeIntersections signature to add optional param:
+       SpaceMapperRunProgressState runProgress = null
+     * Update CpuIntersectionEngine and CudaIntersectionEngine signatures accordingly.
+   - In CpuIntersectionEngine:
+     * On ZoneMajor traversal: after Interlocked.Increment(processedZones), update runProgress totals once and
+       Interlocked.Exchange(runProgress.ZonesProcessed, done) every 64 zones (bitmask gating) and on final zone.
+     * On TargetMajor traversal: similarly update runProgress.TargetsProcessed every 256 targets and final.
+     * Keep cancellationToken behavior intact.
+
+5) Extend SpaceMapperService with a non-breaking overload:
+   - Add RunWithProgress(request, preflightCache, runProgress, token) which calls a shared private RunInternal(..., runProgress).
+   - Keep existing Run(request, preflightCache = null, token = default) calling RunInternal with runProgress = null.
+   - Inside RunInternal:
+     * runProgress.Start()
+     * stage transitions: ResolvingInputs -> ExtractingGeometry -> BuildingIndex -> ComputingIntersections -> ResolvingAssignments -> WritingProperties -> Finalizing -> Completed
+     * set totals after resolving zone/target models
+     * pass runProgress to engine.ComputeIntersections(..., cancellationToken, runProgress)
+   - During writeback (ExecuteWriteback): accept optional runProgress and update:
+     * runProgress.SetWriteTotals(totalTargetsToWrite)
+     * Interlocked.Increment(runProgress.WriteTargetsProcessed) per target group processed
+     * add cancellationToken.ThrowIfCancellationRequested() in loops.
+
+6) Update SpaceMapperControl.xaml.cs RunSpaceMapper():
+   - Create CancellationTokenSource _runCts field (cancel previous run if any).
+   - Create new SpaceMapperRunProgressState and show progress window using SpaceMapperRunProgressHost.Show(state, () => _runCts.Cancel()) before starting Run.
+   - Call SpaceMapperService.RunWithProgress(...) instead of Run(...) so stage/counters flow.
+   - Close the progress window before navigating to results.
+   - On success: ShowResults(result); SpaceMapperNav.Navigate(typeof(SpaceMapperStepResultsPage));
+   - On cancellation: mark cancelled and keep user on the same step (do not navigate).
+   - Always restore dock panes snapshot in finally if you hid them.
+
+Deliverables:
+- Add the 3 new files + update existing SpaceMapperEngines.cs, SpaceMapperService.cs, SpaceMapperControl.xaml.cs.
+- Ensure build passes and no namespace mismatches.
+- Do not introduce heavy UI dispatch from the compute loops; only Interlocked updates + UI polling.
+```
+
+---
+
+If you want, the next refinement (still “no slowdown”) is to add one more line in the progress window: **“Current stage ETA: unknown / elapsed only”** (ETA is hard without a stable denominator), but what you’ll have above is already the highest signal per unit of overhead.

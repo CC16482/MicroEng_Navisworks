@@ -663,6 +663,7 @@
                   <ComboBoxItem Content="Sample points (fast)" />
                   <ComboBoxItem Content="Sample points (dense)" />
                   <ComboBoxItem Content="Target geometry samples" />
+                  <ComboBoxItem Content="Target geometry samples (GPU)" />
                   <ComboBoxItem Content="Bounds overlap (AABB)" />
                 </ComboBox>
                 <Button x:Name="ContainmentCalculationHelpToggle"
@@ -674,7 +675,7 @@
                 <ui:Flyout x:Name="ContainmentCalculationHelpFlyout" Placement="Top">
                   <TextBlock Width="320"
                              TextWrapping="Wrap"
-                             Text="Controls how containment % and Zone Behaviour are computed. Auto uses mesh sampling for Mesh Accurate and AABB overlap for bounds. Target geometry samples triangles and is slower." />
+                             Text="Controls how containment % and Zone Behaviour are computed. Auto uses mesh sampling for Mesh Accurate and AABB overlap for bounds. Target geometry samples triangles and is slower; GPU uses those samples when available." />
                 </ui:Flyout>
               </StackPanel>
             </StackPanel>
@@ -727,6 +728,25 @@
               <TextBlock Width="280"
                          TextWrapping="Wrap"
                          Text="Temporarily closes Selection Tree, Find Items, Properties, and add-in panes to reduce writeback overhead, then restores them." />
+            </ui:Flyout>
+          </StackPanel>
+
+          <StackPanel x:Name="DockPaneDelayRowControl"
+                      Orientation="Horizontal"
+                      Margin="16,4,0,0"
+                      Visibility="Collapsed">
+            <TextBlock Text="Close pane delay (sec):" Width="170" VerticalAlignment="Center" />
+            <TextBox x:Name="DockPaneDelayBoxControl" Width="80" Text="2" Margin="6,0,0,0" />
+            <Button x:Name="DockPaneDelayHelpToggle"
+                    Style="{StaticResource HelpFlyoutButtonStyle}"
+                    Margin="6,0,0,0"
+                    VerticalAlignment="Center">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+            <ui:Flyout x:Name="DockPaneDelayHelpFlyout" Placement="Top">
+              <TextBlock Width="280"
+                         TextWrapping="Wrap"
+                         Text="Wait time after closing panes before the run starts. Increase if panels take longer to collapse." />
             </ui:Flyout>
           </StackPanel>
         </StackPanel>

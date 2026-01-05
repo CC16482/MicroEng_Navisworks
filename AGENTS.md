@@ -1,7 +1,8 @@
 # Space Mapper Handoff
 
 ## Status
-- Last build: `dotnet build /p:DeployToProgramData=false` (succeeded)
+- Last build: `dotnet build` hit deploy retry warnings because Navisworks locks `MicroEng.Navisworks.dll` in ProgramData.
+- Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false`.
 - Working tree includes build outputs and generated files.
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
 
@@ -17,7 +18,9 @@
   - Skip unchanged targets via per-target signature.
   - Pack outputs into a single property to reduce COM writes.
 - Close Navisworks panes during run (restore after): Selection Tree, Find Items, Properties, plus add-in dock panes.
+- Close-pane delay is now user-configurable (sec). Progress window opens after panes close + delay, so UI can settle before run starts.
 - Geometry planes: only create triangle planes when vertices.Count % 3 == 0 (prevents bogus planes from bbox vertices).
+- New containment option: "Target geometry samples (GPU)" computes containment fraction using target mesh samples on GPU when available.
 - GPU batching: D3D11 multi-zone dispatch + adaptive thresholds and pack thresholds; default max batch points = 200k.
 - CUDA: brute-force batching (TestPointsBatched) + native update; optional CUDA BVH backend with per-batch scene build.
 - GPU backend selection: CUDA BVH -> D3D11 batched -> CUDA brute -> CPU fallback.
@@ -51,6 +54,8 @@
 - Skip unchanged: repeat runs reduce writes and increment SkippedUnchanged in stats/report.
 - Pack outputs: writes a single packed property instead of per-mapping properties.
 - Close panes: Selection Tree, Find Items, and Properties close during run and restore after.
+- Close pane delay: with Close panes on and delay=6, progress window appears only after the delay; live/run report shows "Close pane delay (sec)".
+- Target geometry samples (GPU): option appears in containment calculation dropdown and report shows mode=TargetGeometryGpu.
 - Run report includes "GPU Zone Eligibility" table with per-zone skip reason and thresholds.
 - GPU backend shows "CUDA BVH" when the BVH DLL is present; otherwise "D3D11 batched" fallback.
 - Variation check report includes "Normal / Zone-major (CPU)" baseline and "Normal / Zone-major (GPU)" comparison.

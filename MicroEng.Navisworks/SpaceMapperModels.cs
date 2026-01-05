@@ -90,7 +90,8 @@ namespace MicroEng.Navisworks
         SamplePoints = 1,
         SamplePointsDense = 2,
         TargetGeometry = 3,
-        BoundsOverlap = 4
+        BoundsOverlap = 4,
+        TargetGeometryGpu = 5
     }
 
     public enum SpaceMapperFastTraversalMode
@@ -268,6 +269,9 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 36)]
         public int GpuRayCount { get; set; } = 2;
+
+        [DataMember(Order = 37)]
+        public double DockPaneCloseDelaySeconds { get; set; } = 2;
     }
 
     [DataContract]

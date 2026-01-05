@@ -77,6 +77,8 @@ namespace MicroEng.Navisworks
                 computeContainmentFraction = false;
                 needsFraction = false;
             }
+            var useGpuTargetGeometryFraction = needsFraction
+                && containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu;
             var usePointIndex = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
             var treatPartialAsContained = settings != null && settings.TreatPartialAsContained;
             if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
@@ -153,7 +155,9 @@ namespace MicroEng.Navisworks
             }
 
             IReadOnlyList<Vector3D>[] targetSamplePoints = null;
-            if (needsFraction && containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry)
+            if (needsFraction
+                && (containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
+                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu))
             {
                 targetSamplePoints = BuildTargetGeometrySamples(targets);
                 if (targetSamplePoints == null || targetSamplePoints.Length != targetBounds.Length)
@@ -654,7 +658,9 @@ namespace MicroEng.Navisworks
             }
 
             IReadOnlyList<Vector3D>[] targetSamplePoints = null;
-            if (needsFraction && containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry)
+            if (needsFraction
+                && (containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
+                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu))
             {
                 targetSamplePoints = BuildTargetGeometrySamples(targets);
                 if (targetSamplePoints == null || targetSamplePoints.Length != targetBounds.Length)
@@ -1650,6 +1656,7 @@ namespace MicroEng.Navisworks
                         diagnostics,
                         SamplePointsDense);
                 case SpaceMapperContainmentCalculationMode.TargetGeometry:
+                case SpaceMapperContainmentCalculationMode.TargetGeometryGpu:
                 {
                     var fraction = ComputeSampleFractionFromPoints(
                         zone,
@@ -1875,6 +1882,7 @@ namespace MicroEng.Navisworks
         private const int DefaultMaxBatchPoints = 200000;
         private const int DefaultMaxBatchTriangles = 250000;
         private const int CudaBvhLeafSize = 8;
+        private const int TargetGeometrySampleLimit = 200;
         private const int OpenMeshBoundaryEdgeLimit = 32;
         private const int OpenMeshNonManifoldEdgeLimit = 8;
         private const int OpenMeshOutsideSampleTolerance = 1;
@@ -2020,6 +2028,8 @@ namespace MicroEng.Navisworks
                 computeContainmentFraction = false;
                 needsFraction = false;
             }
+            var useGpuTargetGeometryFraction = needsFraction
+                && containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu;
             var usePointIndex = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
             var treatPartialAsContained = settings != null && settings.TreatPartialAsContained;
             if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
@@ -2071,7 +2081,9 @@ namespace MicroEng.Navisworks
             }
 
             IReadOnlyList<Vector3D>[] targetSamplePoints = null;
-            if (needsFraction && containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry)
+            if (needsFraction
+                && (containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
+                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu))
             {
                 targetSamplePoints = CpuIntersectionEngine.BuildTargetGeometrySamples(targets);
                 if (targetSamplePoints == null || targetSamplePoints.Length != targetBounds.Length)
@@ -2249,11 +2261,54 @@ namespace MicroEng.Navisworks
                 }
 
                 var estimatedPoints = candidates.Count * sampleCountPerTarget;
-                var pointsLocal = new Float4[estimatedPoints];
-                var pointsWorld = new Vector3D[estimatedPoints];
+                if (useGpuTargetGeometryFraction)
+                {
+                    estimatedPoints += candidates.Count * TargetGeometrySampleLimit;
+                }
+
                 var targetStart = new int[candidates.Count];
                 var targetCount = new int[candidates.Count];
+                int[] targetFractionStart = null;
+                int[] targetFractionCount = null;
+                List<Float4> pointsLocalList = null;
+                List<Vector3D> pointsWorldList = null;
+                Float4[] pointsLocal = null;
+                Vector3D[] pointsWorld = null;
                 var cursor = 0;
+
+                if (useGpuTargetGeometryFraction)
+                {
+                    targetFractionStart = new int[candidates.Count];
+                    targetFractionCount = new int[candidates.Count];
+                    pointsLocalList = new List<Float4>(estimatedPoints);
+                    pointsWorldList = new List<Vector3D>(estimatedPoints);
+                }
+                else
+                {
+                    pointsLocal = new Float4[estimatedPoints];
+                    pointsWorld = new Vector3D[estimatedPoints];
+                }
+
+                void AddPoint(Vector3D worldPoint, Vector3D gpuPoint)
+                {
+                    if (useGpuTargetGeometryFraction)
+                    {
+                        pointsWorldList.Add(worldPoint);
+                        pointsLocalList.Add(new Float4(
+                            (float)(gpuPoint.X - originX),
+                            (float)(gpuPoint.Y - originY),
+                            (float)(gpuPoint.Z - originZ)));
+                    }
+                    else
+                    {
+                        pointsWorld[cursor] = worldPoint;
+                        pointsLocal[cursor] = new Float4(
+                            (float)(gpuPoint.X - originX),
+                            (float)(gpuPoint.Y - originY),
+                            (float)(gpuPoint.Z - originZ));
+                    }
+                    cursor++;
+                }
 
                 for (int ci = 0; ci < candidates.Count; ci++)
                 {
@@ -2267,16 +2322,11 @@ namespace MicroEng.Navisworks
                         var cy = (bounds.MinY + bounds.MaxY) * 0.5;
                         var cz = (bounds.MinZ + bounds.MaxZ) * 0.5;
                         var worldPoint = new Vector3D(cx, cy, cz);
-                        pointsWorld[cursor] = worldPoint;
                         var gpuPoint = useOpenMeshRetry
                             ? ApplyPointNudge(worldPoint, openMeshNudge, BuildNudgeSeed(zoneIndex, targetIndex, 0))
                             : worldPoint;
-                        pointsLocal[cursor] = new Float4(
-                            (float)(gpuPoint.X - originX),
-                            (float)(gpuPoint.Y - originY),
-                            (float)(gpuPoint.Z - originZ));
+                        AddPoint(worldPoint, gpuPoint);
                         targetCount[ci] = 1;
-                        cursor++;
                     }
                     else
                     {
@@ -2285,15 +2335,34 @@ namespace MicroEng.Navisworks
                         for (int si = 0; si < samples.Count; si++)
                         {
                             var p = samples[si];
-                            pointsWorld[cursor] = p;
                             var gpuPoint = useOpenMeshRetry
                                 ? ApplyPointNudge(p, openMeshNudge, BuildNudgeSeed(zoneIndex, targetIndex, si))
                                 : p;
-                            pointsLocal[cursor] = new Float4(
-                                (float)(gpuPoint.X - originX),
-                                (float)(gpuPoint.Y - originY),
-                                (float)(gpuPoint.Z - originZ));
-                            cursor++;
+                            AddPoint(p, gpuPoint);
+                        }
+                    }
+
+                    if (useGpuTargetGeometryFraction)
+                    {
+                        var geometrySamples = targetSamplePoints?[targetIndex];
+                        if (geometrySamples != null && geometrySamples.Count > 0)
+                        {
+                            targetFractionStart[ci] = cursor;
+                            targetFractionCount[ci] = geometrySamples.Count;
+                            for (int si = 0; si < geometrySamples.Count; si++)
+                            {
+                                var p = geometrySamples[si];
+                                var seed = BuildNudgeSeed(zoneIndex, targetIndex, targetCount[ci] + si);
+                                var gpuPoint = useOpenMeshRetry
+                                    ? ApplyPointNudge(p, openMeshNudge, seed)
+                                    : p;
+                                AddPoint(p, gpuPoint);
+                            }
+                        }
+                        else
+                        {
+                            targetFractionStart[ci] = targetStart[ci];
+                            targetFractionCount[ci] = targetCount[ci];
                         }
                     }
                 }
@@ -2304,7 +2373,12 @@ namespace MicroEng.Navisworks
                     return;
                 }
 
-                if (trimPoints != pointsLocal.Length)
+                if (useGpuTargetGeometryFraction)
+                {
+                    pointsLocal = pointsLocalList.ToArray();
+                    pointsWorld = pointsWorldList.ToArray();
+                }
+                else if (trimPoints != pointsLocal.Length)
                 {
                     Array.Resize(ref pointsLocal, trimPoints);
                     Array.Resize(ref pointsWorld, trimPoints);
@@ -2403,6 +2477,48 @@ namespace MicroEng.Navisworks
                         if (fraction < 0) fraction = 0;
                         else if (fraction > 1) fraction = 1;
                     }
+                    else if (useGpuTargetGeometryFraction)
+                    {
+                        var fractionStart = targetFractionStart?[ci] ?? start;
+                        var fractionCount = targetFractionCount?[ci] ?? count;
+                        if (fractionCount > 0)
+                        {
+                            var insideFraction = insideCount;
+                            if (fractionStart != start || fractionCount != count)
+                            {
+                                insideFraction = 0;
+                                for (int si = 0; si < fractionCount; si++)
+                                {
+                                    var idx = fractionStart + si;
+                                    var flag = insideFlags[idx];
+                                    if (flag == D3D11PointInMeshGpu.Uncertain)
+                                    {
+                                        gpuUncertainPoints++;
+                                        var p = pointsWorld[idx];
+                                        var inside = CpuIntersectionEngine.ZoneContainsPoint(
+                                            zone,
+                                            zoneBoundsLocal,
+                                            zoneBoundsMode,
+                                            containmentEngine,
+                                            diagnostics,
+                                            p.X,
+                                            p.Y,
+                                            p.Z);
+                                        flag = inside ? D3D11PointInMeshGpu.Inside : D3D11PointInMeshGpu.Outside;
+                                    }
+
+                                    if (flag == D3D11PointInMeshGpu.Inside)
+                                    {
+                                        insideFraction++;
+                                    }
+                                }
+                            }
+
+                            fraction = insideFraction / (double)fractionCount;
+                            if (fraction < 0) fraction = 0;
+                            else if (fraction > 1) fraction = 1;
+                        }
+                    }
 
                     var hit = new ZoneTargetIntersection
                     {
@@ -2416,15 +2532,22 @@ namespace MicroEng.Navisworks
 
                     if (needsFraction && containmentCalculationMode != SpaceMapperContainmentCalculationMode.Auto)
                     {
-                        hit.ContainmentFraction = CpuIntersectionEngine.ComputeContainmentFraction(
-                            zone,
-                            zoneBoundsLocal,
-                            targetBounds[targetIndex],
-                            zoneBoundsMode,
-                            containmentEngine,
-                            containmentCalculationMode,
-                            targetSamplePoints?[targetIndex],
-                            diagnostics);
+                        if (useGpuTargetGeometryFraction)
+                        {
+                            hit.ContainmentFraction = fraction;
+                        }
+                        else
+                        {
+                            hit.ContainmentFraction = CpuIntersectionEngine.ComputeContainmentFraction(
+                                zone,
+                                zoneBoundsLocal,
+                                targetBounds[targetIndex],
+                                zoneBoundsMode,
+                                containmentEngine,
+                                containmentCalculationMode,
+                                targetSamplePoints?[targetIndex],
+                                diagnostics);
+                        }
                     }
 
                     AddHit(results, bestHits, hit, targetBounds[targetIndex], targetIndex, zoneIndex, zoneVolumes, zoneCenterX, zoneCenterY, zoneCenterZ, resolutionStrategy);
@@ -2595,6 +2718,48 @@ namespace MicroEng.Navisworks
                             if (fraction < 0) fraction = 0;
                             else if (fraction > 1) fraction = 1;
                         }
+                        else if (useGpuTargetGeometryFraction)
+                        {
+                            var fractionStart = job.TargetFractionStartAbs?[ci] ?? start;
+                            var fractionCount = job.TargetFractionCount?[ci] ?? count;
+                            if (fractionCount > 0)
+                            {
+                                var insideFraction = insideCount;
+                                if (fractionStart != start || fractionCount != count)
+                                {
+                                    insideFraction = 0;
+                                    for (int si = 0; si < fractionCount; si++)
+                                    {
+                                        var idx = fractionStart + si;
+                                        var flag = insideFlags[idx];
+                                        if (flag == D3D11PointInMeshGpu.Uncertain)
+                                        {
+                                            gpuUncertainPoints++;
+                                            var p = batchPointsWorld[idx];
+                                            var inside = CpuIntersectionEngine.ZoneContainsPoint(
+                                                zone,
+                                                zoneBoundsLocal,
+                                                zoneBoundsMode,
+                                                containmentEngine,
+                                                diagnostics,
+                                                p.X,
+                                                p.Y,
+                                                p.Z);
+                                            flag = inside ? D3D11PointInMeshGpu.Inside : D3D11PointInMeshGpu.Outside;
+                                        }
+
+                                        if (flag == D3D11PointInMeshGpu.Inside)
+                                        {
+                                            insideFraction++;
+                                        }
+                                    }
+                                }
+
+                                fraction = insideFraction / (double)fractionCount;
+                                if (fraction < 0) fraction = 0;
+                                else if (fraction > 1) fraction = 1;
+                            }
+                        }
 
                         var hit = new ZoneTargetIntersection
                         {
@@ -2608,15 +2773,22 @@ namespace MicroEng.Navisworks
 
                         if (needsFraction && containmentCalculationMode != SpaceMapperContainmentCalculationMode.Auto)
                         {
-                            hit.ContainmentFraction = CpuIntersectionEngine.ComputeContainmentFraction(
-                                zone,
-                                zoneBoundsLocal,
-                                targetBounds[targetIndex],
-                                zoneBoundsMode,
-                                containmentEngine,
-                                containmentCalculationMode,
-                                targetSamplePoints?[targetIndex],
-                                diagnostics);
+                            if (useGpuTargetGeometryFraction)
+                            {
+                                hit.ContainmentFraction = fraction;
+                            }
+                            else
+                            {
+                                hit.ContainmentFraction = CpuIntersectionEngine.ComputeContainmentFraction(
+                                    zone,
+                                    zoneBoundsLocal,
+                                    targetBounds[targetIndex],
+                                    zoneBoundsMode,
+                                    containmentEngine,
+                                    containmentCalculationMode,
+                                    targetSamplePoints?[targetIndex],
+                                    diagnostics);
+                            }
                         }
 
                         AddHit(results, bestHits, hit, targetBounds[targetIndex], targetIndex, job.ZoneIndex, zoneVolumes, zoneCenterX, zoneCenterY, zoneCenterZ, resolutionStrategy);
@@ -2863,7 +3035,15 @@ namespace MicroEng.Navisworks
                         var candidateTargets = candidates.ToArray();
                         var targetStartAbs = new int[candidateTargets.Length];
                         var targetCount = new int[candidateTargets.Length];
+                        int[] targetFractionStartAbs = null;
+                        int[] targetFractionCount = null;
                         var pointsAdded = 0;
+
+                        if (useGpuTargetGeometryFraction)
+                        {
+                            targetFractionStartAbs = new int[candidateTargets.Length];
+                            targetFractionCount = new int[candidateTargets.Length];
+                        }
 
                         for (int ci = 0; ci < candidateTargets.Length; ci++)
                         {
@@ -2908,6 +3088,36 @@ namespace MicroEng.Navisworks
                                     pointsAdded++;
                                 }
                             }
+
+                            if (useGpuTargetGeometryFraction)
+                            {
+                                var geometrySamples = targetSamplePoints?[targetIndex];
+                                if (geometrySamples != null && geometrySamples.Count > 0)
+                                {
+                                    targetFractionStartAbs[ci] = batchPointsLocal.Count;
+                                    targetFractionCount[ci] = geometrySamples.Count;
+                                    for (int si = 0; si < geometrySamples.Count; si++)
+                                    {
+                                        var p = geometrySamples[si];
+                                        var seed = BuildNudgeSeed(zoneIndex, targetIndex, targetCount[ci] + si);
+                                        var gpuPoint = useOpenMeshRetry
+                                            ? ApplyPointNudge(p, openMeshNudge, seed)
+                                            : p;
+                                        batchPointsWorld.Add(p);
+                                        batchPointsLocal.Add(new Float4(
+                                            (float)(gpuPoint.X - originX),
+                                            (float)(gpuPoint.Y - originY),
+                                            (float)(gpuPoint.Z - originZ)));
+                                        batchPointZoneIds.Add((uint)zoneBatchId);
+                                        pointsAdded++;
+                                    }
+                                }
+                                else
+                                {
+                                    targetFractionStartAbs[ci] = targetStartAbs[ci];
+                                    targetFractionCount[ci] = targetCount[ci];
+                                }
+                            }
                         }
 
                         if (pointsAdded > 0)
@@ -2920,6 +3130,8 @@ namespace MicroEng.Navisworks
                                 CandidateTargets = candidateTargets,
                                 TargetStartAbs = targetStartAbs,
                                 TargetCount = targetCount,
+                                TargetFractionStartAbs = targetFractionStartAbs,
+                                TargetFractionCount = targetFractionCount,
                                 UseOpenMeshRetry = useOpenMeshRetry,
                                 OpenMeshNudge = openMeshNudge,
                                 Intensive = intensiveForZone,
@@ -3330,6 +3542,8 @@ namespace MicroEng.Navisworks
             public int[] CandidateTargets;
             public int[] TargetStartAbs;
             public int[] TargetCount;
+            public int[] TargetFractionStartAbs;
+            public int[] TargetFractionCount;
             public bool UseOpenMeshRetry;
             public double OpenMeshNudge;
             public bool Intensive;

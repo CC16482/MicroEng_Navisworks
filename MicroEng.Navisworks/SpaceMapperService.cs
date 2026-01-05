@@ -335,6 +335,10 @@ namespace MicroEng.Navisworks
                 stats.WritebackStrategy = writeback.StrategyUsed;
                 stats.WriteBackTime = writeback.Elapsed;
                 stats.ZoneSummaries = writeback.ZoneSummaries;
+                if (writeback.StrategyUsed == SpaceMapperWritebackStrategy.LegacyPerMapping)
+                {
+                    _log?.Invoke("SpaceMapper warning: Legacy per-mapping writeback enabled (slower).");
+                }
 
                 result.Stats = stats;
                 sw.Stop();
@@ -1288,7 +1292,8 @@ namespace MicroEng.Navisworks
             var zonesMeshFallback = 0;
             var meshExtractionErrors = 0;
             var requireTargetTriangles = settings != null
-                && settings.ContainmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
+                && (settings.ContainmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
+                    || settings.ContainmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu)
                 && (settings.WriteZoneContainmentPercentProperty || settings.WriteZoneBehaviorProperty);
             var zoneTotal = resolved.ZoneModels.Count;
             var targetTotal = resolved.TargetModels.Count;

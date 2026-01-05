@@ -52,6 +52,7 @@ namespace MicroEng.Navisworks
             WireHover(WriteContainmentPercentHelpToggle, WriteContainmentPercentHelpFlyout);
             WireHover(ContainmentCalculationHelpToggle, ContainmentCalculationHelpFlyout);
             WireHover(CloseDockPanesHelpToggle, CloseDockPanesHelpFlyout);
+            WireHover(DockPaneDelayHelpToggle, DockPaneDelayHelpFlyout);
             WireHover(GpuRayAccuracyHelpToggle, GpuRayAccuracyHelpFlyout);
             HookUiStateUpdates();
             Loaded += (_, __) => UpdateProcessingUiState();
@@ -108,6 +109,12 @@ namespace MicroEng.Navisworks
                 WriteContainmentPercentCheckControl.Checked += (_, __) => UpdateProcessingUiState();
                 WriteContainmentPercentCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
             }
+
+            if (CloseDockPanesCheckControl != null)
+            {
+                CloseDockPanesCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                CloseDockPanesCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
         }
 
         private static void WireHover(FrameworkElement trigger, WpfFlyout flyout)
@@ -158,6 +165,8 @@ namespace MicroEng.Navisworks
         internal ComboBox ContainmentCalculationCombo => ContainmentCalculationComboControl;
         internal FrameworkElement ContainmentCalculationPanel => ContainmentCalculationPanelControl;
         internal CheckBox CloseDockPanesCheck => CloseDockPanesCheckControl;
+        internal TextBox DockPaneDelayBox => DockPaneDelayBoxControl;
+        internal FrameworkElement DockPaneDelayRow => DockPaneDelayRowControl;
         internal Button VariationCheckButton => VariationCheckButtonControl;
         internal ComboBox GpuRayAccuracyCombo => GpuRayAccuracyComboControl;
 
@@ -222,6 +231,13 @@ namespace MicroEng.Navisworks
                 {
                     WriteContainmentPercentCheckControl.IsEnabled = true;
                 }
+            }
+
+            if (DockPaneDelayRowControl != null)
+            {
+                DockPaneDelayRowControl.Visibility = CloseDockPanesCheckControl?.IsChecked == true
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
             }
 
             if (MeshAccurateNoteTextControl != null)

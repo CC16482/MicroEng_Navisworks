@@ -241,10 +241,15 @@ namespace MicroEng.Navisworks
             sb.AppendLine($"- Max threads: {settings.MaxThreads}");
             sb.AppendLine($"- Batch size: {settings.BatchSize}");
             sb.AppendLine($"- Writeback strategy: {settings.WritebackStrategy}");
+            if (settings.WritebackStrategy == SpaceMapperWritebackStrategy.LegacyPerMapping)
+            {
+                sb.AppendLine("- WARNING: Legacy per-mapping writeback enabled (slower).");
+            }
             sb.AppendLine($"- Show internal properties during writeback: {settings.ShowInternalPropertiesDuringWriteback}");
             sb.AppendLine($"- Skip unchanged writeback: {settings.SkipUnchangedWriteback}");
             sb.AppendLine($"- Pack writeback outputs: {settings.PackWritebackProperties}");
             sb.AppendLine($"- Close dock panes during run: {settings.CloseDockPanesDuringRun}");
+            sb.AppendLine($"- Close pane delay (sec): {settings.DockPaneCloseDelaySeconds.ToString("0.##", CultureInfo.InvariantCulture)}");
             sb.AppendLine($"- Zones with mesh: {stats.ZonesWithMesh}");
             var meshClosureWarnings = dataset?.Zones?
                 .Where(z => z.HasTriangleMesh && !z.MeshIsClosed)
@@ -483,10 +488,15 @@ namespace MicroEng.Navisworks
             sb.AppendLine($"- Max threads: {settings.MaxThreads}");
             sb.AppendLine($"- Batch size: {settings.BatchSize}");
             sb.AppendLine($"- Writeback strategy: {settings.WritebackStrategy}");
+            if (settings.WritebackStrategy == SpaceMapperWritebackStrategy.LegacyPerMapping)
+            {
+                sb.AppendLine("- WARNING: Legacy per-mapping writeback enabled (slower).");
+            }
             sb.AppendLine($"- Show internal properties during writeback: {settings.ShowInternalPropertiesDuringWriteback}");
             sb.AppendLine($"- Skip unchanged writeback: {settings.SkipUnchangedWriteback}");
             sb.AppendLine($"- Pack writeback outputs: {settings.PackWritebackProperties}");
             sb.AppendLine($"- Close dock panes during run: {settings.CloseDockPanesDuringRun}");
+            sb.AppendLine($"- Close pane delay (sec): {settings.DockPaneCloseDelaySeconds.ToString("0.##", CultureInfo.InvariantCulture)}");
             sb.AppendLine();
 
             sb.AppendLine("## Live Results");

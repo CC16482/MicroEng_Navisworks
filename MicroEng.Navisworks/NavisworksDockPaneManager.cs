@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Automation;
+using System.Linq;
+using System.Threading;
 using System.Windows.Forms;
 using Autodesk.Navisworks.Api.Plugins;
 using Autodesk.Navisworks.Api.ApplicationParts;
@@ -12,18 +14,23 @@ namespace MicroEng.Navisworks
     {
         public DockPaneVisibilitySnapshot(
             Dictionary<string, bool> visibleById,
-            Dictionary<string, bool> builtInVisibleByCommandId = null)
+            Dictionary<string, bool> builtInVisibleByCommandId = null,
+            HashSet<string> capturedDisplayNames = null)
         {
             VisibleById = visibleById ?? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             BuiltInVisibleByCommandId = builtInVisibleByCommandId ?? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            CapturedDisplayNames = capturedDisplayNames ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
         public Dictionary<string, bool> VisibleById { get; }
         public Dictionary<string, bool> BuiltInVisibleByCommandId { get; }
+        public HashSet<string> CapturedDisplayNames { get; }
     }
 
     internal static class NavisworksDockPaneManager
     {
+        private static readonly TimeSpan DefaultDockPaneSettleDelay = TimeSpan.FromMilliseconds(500);
+
         private static readonly HashSet<string> DefaultExcludedPaneIds = new(StringComparer.OrdinalIgnoreCase)
         {
             "MicroEng.SpaceMapper.DockPane.MENG"
@@ -31,13 +38,40 @@ namespace MicroEng.Navisworks
 
         private static readonly HashSet<string> KnownDockPaneDisplayNames = new(StringComparer.OrdinalIgnoreCase)
         {
+            "Clash Detective",
+            "TimeLiner",
+            "Timeliner",
+            "Autodesk Rendering",
+            "Animator",
+            "Scripter",
+            "Quantification",
+            "Quantification Workbook",
+            "Item Catalog",
+            "Resource Catalog",
             "Selection Tree",
             "Selection Tree (Compact)",
             "Sets",
             "Properties",
             "Item Properties",
             "Find Items",
-            "Selection Inspector"
+            "Selection Inspector",
+            "Comments",
+            "Find Comments",
+            "Set Scale by Measurement",
+            "Saved Viewpoints",
+            "Tilt",
+            "Plan View",
+            "Section View",
+            "Section Plane Settings",
+            "Property Favorites",
+            "Civil Alignments",
+            "Measure Tools",
+            "Appearance Profiler",
+            "BIM 360 Shared Views",
+            "BIM 360 Glue Shared Views",
+            "Shared Views",
+            "Sheet Browser",
+            "Find Item in Other Sheets and Models"
         };
 
         private static readonly string[] KnownDockPaneIdKeywords =
@@ -54,14 +88,14 @@ namespace MicroEng.Navisworks
 
         private sealed class BuiltInDockPaneCommand
         {
-            public BuiltInDockPaneCommand(string commandId, params string[] automationNames)
+            public BuiltInDockPaneCommand(string commandId, params string[] names)
             {
                 CommandId = commandId;
-                AutomationNames = automationNames ?? Array.Empty<string>();
+                Names = names ?? Array.Empty<string>();
             }
 
             public string CommandId { get; }
-            public string[] AutomationNames { get; }
+            public string[] Names { get; }
         }
 
         private static readonly BuiltInDockPaneCommand[] BuiltInDockPaneCommands =
@@ -76,10 +110,73 @@ namespace MicroEng.Navisworks
             new BuiltInDockPaneCommand(
                 "RoamerGUI_OM_ATTRIB_BAR",
                 "Properties",
-                "Item Properties")
+                "Item Properties"),
+            new BuiltInDockPaneCommand(
+                "SelectionInspectorCommand.Navisworks",
+                "Selection Inspector"),
+            new BuiltInDockPaneCommand(
+                "ClashWindowCommand.Navisworks",
+                "Clash Detective"),
+            new BuiltInDockPaneCommand(
+                "TimelinerRibbonCommand.Navisworks",
+                "TimeLiner",
+                "Timeliner"),
+            new BuiltInDockPaneCommand(
+                "TakeoffWorkbookRibbonCommand.Navisworks",
+                "Quantification",
+                "Quantification Workbook"),
+            new BuiltInDockPaneCommand(
+                "RenderBrowserCommand.Navisworks",
+                "Autodesk Rendering"),
+            new BuiltInDockPaneCommand(
+                "navisworks.animator.plugin.Animator",
+                "Animator"),
+            new BuiltInDockPaneCommand(
+                "navisworks.scripter.plugin.Scripter",
+                "Scripter"),
+            new BuiltInDockPaneCommand(
+                "AutoAppearanceCommand.Navisworks",
+                "Appearance Profiler"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_OM_MESSAGE_BOARD",
+                "Comments"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_OM_FIND_BAR",
+                "Find Comments"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_OM_VP_ORG",
+                "Saved Viewpoints"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_OM_VIEW_TILT",
+                "Tilt",
+                "Tilt Bar",
+                "Camera Tilt"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_OM_VIEW_PLAN_THUMBNAIL",
+                "Plan View"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_OM_VIEW_XSECT_THUMBNAIL",
+                "Section View"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_OM_SECTION_PLANES_DIALOG",
+                "Section Plane Settings"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_CIVIL_ALIGNMENT_PANEL",
+                "Civil Alignments"),
+            new BuiltInDockPaneCommand(
+                "RoamerGUI_MEASURE_PANEL",
+                "Measure Tools"),
+            new BuiltInDockPaneCommand(
+                "Bim360ViewsPaneCommand.Navisworks",
+                "BIM 360 Shared Views",
+                "BIM 360 Glue Shared Views",
+                "Shared Views"),
+            new BuiltInDockPaneCommand(
+                "MultiSheetSearchPaneCommand.Navisworks",
+                "Find Item in Other Sheets and Models")
         };
 
-        public static DockPaneVisibilitySnapshot HideDockPanes(IEnumerable<string> extraExclusions = null)
+        public static DockPaneVisibilitySnapshot HideDockPanes(IEnumerable<string> extraExclusions = null, TimeSpan? settleDelay = null)
         {
             var exclusions = BuildExclusions(extraExclusions);
             var gui = NavisApp.Gui;
@@ -89,7 +186,7 @@ namespace MicroEng.Navisworks
             }
 
             var snapshot = CaptureDockPanes(gui, exclusions);
-            var builtInSnapshot = CaptureBuiltInDockPanes(gui.MainWindow);
+            var builtInSnapshot = CaptureBuiltInDockPanes(gui.MainWindow, snapshot.CapturedDisplayNames);
             foreach (var kvp in snapshot.VisibleById)
             {
                 if (!kvp.Value)
@@ -117,7 +214,13 @@ namespace MicroEng.Navisworks
                 TryExecuteBuiltInCommand(kvp.Key);
             }
 
-            return new DockPaneVisibilitySnapshot(snapshot.VisibleById, builtInSnapshot);
+            var delay = settleDelay ?? DefaultDockPaneSettleDelay;
+            if (delay > TimeSpan.Zero)
+            {
+                Thread.Sleep(delay);
+            }
+
+            return new DockPaneVisibilitySnapshot(snapshot.VisibleById, builtInSnapshot, snapshot.CapturedDisplayNames);
         }
 
         public static void RestoreDockPanes(DockPaneVisibilitySnapshot snapshot)
@@ -159,10 +262,11 @@ namespace MicroEng.Navisworks
         private static DockPaneVisibilitySnapshot CaptureDockPanes(IApplicationGui gui, HashSet<string> exclusions)
         {
             var visibleById = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            var capturedDisplayNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var records = NavisApp.Plugins?.PluginRecords;
             if (records == null)
             {
-                return new DockPaneVisibilitySnapshot(visibleById);
+                return new DockPaneVisibilitySnapshot(visibleById, null, capturedDisplayNames);
             }
 
             foreach (var record in records)
@@ -203,9 +307,20 @@ namespace MicroEng.Navisworks
                 }
 
                 visibleById[id] = visible;
+
+                var displayName = record.DisplayName ?? record.Name ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(displayName))
+                {
+                    capturedDisplayNames.Add(displayName);
+                }
+
+                if (!string.IsNullOrWhiteSpace(record.Name))
+                {
+                    capturedDisplayNames.Add(record.Name);
+                }
             }
 
-            return new DockPaneVisibilitySnapshot(visibleById);
+            return new DockPaneVisibilitySnapshot(visibleById, null, capturedDisplayNames);
         }
 
         private static bool IsDockPaneRecord(PluginRecord record)
@@ -269,7 +384,7 @@ namespace MicroEng.Navisworks
             return false;
         }
 
-        private static Dictionary<string, bool> CaptureBuiltInDockPanes(IWin32Window mainWindow)
+        private static Dictionary<string, bool> CaptureBuiltInDockPanes(IWin32Window mainWindow, HashSet<string> skipNames)
         {
             var visibleByCommand = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             if (mainWindow == null)
@@ -299,7 +414,12 @@ namespace MicroEng.Navisworks
                     continue;
                 }
 
-                var isVisible = IsAutomationPaneVisible(root, command.AutomationNames);
+                if (ShouldSkipBuiltInCommand(command, skipNames))
+                {
+                    continue;
+                }
+
+                var isVisible = IsAutomationPaneVisible(root, command.Names);
                 visibleByCommand[command.CommandId] = isVisible;
             }
 
@@ -323,22 +443,93 @@ namespace MicroEng.Navisworks
                 try
                 {
                     var condition = new PropertyCondition(AutomationElement.NameProperty, name);
-                    var element = root.FindFirst(TreeScope.Descendants, condition);
-                    if (element == null)
+                    var elements = root.FindAll(TreeScope.Descendants, condition);
+                    if (elements == null || elements.Count == 0)
                     {
                         continue;
                     }
 
-                    var rect = element.Current.BoundingRectangle;
-                    if (!element.Current.IsOffscreen && rect.Width > 0 && rect.Height > 0)
+                    foreach (AutomationElement element in elements)
                     {
-                        return true;
+                        if (element == null)
+                        {
+                            continue;
+                        }
+
+                        var type = element.Current.ControlType;
+                        if (type != ControlType.Pane && type != ControlType.Window)
+                        {
+                            continue;
+                        }
+
+                        var className = element.Current.ClassName ?? string.Empty;
+                        var automationId = element.Current.AutomationId ?? string.Empty;
+                        if (className.IndexOf("Ribbon", StringComparison.OrdinalIgnoreCase) >= 0
+                            || automationId.IndexOf("Ribbon", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            continue;
+                        }
+
+                        if (IsInRibbon(element))
+                        {
+                            continue;
+                        }
+
+                        var rect = element.Current.BoundingRectangle;
+                        if (!element.Current.IsOffscreen && rect.Width >= 20 && rect.Height >= 20)
+                        {
+                            return true;
+                        }
                     }
                 }
                 catch
                 {
                     // ignore
                 }
+            }
+
+            return false;
+        }
+
+        private static bool ShouldSkipBuiltInCommand(BuiltInDockPaneCommand command, HashSet<string> skipNames)
+        {
+            if (command?.Names == null || skipNames == null || skipNames.Count == 0)
+            {
+                return false;
+            }
+
+            return command.Names.Any(name => !string.IsNullOrWhiteSpace(name) && skipNames.Contains(name));
+        }
+
+        private static bool IsInRibbon(AutomationElement element)
+        {
+            if (element == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                var walker = TreeWalker.ControlViewWalker;
+                var parent = walker.GetParent(element);
+                while (parent != null)
+                {
+                    var className = parent.Current.ClassName ?? string.Empty;
+                    var automationId = parent.Current.AutomationId ?? string.Empty;
+                    var name = parent.Current.Name ?? string.Empty;
+                    if (className.IndexOf("Ribbon", StringComparison.OrdinalIgnoreCase) >= 0
+                        || automationId.IndexOf("Ribbon", StringComparison.OrdinalIgnoreCase) >= 0
+                        || name.IndexOf("Ribbon", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return true;
+                    }
+
+                    parent = walker.GetParent(parent);
+                }
+            }
+            catch
+            {
+                return false;
             }
 
             return false;

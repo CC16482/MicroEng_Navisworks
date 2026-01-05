@@ -1627,6 +1627,8 @@ namespace MicroEng.Navisworks
         private void RunSpaceMapper()
         {
             DockPaneVisibilitySnapshot paneSnapshot = null;
+            SpaceMapperRunProgressHost progressHost = null;
+            SpaceMapperRunProgressState runProgress = null;
             if (!ValidateRunInputs())
             {
                 return;
@@ -1636,15 +1638,12 @@ namespace MicroEng.Navisworks
             _runCts?.Dispose();
             _runCts = new CancellationTokenSource();
 
-            var runProgress = new SpaceMapperRunProgressState();
-            using var progressHost = SpaceMapperRunProgressHost.Show(runProgress, () => _runCts.Cancel());
-
             try
             {
                 var request = BuildRequest();
                 if (request == null)
                 {
-                    runProgress.MarkFailed(new InvalidOperationException("Unable to build Space Mapper request."));
+                    runProgress?.MarkFailed(new InvalidOperationException("Unable to build Space Mapper request."));
                     return;
                 }
 
@@ -1657,27 +1656,33 @@ namespace MicroEng.Navisworks
 
                 if (request.ProcessingSettings?.CloseDockPanesDuringRun == true)
                 {
-                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes();
+                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes(settleDelay: TimeSpan.Zero);
+                    WaitForDockPaneSettle(request.ProcessingSettings);
                 }
+
+                runProgress = new SpaceMapperRunProgressState();
+                progressHost = SpaceMapperRunProgressHost.Show(runProgress, () => _runCts.Cancel());
 
                 var service = new SpaceMapperService(MicroEngActions.Log);
                 var result = service.RunWithProgress(request, null, runProgress, _runCts.Token);
 
-                progressHost.Close();
+                progressHost?.Close();
                 ShowResults(result);
                 SpaceMapperNav.Navigate(typeof(SpaceMapperStepResultsPage));
             }
             catch (OperationCanceledException)
             {
-                runProgress.MarkCancelled();
+                runProgress?.MarkCancelled();
             }
             catch (Exception ex)
             {
-                runProgress.MarkFailed(ex);
+                runProgress?.MarkFailed(ex);
                 MessageBox.Show($"Space Mapper failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
+                progressHost?.Close();
+                progressHost?.Dispose();
                 NavisworksDockPaneManager.RestoreDockPanes(paneSnapshot);
             }
         }
@@ -1685,6 +1690,8 @@ namespace MicroEng.Navisworks
         private void RunVariationCheckReport()
         {
             DockPaneVisibilitySnapshot paneSnapshot = null;
+            SpaceMapperRunProgressHost progressHost = null;
+            SpaceMapperRunProgressState runProgress = null;
             if (!ValidateVariationCheckInputs())
             {
                 return;
@@ -1694,11 +1701,9 @@ namespace MicroEng.Navisworks
             _runCts?.Dispose();
             _runCts = new CancellationTokenSource();
 
-            var runProgress = new SpaceMapperRunProgressState();
-            using var progressHost = SpaceMapperRunProgressHost.Show(runProgress, () => _runCts.Cancel());
-
             try
             {
+                runProgress = new SpaceMapperRunProgressState();
                 runProgress.Start();
                 runProgress.SetStage(SpaceMapperRunStage.ResolvingInputs, "Resolving zones and targets...");
 
@@ -1732,8 +1737,11 @@ namespace MicroEng.Navisworks
 
                 if (request.ProcessingSettings?.CloseDockPanesDuringRun == true)
                 {
-                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes();
+                    paneSnapshot = NavisworksDockPaneManager.HideDockPanes(settleDelay: TimeSpan.Zero);
+                    WaitForDockPaneSettle(request.ProcessingSettings);
                 }
+
+                progressHost = SpaceMapperRunProgressHost.Show(runProgress, () => _runCts.Cancel());
 
                 var resolved = SpaceMapperService.ResolveData(request, doc, session);
                 runProgress.SetTotals(resolved.ZoneModels.Count, resolved.TargetModels.Count);
@@ -1830,21 +1838,23 @@ namespace MicroEng.Navisworks
                 }
 
                 runProgress.MarkCompleted();
-                progressHost.Close();
+                progressHost?.Close();
 
                 MessageBox.Show($"Variation check report saved to:\n{reportPath}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             catch (OperationCanceledException)
             {
-                runProgress.MarkCancelled();
+                runProgress?.MarkCancelled();
             }
             catch (Exception ex)
             {
-                runProgress.MarkFailed(ex);
+                runProgress?.MarkFailed(ex);
                 MessageBox.Show($"Variation check failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
+                progressHost?.Close();
+                progressHost?.Dispose();
                 NavisworksDockPaneManager.RestoreDockPanes(paneSnapshot);
             }
         }
@@ -1898,6 +1908,7 @@ namespace MicroEng.Navisworks
                 WritebackStrategy = SpaceMapperWritebackStrategy.OptimizedSingleCategory,
                 ShowInternalPropertiesDuringWriteback = _processingPage.ShowInternalWritebackCheck?.IsChecked == true,
                 CloseDockPanesDuringRun = _processingPage.CloseDockPanesCheck?.IsChecked == true,
+                DockPaneCloseDelaySeconds = Math.Max(0, ParseDouble(_processingPage.DockPaneDelayBox?.Text)),
                 SkipUnchangedWriteback = _processingPage.SkipUnchangedWritebackCheck?.IsChecked == true,
                 PackWritebackProperties = _processingPage.PackWritebackCheck?.IsChecked == true,
                 ZoneBoundsMode = zoneBoundsMode,
@@ -1910,6 +1921,44 @@ namespace MicroEng.Navisworks
                 UseOriginPointOnly = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint,
                 GpuRayCount = gpuRayCount
             };
+        }
+
+        private static TimeSpan GetDockPaneDelay(SpaceMapperProcessingSettings settings)
+        {
+            if (settings == null)
+            {
+                return TimeSpan.Zero;
+            }
+
+            var delaySeconds = settings.DockPaneCloseDelaySeconds;
+            if (delaySeconds <= 0)
+            {
+                return TimeSpan.Zero;
+            }
+
+            return TimeSpan.FromSeconds(delaySeconds);
+        }
+
+        private static void WaitForDockPaneSettle(SpaceMapperProcessingSettings settings)
+        {
+            var delay = GetDockPaneDelay(settings);
+            if (delay <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            var frame = new DispatcherFrame();
+            var timer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = delay
+            };
+            timer.Tick += (_, __) =>
+            {
+                timer.Stop();
+                frame.Continue = false;
+            };
+            timer.Start();
+            Dispatcher.PushFrame(frame);
         }
 
         private SpaceMapperRequest BuildRequest()
@@ -2000,7 +2049,8 @@ namespace MicroEng.Navisworks
                 1 => SpaceMapperContainmentCalculationMode.SamplePoints,
                 2 => SpaceMapperContainmentCalculationMode.SamplePointsDense,
                 3 => SpaceMapperContainmentCalculationMode.TargetGeometry,
-                4 => SpaceMapperContainmentCalculationMode.BoundsOverlap,
+                4 => SpaceMapperContainmentCalculationMode.TargetGeometryGpu,
+                5 => SpaceMapperContainmentCalculationMode.BoundsOverlap,
                 _ => SpaceMapperContainmentCalculationMode.Auto
             };
         }
@@ -2754,7 +2804,8 @@ namespace MicroEng.Navisworks
                     SpaceMapperContainmentCalculationMode.SamplePoints => 1,
                     SpaceMapperContainmentCalculationMode.SamplePointsDense => 2,
                     SpaceMapperContainmentCalculationMode.TargetGeometry => 3,
-                    SpaceMapperContainmentCalculationMode.BoundsOverlap => 4,
+                    SpaceMapperContainmentCalculationMode.TargetGeometryGpu => 4,
+                    SpaceMapperContainmentCalculationMode.BoundsOverlap => 5,
                     _ => 0
                 };
             }
@@ -2793,6 +2844,10 @@ namespace MicroEng.Navisworks
             if (_processingPage.CloseDockPanesCheck != null)
             {
                 _processingPage.CloseDockPanesCheck.IsChecked = settings.CloseDockPanesDuringRun;
+            }
+            if (_processingPage.DockPaneDelayBox != null)
+            {
+                _processingPage.DockPaneDelayBox.Text = settings.DockPaneCloseDelaySeconds.ToString();
             }
             ApplyBoundsSettings(settings);
         }

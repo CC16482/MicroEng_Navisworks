@@ -237,6 +237,9 @@ namespace MicroEng.Navisworks
             sb.AppendLine($"- Offset bottom: {settings.OffsetBottom}");
             sb.AppendLine($"- Units: {settings.Units}");
             sb.AppendLine($"- Offset mode: {settings.OffsetMode}");
+            sb.AppendLine($"- Enable zone offsets: {settings.EnableZoneOffsets}");
+            sb.AppendLine($"- Offset-only pass: {settings.EnableOffsetAreaPass}");
+            sb.AppendLine($"- Write offset-only match property: {settings.WriteZoneOffsetMatchProperty}");
             sb.AppendLine($"- Index granularity: {settings.IndexGranularity}");
             sb.AppendLine($"- Max threads: {settings.MaxThreads}");
             sb.AppendLine($"- Batch size: {settings.BatchSize}");
@@ -484,6 +487,9 @@ namespace MicroEng.Navisworks
             sb.AppendLine($"- Offset bottom: {settings.OffsetBottom}");
             sb.AppendLine($"- Units: {settings.Units}");
             sb.AppendLine($"- Offset mode: {settings.OffsetMode}");
+            sb.AppendLine($"- Enable zone offsets: {settings.EnableZoneOffsets}");
+            sb.AppendLine($"- Offset-only pass: {settings.EnableOffsetAreaPass}");
+            sb.AppendLine($"- Write offset-only match property: {settings.WriteZoneOffsetMatchProperty}");
             sb.AppendLine($"- Index granularity: {settings.IndexGranularity}");
             sb.AppendLine($"- Max threads: {settings.MaxThreads}");
             sb.AppendLine($"- Batch size: {settings.BatchSize}");

@@ -300,7 +300,7 @@ namespace MicroEng.Navisworks
                         var cy = (targetBoundsLocal.MinY + targetBoundsLocal.MaxY) * 0.5;
                         var cz = (targetBoundsLocal.MinZ + targetBoundsLocal.MaxZ) * 0.5;
 
-                        var inside = ZoneContainsPoint(zone, zoneBoundsLocal, zoneBoundsMode, containmentEngine, diagnostics, cx, cy, cz);
+                        var inside = ZoneContainsPoint(zone, zoneBoundsLocal, zoneBoundsMode, containmentEngine, diagnostics, settings, cx, cy, cz);
                         if (!inside)
                         {
                             return;
@@ -355,6 +355,7 @@ namespace MicroEng.Navisworks
                             zoneBoundsMode,
                             containmentEngine,
                             diagnostics,
+                            settings,
                             targetBoundsMode,
                             computeContainmentFraction,
                             needsPartial,
@@ -372,6 +373,7 @@ namespace MicroEng.Navisworks
                             zoneBoundsMode,
                             containmentEngine,
                             diagnostics,
+                            settings,
                             targetBoundsMode,
                             computeContainmentFraction,
                             needsPartial,
@@ -390,7 +392,8 @@ namespace MicroEng.Navisworks
                                 containmentEngine,
                                 containmentCalculationMode,
                                 targetSamplePoints?[idx],
-                                diagnostics);
+                                diagnostics,
+                                settings);
                         }
 
                         localResults.Add(hit);
@@ -757,7 +760,7 @@ namespace MicroEng.Navisworks
                     }
 
                     var zoneBoundsLocal = zoneBounds[zoneIndex];
-                    var inside = ZoneContainsPoint(zones[zoneIndex], zoneBoundsLocal, zoneBoundsMode, containmentEngine, diagnostics, cx, cy, cz);
+                    var inside = ZoneContainsPoint(zones[zoneIndex], zoneBoundsLocal, zoneBoundsMode, containmentEngine, diagnostics, settings, cx, cy, cz);
 
                     if (!inside)
                     {
@@ -908,6 +911,7 @@ namespace MicroEng.Navisworks
             SpaceMapperZoneBoundsMode zoneBoundsMode,
             SpaceMapperZoneContainmentEngine containmentEngine,
             SpaceMapperEngineDiagnostics diagnostics,
+            SpaceMapperProcessingSettings settings,
             SpaceMapperTargetBoundsMode targetBoundsMode,
             bool computeContainmentFraction,
             bool needsPartial,
@@ -924,6 +928,7 @@ namespace MicroEng.Navisworks
                     zoneBoundsMode,
                     containmentEngine,
                     diagnostics,
+                    settings,
                     computeContainmentFraction);
             }
 
@@ -938,6 +943,7 @@ namespace MicroEng.Navisworks
                     zoneBoundsMode,
                     containmentEngine,
                     diagnostics,
+                    settings,
                     targetBoundsMode,
                     computeContainmentFraction,
                     needsPartial,
@@ -969,7 +975,8 @@ namespace MicroEng.Navisworks
                 computeContainmentFraction,
                 needsPartial,
                 treatPartialAsContained,
-                extraSamples);
+                extraSamples,
+                settings);
         }
 
         internal static ZoneTargetIntersection ClassifyPointTarget(
@@ -980,13 +987,14 @@ namespace MicroEng.Navisworks
             SpaceMapperZoneBoundsMode zoneBoundsMode,
             SpaceMapperZoneContainmentEngine containmentEngine,
             SpaceMapperEngineDiagnostics diagnostics,
+            SpaceMapperProcessingSettings settings,
             bool computeContainmentFraction)
         {
             var cx = (targetBounds.MinX + targetBounds.MaxX) * 0.5;
             var cy = (targetBounds.MinY + targetBounds.MaxY) * 0.5;
             var cz = (targetBounds.MinZ + targetBounds.MaxZ) * 0.5;
 
-            var inside = ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, cx, cy, cz);
+            var inside = ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, settings, cx, cy, cz);
 
             if (!inside)
             {
@@ -1012,6 +1020,7 @@ namespace MicroEng.Navisworks
             SpaceMapperZoneBoundsMode zoneBoundsMode,
             SpaceMapperZoneContainmentEngine containmentEngine,
             SpaceMapperEngineDiagnostics diagnostics,
+            SpaceMapperProcessingSettings settings,
             SpaceMapperTargetBoundsMode targetBoundsMode,
             bool computeContainmentFraction,
             bool needsPartial,
@@ -1070,7 +1079,7 @@ namespace MicroEng.Navisworks
             bool Sample(double x, double y, double z)
             {
                 sampleCount++;
-                var inside = ZoneContainsPoint(zone, zoneBoundsLocal, zoneBoundsMode, containmentEngine, diagnostics, x, y, z);
+                var inside = ZoneContainsPoint(zone, zoneBoundsLocal, zoneBoundsMode, containmentEngine, diagnostics, settings, x, y, z);
 
                 if (inside)
                 {
@@ -1209,7 +1218,8 @@ namespace MicroEng.Navisworks
             bool computeContainmentFraction,
             bool needsPartial,
             bool treatPartialAsContained,
-            bool extraSamples)
+            bool extraSamples,
+            SpaceMapperProcessingSettings settings)
         {
             if (zone?.Planes == null || zone.Planes.Count == 0)
             {
@@ -1218,29 +1228,30 @@ namespace MicroEng.Navisworks
 
             var anyInside = false;
             var anyOutside = false;
+            GetOffsetParams(settings, out var dx, out var dy, out var dz, out var shift);
 
-            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MinY, targetBounds.MinZ, ref anyInside, ref anyOutside);
-            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MinY, targetBounds.MinZ, ref anyInside, ref anyOutside);
-            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MaxY, targetBounds.MinZ, ref anyInside, ref anyOutside);
-            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MaxY, targetBounds.MinZ, ref anyInside, ref anyOutside);
-            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MinY, targetBounds.MaxZ, ref anyInside, ref anyOutside);
-            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MinY, targetBounds.MaxZ, ref anyInside, ref anyOutside);
-            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MaxY, targetBounds.MaxZ, ref anyInside, ref anyOutside);
-            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MaxY, targetBounds.MaxZ, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MinY, targetBounds.MinZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MinY, targetBounds.MinZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MaxY, targetBounds.MinZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MaxY, targetBounds.MinZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MinY, targetBounds.MaxZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MinY, targetBounds.MaxZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MinX, targetBounds.MaxY, targetBounds.MaxZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+            TestCorner(zone.Planes, targetBounds.MaxX, targetBounds.MaxY, targetBounds.MaxZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
 
             if (extraSamples && !(anyInside && anyOutside))
             {
                 var cx = (targetBounds.MinX + targetBounds.MaxX) * 0.5;
                 var cy = (targetBounds.MinY + targetBounds.MaxY) * 0.5;
                 var cz = (targetBounds.MinZ + targetBounds.MaxZ) * 0.5;
-                TestCorner(zone.Planes, cx, cy, cz, ref anyInside, ref anyOutside);
+                TestCorner(zone.Planes, cx, cy, cz, shift, dx, dy, dz, ref anyInside, ref anyOutside);
 
-                TestCorner(zone.Planes, targetBounds.MinX, cy, cz, ref anyInside, ref anyOutside);
-                TestCorner(zone.Planes, targetBounds.MaxX, cy, cz, ref anyInside, ref anyOutside);
-                TestCorner(zone.Planes, cx, targetBounds.MinY, cz, ref anyInside, ref anyOutside);
-                TestCorner(zone.Planes, cx, targetBounds.MaxY, cz, ref anyInside, ref anyOutside);
-                TestCorner(zone.Planes, cx, cy, targetBounds.MinZ, ref anyInside, ref anyOutside);
-                TestCorner(zone.Planes, cx, cy, targetBounds.MaxZ, ref anyInside, ref anyOutside);
+                TestCorner(zone.Planes, targetBounds.MinX, cy, cz, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+                TestCorner(zone.Planes, targetBounds.MaxX, cy, cz, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+                TestCorner(zone.Planes, cx, targetBounds.MinY, cz, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+                TestCorner(zone.Planes, cx, targetBounds.MaxY, cz, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+                TestCorner(zone.Planes, cx, cy, targetBounds.MinZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
+                TestCorner(zone.Planes, cx, cy, targetBounds.MaxZ, shift, dx, dy, dz, ref anyInside, ref anyOutside);
             }
 
             if (!anyInside)
@@ -1273,14 +1284,27 @@ namespace MicroEng.Navisworks
             };
         }
 
-        internal static void TestCorner(IReadOnlyList<PlaneEquation> planes, double x, double y, double z, ref bool anyInside, ref bool anyOutside)
+        internal static void TestCorner(
+            IReadOnlyList<PlaneEquation> planes,
+            double x,
+            double y,
+            double z,
+            in Vector3D shift,
+            double dx,
+            double dy,
+            double dz,
+            ref bool anyInside,
+            ref bool anyOutside)
         {
             if (anyInside && anyOutside)
             {
                 return;
             }
 
-            var inside = GeometryMath.IsInside(planes, new Vector3D(x, y, z));
+            var point = new Vector3D(x - shift.X, y - shift.Y, z - shift.Z);
+            var inside = dx != 0 || dy != 0 || dz != 0
+                ? GeometryMath.IsInsideInflated(planes, point, dx, dy, dz)
+                : GeometryMath.IsInside(planes, point);
             if (inside) anyInside = true; else anyOutside = true;
         }
 
@@ -1290,6 +1314,7 @@ namespace MicroEng.Navisworks
             SpaceMapperZoneBoundsMode zoneBoundsMode,
             SpaceMapperZoneContainmentEngine containmentEngine,
             SpaceMapperEngineDiagnostics diagnostics,
+            SpaceMapperProcessingSettings settings,
             double x,
             double y,
             double z)
@@ -1299,15 +1324,19 @@ namespace MicroEng.Navisworks
                 return false;
             }
 
+            GetOffsetParams(settings, out var dx, out var dy, out var dz, out var shift);
+            var point = new Vector3D(x, y, z);
+            var shiftedPoint = new Vector3D(point.X - shift.X, point.Y - shift.Y, point.Z - shift.Z);
+            var hasOffset = dx != 0 || dy != 0 || dz != 0;
+
             if (containmentEngine == SpaceMapperZoneContainmentEngine.MeshAccurate
                 && zone.HasTriangleMesh
                 && zone.TriangleVertices != null)
             {
-                var point = new Vector3D(x, y, z);
                 bool inside;
                 var ok = zone.MeshIsClosed
-                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, point, out inside)
-                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, point, out inside);
+                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, shiftedPoint, out inside)
+                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, shiftedPoint, out inside);
 
                 if (ok)
                 {
@@ -1315,7 +1344,80 @@ namespace MicroEng.Navisworks
                     {
                         Interlocked.Increment(ref diagnostics.MeshPointTests);
                     }
-                    return inside;
+
+                    if (inside)
+                    {
+                        return true;
+                    }
+
+                    if (settings?.EnableZoneOffsets == true && hasOffset)
+                    {
+                        bool probeInside;
+                        if (dx > 0)
+                        {
+                            var probe = new Vector3D(shiftedPoint.X + dx, shiftedPoint.Y, shiftedPoint.Z);
+                            if ((zone.MeshIsClosed
+                                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, probe, out probeInside)
+                                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, probe, out probeInside))
+                                && probeInside)
+                            {
+                                return true;
+                            }
+
+                            probe = new Vector3D(shiftedPoint.X - dx, shiftedPoint.Y, shiftedPoint.Z);
+                            if ((zone.MeshIsClosed
+                                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, probe, out probeInside)
+                                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, probe, out probeInside))
+                                && probeInside)
+                            {
+                                return true;
+                            }
+                        }
+
+                        if (dy > 0)
+                        {
+                            var probe = new Vector3D(shiftedPoint.X, shiftedPoint.Y + dy, shiftedPoint.Z);
+                            if ((zone.MeshIsClosed
+                                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, probe, out probeInside)
+                                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, probe, out probeInside))
+                                && probeInside)
+                            {
+                                return true;
+                            }
+
+                            probe = new Vector3D(shiftedPoint.X, shiftedPoint.Y - dy, shiftedPoint.Z);
+                            if ((zone.MeshIsClosed
+                                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, probe, out probeInside)
+                                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, probe, out probeInside))
+                                && probeInside)
+                            {
+                                return true;
+                            }
+                        }
+
+                        if (dz > 0)
+                        {
+                            var probe = new Vector3D(shiftedPoint.X, shiftedPoint.Y, shiftedPoint.Z + dz);
+                            if ((zone.MeshIsClosed
+                                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, probe, out probeInside)
+                                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, probe, out probeInside))
+                                && probeInside)
+                            {
+                                return true;
+                            }
+
+                            probe = new Vector3D(shiftedPoint.X, shiftedPoint.Y, shiftedPoint.Z - dz);
+                            if ((zone.MeshIsClosed
+                                    ? GeometryMath.TryIsInsideMesh(zone.TriangleVertices, probe, out probeInside)
+                                    : GeometryMath.TryIsInsideMeshRobust(zone.TriangleVertices, probe, out probeInside))
+                                && probeInside)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+
+                    return false;
                 }
 
                 if (diagnostics != null)
@@ -1339,7 +1441,10 @@ namespace MicroEng.Navisworks
                 {
                     Interlocked.Increment(ref diagnostics.BoundsPointTests);
                 }
-                return GeometryMath.IsInside(zone.Planes, new Vector3D(x, y, z));
+
+                return hasOffset
+                    ? GeometryMath.IsInsideInflated(zone.Planes, shiftedPoint, dx, dy, dz)
+                    : GeometryMath.IsInside(zone.Planes, shiftedPoint);
             }
 
             if (diagnostics != null)
@@ -1626,7 +1731,8 @@ namespace MicroEng.Navisworks
             SpaceMapperZoneContainmentEngine containmentEngine,
             SpaceMapperContainmentCalculationMode calculationMode,
             IReadOnlyList<Vector3D> targetSamplePoints,
-            SpaceMapperEngineDiagnostics diagnostics)
+            SpaceMapperEngineDiagnostics diagnostics,
+            SpaceMapperProcessingSettings settings)
         {
             if (zone == null)
             {
@@ -1645,6 +1751,7 @@ namespace MicroEng.Navisworks
                         zoneBoundsMode,
                         containmentEngine,
                         diagnostics,
+                        settings,
                         SamplePointsFast);
                 case SpaceMapperContainmentCalculationMode.SamplePointsDense:
                     return ComputeSampleFractionFromBounds(
@@ -1654,6 +1761,7 @@ namespace MicroEng.Navisworks
                         zoneBoundsMode,
                         containmentEngine,
                         diagnostics,
+                        settings,
                         SamplePointsDense);
                 case SpaceMapperContainmentCalculationMode.TargetGeometry:
                 case SpaceMapperContainmentCalculationMode.TargetGeometryGpu:
@@ -1664,6 +1772,7 @@ namespace MicroEng.Navisworks
                         zoneBoundsMode,
                         containmentEngine,
                         diagnostics,
+                        settings,
                         targetSamplePoints);
                     if (fraction.HasValue)
                     {
@@ -1677,6 +1786,7 @@ namespace MicroEng.Navisworks
                         zoneBoundsMode,
                         containmentEngine,
                         diagnostics,
+                        settings,
                         SamplePointsFast);
                 }
                 default:
@@ -1691,6 +1801,7 @@ namespace MicroEng.Navisworks
             SpaceMapperZoneBoundsMode zoneBoundsMode,
             SpaceMapperZoneContainmentEngine containmentEngine,
             SpaceMapperEngineDiagnostics diagnostics,
+            SpaceMapperProcessingSettings settings,
             int samplesPerAxis)
         {
             if (samplesPerAxis <= 0)
@@ -1704,7 +1815,7 @@ namespace MicroEng.Navisworks
                 var cx = (targetBounds.MinX + targetBounds.MaxX) * 0.5;
                 var cy = (targetBounds.MinY + targetBounds.MaxY) * 0.5;
                 var cz = (targetBounds.MinZ + targetBounds.MaxZ) * 0.5;
-                var inside = ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, cx, cy, cz);
+                var inside = ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, settings, cx, cy, cz);
                 return inside ? 1.0 : 0.0;
             }
 
@@ -1720,7 +1831,7 @@ namespace MicroEng.Navisworks
                     {
                         var tz = targetBounds.MinZ + (targetBounds.MaxZ - targetBounds.MinZ) * (zi / (double)steps);
                         sampleCount++;
-                        if (ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, tx, ty, tz))
+                        if (ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, settings, tx, ty, tz))
                         {
                             insideCount++;
                         }
@@ -1745,6 +1856,7 @@ namespace MicroEng.Navisworks
             SpaceMapperZoneBoundsMode zoneBoundsMode,
             SpaceMapperZoneContainmentEngine containmentEngine,
             SpaceMapperEngineDiagnostics diagnostics,
+            SpaceMapperProcessingSettings settings,
             IReadOnlyList<Vector3D> samplePoints)
         {
             if (samplePoints == null || samplePoints.Count == 0)
@@ -1756,7 +1868,7 @@ namespace MicroEng.Navisworks
             for (int i = 0; i < samplePoints.Count; i++)
             {
                 var p = samplePoints[i];
-                if (ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, p.X, p.Y, p.Z))
+                if (ZoneContainsPoint(zone, zoneBounds, zoneBoundsMode, containmentEngine, diagnostics, settings, p.X, p.Y, p.Z))
                 {
                     insideCount++;
                 }
@@ -1846,9 +1958,41 @@ namespace MicroEng.Navisworks
             return Inflate(aabb, settings);
         }
 
+        internal static void GetOffsetParams(
+            SpaceMapperProcessingSettings settings,
+            out double dx,
+            out double dy,
+            out double dz,
+            out Vector3D shift)
+        {
+            dx = 0;
+            dy = 0;
+            dz = 0;
+            shift = new Vector3D(0, 0, 0);
+
+            if (settings == null || !settings.EnableZoneOffsets)
+            {
+                return;
+            }
+
+            var side = settings.OffsetSides + settings.Offset3D;
+            var top = settings.OffsetTop + settings.Offset3D;
+            var bottom = settings.OffsetBottom + settings.Offset3D;
+
+            dx = side;
+            dy = side;
+            dz = (top + bottom) * 0.5;
+
+            var zShift = (top - bottom) * 0.5;
+            if (zShift != 0)
+            {
+                shift = new Vector3D(0, 0, zShift);
+            }
+        }
+
         internal static Aabb Inflate(Aabb bbox, SpaceMapperProcessingSettings settings)
         {
-            if (settings == null)
+            if (settings == null || !settings.EnableZoneOffsets)
             {
                 return bbox;
             }
@@ -2174,6 +2318,15 @@ namespace MicroEng.Navisworks
             var rayCount = ResolveGpuRayCount(settings, Mode);
             var intensive = rayCount >= 2;
             var sampleCountPerTarget = GetSampleCount(targetBoundsMode);
+            CpuIntersectionEngine.GetOffsetParams(settings, out var offsetDx, out var offsetDy, out var offsetDz, out var offsetShift);
+            var offsetProbeCount = 1;
+            if (settings?.EnableZoneOffsets == true)
+            {
+                if (offsetDx > 0) offsetProbeCount += 2;
+                if (offsetDy > 0) offsetProbeCount += 2;
+                if (offsetDz > 0) offsetProbeCount += 2;
+            }
+            var useOffsetProbes = offsetProbeCount > 1;
             var minPoints = Mode == SpaceMapperProcessingMode.GpuQuick ? GpuMinPointsQuick : GpuMinPointsIntensive;
             var minWork = Mode == SpaceMapperProcessingMode.GpuQuick ? GpuMinWorkQuick : GpuMinWorkIntensive;
             var minPointsPack = GpuMinPointsPack;
@@ -2214,6 +2367,7 @@ namespace MicroEng.Navisworks
                         zoneBoundsMode,
                         containmentEngine,
                         diagnostics,
+                        settings,
                         targetBoundsMode,
                         computeContainmentFraction,
                         needsPartial,
@@ -2233,7 +2387,8 @@ namespace MicroEng.Navisworks
                             containmentEngine,
                             containmentCalculationMode,
                             targetSamplePoints?[targetIndex],
-                            diagnostics);
+                            diagnostics,
+                            settings);
                     }
 
                     AddHit(results, bestHits, hit, targetBounds[targetIndex], targetIndex, zoneIndex, zoneVolumes, zoneCenterX, zoneCenterY, zoneCenterZ, resolutionStrategy);
@@ -2261,9 +2416,13 @@ namespace MicroEng.Navisworks
                 }
 
                 var estimatedPoints = candidates.Count * sampleCountPerTarget;
+                if (useOffsetProbes)
+                {
+                    estimatedPoints *= offsetProbeCount;
+                }
                 if (useGpuTargetGeometryFraction)
                 {
-                    estimatedPoints += candidates.Count * TargetGeometrySampleLimit;
+                    estimatedPoints += candidates.Count * TargetGeometrySampleLimit * (useOffsetProbes ? offsetProbeCount : 1);
                 }
 
                 var targetStart = new int[candidates.Count];
@@ -2310,6 +2469,36 @@ namespace MicroEng.Navisworks
                     cursor++;
                 }
 
+                void AddSamplePoints(Vector3D worldPoint, int seed)
+                {
+                    var gpuPoint = useOpenMeshRetry
+                        ? ApplyPointNudge(worldPoint, openMeshNudge, seed)
+                        : worldPoint;
+                    var shiftedPoint = new Vector3D(
+                        gpuPoint.X - offsetShift.X,
+                        gpuPoint.Y - offsetShift.Y,
+                        gpuPoint.Z - offsetShift.Z);
+                    AddPoint(worldPoint, shiftedPoint);
+
+                    if (offsetDx > 0)
+                    {
+                        AddPoint(worldPoint, new Vector3D(shiftedPoint.X + offsetDx, shiftedPoint.Y, shiftedPoint.Z));
+                        AddPoint(worldPoint, new Vector3D(shiftedPoint.X - offsetDx, shiftedPoint.Y, shiftedPoint.Z));
+                    }
+
+                    if (offsetDy > 0)
+                    {
+                        AddPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y + offsetDy, shiftedPoint.Z));
+                        AddPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y - offsetDy, shiftedPoint.Z));
+                    }
+
+                    if (offsetDz > 0)
+                    {
+                        AddPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y, shiftedPoint.Z + offsetDz));
+                        AddPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y, shiftedPoint.Z - offsetDz));
+                    }
+                }
+
                 for (int ci = 0; ci < candidates.Count; ci++)
                 {
                     var targetIndex = candidates[ci];
@@ -2322,10 +2511,7 @@ namespace MicroEng.Navisworks
                         var cy = (bounds.MinY + bounds.MaxY) * 0.5;
                         var cz = (bounds.MinZ + bounds.MaxZ) * 0.5;
                         var worldPoint = new Vector3D(cx, cy, cz);
-                        var gpuPoint = useOpenMeshRetry
-                            ? ApplyPointNudge(worldPoint, openMeshNudge, BuildNudgeSeed(zoneIndex, targetIndex, 0))
-                            : worldPoint;
-                        AddPoint(worldPoint, gpuPoint);
+                        AddSamplePoints(worldPoint, BuildNudgeSeed(zoneIndex, targetIndex, 0));
                         targetCount[ci] = 1;
                     }
                     else
@@ -2335,10 +2521,7 @@ namespace MicroEng.Navisworks
                         for (int si = 0; si < samples.Count; si++)
                         {
                             var p = samples[si];
-                            var gpuPoint = useOpenMeshRetry
-                                ? ApplyPointNudge(p, openMeshNudge, BuildNudgeSeed(zoneIndex, targetIndex, si))
-                                : p;
-                            AddPoint(p, gpuPoint);
+                            AddSamplePoints(p, BuildNudgeSeed(zoneIndex, targetIndex, si));
                         }
                     }
 
@@ -2353,10 +2536,7 @@ namespace MicroEng.Navisworks
                             {
                                 var p = geometrySamples[si];
                                 var seed = BuildNudgeSeed(zoneIndex, targetIndex, targetCount[ci] + si);
-                                var gpuPoint = useOpenMeshRetry
-                                    ? ApplyPointNudge(p, openMeshNudge, seed)
-                                    : p;
-                                AddPoint(p, gpuPoint);
+                                AddSamplePoints(p, seed);
                             }
                         }
                         else
@@ -2410,6 +2590,7 @@ namespace MicroEng.Navisworks
                 CpuIntersectionEngine.UpdateMax(ref gpuMaxTrianglesPerZone, trianglesLocal.Length);
                 CpuIntersectionEngine.UpdateMax(ref gpuMaxPointsPerZone, trimPoints);
 
+                var probeStride = offsetProbeCount;
                 for (int ci = 0; ci < candidates.Count; ci++)
                 {
                     var targetIndex = candidates[ci];
@@ -2425,25 +2606,43 @@ namespace MicroEng.Navisworks
                     var anyOutside = false;
                     for (int si = 0; si < count; si++)
                     {
-                        var idx = start + si;
-                        var flag = insideFlags[idx];
-                        if (flag == D3D11PointInMeshGpu.Uncertain)
+                        var sampleStart = start + (si * probeStride);
+                        var sampleInside = false;
+                        var sampleUncertain = false;
+                        for (int pi = 0; pi < probeStride; pi++)
                         {
-                            gpuUncertainPoints++;
-                            var p = pointsWorld[idx];
-                            var inside = CpuIntersectionEngine.ZoneContainsPoint(
+                            var idx = sampleStart + pi;
+                            var flag = insideFlags[idx];
+                            if (flag == D3D11PointInMeshGpu.Uncertain)
+                            {
+                                gpuUncertainPoints++;
+                                sampleUncertain = true;
+                                continue;
+                            }
+
+                            if (flag == D3D11PointInMeshGpu.Inside)
+                            {
+                                sampleInside = true;
+                                break;
+                            }
+                        }
+
+                        if (!sampleInside && sampleUncertain)
+                        {
+                            var p = pointsWorld[sampleStart];
+                            sampleInside = CpuIntersectionEngine.ZoneContainsPoint(
                                 zone,
                                 zoneBoundsLocal,
                                 zoneBoundsMode,
                                 containmentEngine,
                                 diagnostics,
+                                settings,
                                 p.X,
                                 p.Y,
                                 p.Z);
-                            flag = inside ? D3D11PointInMeshGpu.Inside : D3D11PointInMeshGpu.Outside;
                         }
 
-                        if (flag == D3D11PointInMeshGpu.Inside)
+                        if (sampleInside)
                         {
                             insideCount++;
                             anyInside = true;
@@ -2489,25 +2688,43 @@ namespace MicroEng.Navisworks
                                 insideFraction = 0;
                                 for (int si = 0; si < fractionCount; si++)
                                 {
-                                    var idx = fractionStart + si;
-                                    var flag = insideFlags[idx];
-                                    if (flag == D3D11PointInMeshGpu.Uncertain)
+                                    var sampleStart = fractionStart + (si * probeStride);
+                                    var sampleInside = false;
+                                    var sampleUncertain = false;
+                                    for (int pi = 0; pi < probeStride; pi++)
                                     {
-                                        gpuUncertainPoints++;
-                                        var p = pointsWorld[idx];
-                                        var inside = CpuIntersectionEngine.ZoneContainsPoint(
+                                        var idx = sampleStart + pi;
+                                        var flag = insideFlags[idx];
+                                        if (flag == D3D11PointInMeshGpu.Uncertain)
+                                        {
+                                            gpuUncertainPoints++;
+                                            sampleUncertain = true;
+                                            continue;
+                                        }
+
+                                        if (flag == D3D11PointInMeshGpu.Inside)
+                                        {
+                                            sampleInside = true;
+                                            break;
+                                        }
+                                    }
+
+                                    if (!sampleInside && sampleUncertain)
+                                    {
+                                        var p = pointsWorld[sampleStart];
+                                        sampleInside = CpuIntersectionEngine.ZoneContainsPoint(
                                             zone,
                                             zoneBoundsLocal,
                                             zoneBoundsMode,
                                             containmentEngine,
                                             diagnostics,
+                                            settings,
                                             p.X,
                                             p.Y,
                                             p.Z);
-                                        flag = inside ? D3D11PointInMeshGpu.Inside : D3D11PointInMeshGpu.Outside;
                                     }
 
-                                    if (flag == D3D11PointInMeshGpu.Inside)
+                                    if (sampleInside)
                                     {
                                         insideFraction++;
                                     }
@@ -2546,7 +2763,8 @@ namespace MicroEng.Navisworks
                                 containmentEngine,
                                 containmentCalculationMode,
                                 targetSamplePoints?[targetIndex],
-                                diagnostics);
+                                diagnostics,
+                                settings);
                         }
                     }
 
@@ -2637,6 +2855,7 @@ namespace MicroEng.Navisworks
                 CpuIntersectionEngine.UpdateMax(ref gpuBatchMaxPoints, batchPointsLocal.Count);
                 CpuIntersectionEngine.UpdateMax(ref gpuBatchMaxTriangles, batchTriangles.Count);
 
+                var probeStride = offsetProbeCount;
                 for (int jobIndex = 0; jobIndex < batchJobs.Count; jobIndex++)
                 {
                     var job = batchJobs[jobIndex];
@@ -2666,25 +2885,43 @@ namespace MicroEng.Navisworks
                         var anyOutside = false;
                         for (int si = 0; si < count; si++)
                         {
-                            var idx = start + si;
-                            var flag = insideFlags[idx];
-                            if (flag == D3D11PointInMeshGpu.Uncertain)
+                            var sampleStart = start + (si * probeStride);
+                            var sampleInside = false;
+                            var sampleUncertain = false;
+                            for (int pi = 0; pi < probeStride; pi++)
                             {
-                                gpuUncertainPoints++;
-                                var p = batchPointsWorld[idx];
-                                var inside = CpuIntersectionEngine.ZoneContainsPoint(
+                                var idx = sampleStart + pi;
+                                var flag = insideFlags[idx];
+                                if (flag == D3D11PointInMeshGpu.Uncertain)
+                                {
+                                    gpuUncertainPoints++;
+                                    sampleUncertain = true;
+                                    continue;
+                                }
+
+                                if (flag == D3D11PointInMeshGpu.Inside)
+                                {
+                                    sampleInside = true;
+                                    break;
+                                }
+                            }
+
+                            if (!sampleInside && sampleUncertain)
+                            {
+                                var p = batchPointsWorld[sampleStart];
+                                sampleInside = CpuIntersectionEngine.ZoneContainsPoint(
                                     zone,
                                     zoneBoundsLocal,
                                     zoneBoundsMode,
                                     containmentEngine,
                                     diagnostics,
+                                    settings,
                                     p.X,
                                     p.Y,
                                     p.Z);
-                                flag = inside ? D3D11PointInMeshGpu.Inside : D3D11PointInMeshGpu.Outside;
                             }
 
-                            if (flag == D3D11PointInMeshGpu.Inside)
+                            if (sampleInside)
                             {
                                 insideCount++;
                                 anyInside = true;
@@ -2730,25 +2967,43 @@ namespace MicroEng.Navisworks
                                     insideFraction = 0;
                                     for (int si = 0; si < fractionCount; si++)
                                     {
-                                        var idx = fractionStart + si;
-                                        var flag = insideFlags[idx];
-                                        if (flag == D3D11PointInMeshGpu.Uncertain)
+                                        var sampleStart = fractionStart + (si * probeStride);
+                                        var sampleInside = false;
+                                        var sampleUncertain = false;
+                                        for (int pi = 0; pi < probeStride; pi++)
                                         {
-                                            gpuUncertainPoints++;
-                                            var p = batchPointsWorld[idx];
-                                            var inside = CpuIntersectionEngine.ZoneContainsPoint(
+                                            var idx = sampleStart + pi;
+                                            var flag = insideFlags[idx];
+                                            if (flag == D3D11PointInMeshGpu.Uncertain)
+                                            {
+                                                gpuUncertainPoints++;
+                                                sampleUncertain = true;
+                                                continue;
+                                            }
+
+                                            if (flag == D3D11PointInMeshGpu.Inside)
+                                            {
+                                                sampleInside = true;
+                                                break;
+                                            }
+                                        }
+
+                                        if (!sampleInside && sampleUncertain)
+                                        {
+                                            var p = batchPointsWorld[sampleStart];
+                                            sampleInside = CpuIntersectionEngine.ZoneContainsPoint(
                                                 zone,
                                                 zoneBoundsLocal,
                                                 zoneBoundsMode,
                                                 containmentEngine,
                                                 diagnostics,
+                                                settings,
                                                 p.X,
                                                 p.Y,
                                                 p.Z);
-                                            flag = inside ? D3D11PointInMeshGpu.Inside : D3D11PointInMeshGpu.Outside;
                                         }
 
-                                        if (flag == D3D11PointInMeshGpu.Inside)
+                                        if (sampleInside)
                                         {
                                             insideFraction++;
                                         }
@@ -2787,7 +3042,8 @@ namespace MicroEng.Navisworks
                                     containmentEngine,
                                     containmentCalculationMode,
                                     targetSamplePoints?[targetIndex],
-                                    diagnostics);
+                                    diagnostics,
+                                    settings);
                             }
                         }
 
@@ -2920,6 +3176,10 @@ namespace MicroEng.Navisworks
                     }
                 }
                 var estimatedPoints = candidateCount * sampleCountPerTarget;
+                if (useOffsetProbes)
+                {
+                    estimatedPoints *= offsetProbeCount;
+                }
                 var workEstimate = (long)estimatedPoints * triCountEstimate;
                 var intensiveForZone = intensive || allowOpenMeshGpu;
                 var canPack = supportsBatching
@@ -3045,6 +3305,47 @@ namespace MicroEng.Navisworks
                             targetFractionCount = new int[candidateTargets.Length];
                         }
 
+                        void AddBatchPoint(Vector3D worldPoint, Vector3D gpuPoint)
+                        {
+                            batchPointsWorld.Add(worldPoint);
+                            batchPointsLocal.Add(new Float4(
+                                (float)(gpuPoint.X - originX),
+                                (float)(gpuPoint.Y - originY),
+                                (float)(gpuPoint.Z - originZ)));
+                            batchPointZoneIds.Add((uint)zoneBatchId);
+                            pointsAdded++;
+                        }
+
+                        void AddBatchSamplePoints(Vector3D worldPoint, int seed)
+                        {
+                            var gpuPoint = useOpenMeshRetry
+                                ? ApplyPointNudge(worldPoint, openMeshNudge, seed)
+                                : worldPoint;
+                            var shiftedPoint = new Vector3D(
+                                gpuPoint.X - offsetShift.X,
+                                gpuPoint.Y - offsetShift.Y,
+                                gpuPoint.Z - offsetShift.Z);
+                            AddBatchPoint(worldPoint, shiftedPoint);
+
+                            if (offsetDx > 0)
+                            {
+                                AddBatchPoint(worldPoint, new Vector3D(shiftedPoint.X + offsetDx, shiftedPoint.Y, shiftedPoint.Z));
+                                AddBatchPoint(worldPoint, new Vector3D(shiftedPoint.X - offsetDx, shiftedPoint.Y, shiftedPoint.Z));
+                            }
+
+                            if (offsetDy > 0)
+                            {
+                                AddBatchPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y + offsetDy, shiftedPoint.Z));
+                                AddBatchPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y - offsetDy, shiftedPoint.Z));
+                            }
+
+                            if (offsetDz > 0)
+                            {
+                                AddBatchPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y, shiftedPoint.Z + offsetDz));
+                                AddBatchPoint(worldPoint, new Vector3D(shiftedPoint.X, shiftedPoint.Y, shiftedPoint.Z - offsetDz));
+                            }
+                        }
+
                         for (int ci = 0; ci < candidateTargets.Length; ci++)
                         {
                             var targetIndex = candidateTargets[ci];
@@ -3057,17 +3358,8 @@ namespace MicroEng.Navisworks
                                 var cy = (bounds.MinY + bounds.MaxY) * 0.5;
                                 var cz = (bounds.MinZ + bounds.MaxZ) * 0.5;
                                 var worldPoint = new Vector3D(cx, cy, cz);
-                                batchPointsWorld.Add(worldPoint);
-                                var gpuPoint = useOpenMeshRetry
-                                    ? ApplyPointNudge(worldPoint, openMeshNudge, BuildNudgeSeed(zoneIndex, targetIndex, 0))
-                                    : worldPoint;
-                                batchPointsLocal.Add(new Float4(
-                                    (float)(gpuPoint.X - originX),
-                                    (float)(gpuPoint.Y - originY),
-                                    (float)(gpuPoint.Z - originZ)));
-                                batchPointZoneIds.Add((uint)zoneBatchId);
+                                AddBatchSamplePoints(worldPoint, BuildNudgeSeed(zoneIndex, targetIndex, 0));
                                 targetCount[ci] = 1;
-                                pointsAdded++;
                             }
                             else
                             {
@@ -3076,16 +3368,7 @@ namespace MicroEng.Navisworks
                                 for (int si = 0; si < samples.Count; si++)
                                 {
                                     var p = samples[si];
-                                    batchPointsWorld.Add(p);
-                                    var gpuPoint = useOpenMeshRetry
-                                        ? ApplyPointNudge(p, openMeshNudge, BuildNudgeSeed(zoneIndex, targetIndex, si))
-                                        : p;
-                                    batchPointsLocal.Add(new Float4(
-                                        (float)(gpuPoint.X - originX),
-                                        (float)(gpuPoint.Y - originY),
-                                        (float)(gpuPoint.Z - originZ)));
-                                    batchPointZoneIds.Add((uint)zoneBatchId);
-                                    pointsAdded++;
+                                    AddBatchSamplePoints(p, BuildNudgeSeed(zoneIndex, targetIndex, si));
                                 }
                             }
 
@@ -3100,16 +3383,7 @@ namespace MicroEng.Navisworks
                                     {
                                         var p = geometrySamples[si];
                                         var seed = BuildNudgeSeed(zoneIndex, targetIndex, targetCount[ci] + si);
-                                        var gpuPoint = useOpenMeshRetry
-                                            ? ApplyPointNudge(p, openMeshNudge, seed)
-                                            : p;
-                                        batchPointsWorld.Add(p);
-                                        batchPointsLocal.Add(new Float4(
-                                            (float)(gpuPoint.X - originX),
-                                            (float)(gpuPoint.Y - originY),
-                                            (float)(gpuPoint.Z - originZ)));
-                                        batchPointZoneIds.Add((uint)zoneBatchId);
-                                        pointsAdded++;
+                                        AddBatchSamplePoints(p, seed);
                                     }
                                 }
                                 else

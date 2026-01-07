@@ -81,6 +81,7 @@ namespace MicroEng.Navisworks
         private const string WritebackSignaturePropertyName = "SpaceMapperSignature";
         private const int MaxSequenceOutputsPerMapping = 8;
         private const string ZoneContainmentPercentPropertyName = "Zone Containment %";
+        private const string ZoneOffsetMatchPropertyName = "Zone Offset Match";
         private const double ContainmentFullTolerance = 1e-6;
 
         public SpaceMapperService(Action<string> log)
@@ -235,6 +236,31 @@ namespace MicroEng.Navisworks
 
                 var engine = SpaceMapperEngineFactory.Create(request.ProcessingSettings.ProcessingMode);
                 var diagnostics = new SpaceMapperEngineDiagnostics();
+                IList<ZoneTargetIntersection> baselineIntersections = null;
+                if (request.ProcessingSettings.EnableZoneOffsets
+                    && request.ProcessingSettings.EnableOffsetAreaPass)
+                {
+                    var baselineSettings = CloneProcessingSettings(request.ProcessingSettings);
+                    baselineSettings.EnableZoneOffsets = false;
+                    baselineSettings.EnableOffsetAreaPass = false;
+                    baselineSettings.WriteZoneOffsetMatchProperty = false;
+                    baselineSettings.Offset3D = 0;
+                    baselineSettings.OffsetTop = 0;
+                    baselineSettings.OffsetBottom = 0;
+                    baselineSettings.OffsetSides = 0;
+                    baselineSettings.OffsetMode = "None";
+
+                    baselineIntersections = engine.ComputeIntersections(
+                            dataset.Zones,
+                            dataset.TargetsForEngine,
+                            baselineSettings,
+                            null,
+                            new SpaceMapperEngineDiagnostics(),
+                            null,
+                            token,
+                            runProgress)
+                        ?? new List<ZoneTargetIntersection>();
+                }
                 var intersections = engine.ComputeIntersections(
                         dataset.Zones,
                         dataset.TargetsForEngine,
@@ -245,6 +271,30 @@ namespace MicroEng.Navisworks
                         token,
                         runProgress)
                     ?? new List<ZoneTargetIntersection>();
+
+                if (baselineIntersections != null && baselineIntersections.Count > 0)
+                {
+                    var baselineSet = new HashSet<string>(
+                        baselineIntersections
+                            .Where(i => i != null && !string.IsNullOrWhiteSpace(i.ZoneId) && !string.IsNullOrWhiteSpace(i.TargetItemKey))
+                            .Select(i => $"{i.TargetItemKey}|{i.ZoneId}"),
+                        StringComparer.OrdinalIgnoreCase);
+
+                    for (var i = 0; i < intersections.Count; i++)
+                    {
+                        var inter = intersections[i];
+                        if (inter == null || string.IsNullOrWhiteSpace(inter.ZoneId) || string.IsNullOrWhiteSpace(inter.TargetItemKey))
+                        {
+                            continue;
+                        }
+
+                        var key = $"{inter.TargetItemKey}|{inter.ZoneId}";
+                        if (!baselineSet.Contains(key))
+                        {
+                            inter.IsOffsetOnly = true;
+                        }
+                    }
+                }
                 result.Intersections = intersections.ToList();
 
                 stats.ZonesProcessed = dataset.Zones.Count;
@@ -843,6 +893,43 @@ namespace MicroEng.Navisworks
                 }
             }
 
+            if (settings?.WriteZoneOffsetMatchProperty == true && relevant != null && relevant.Count > 0)
+            {
+                var category = string.IsNullOrWhiteSpace(settings.ZoneBehaviorCategory)
+                    ? "ME_SpaceInfo"
+                    : settings.ZoneBehaviorCategory;
+
+                if (ShouldSequenceBehaviour(relevant, mappings, settings))
+                {
+                    var count = Math.Min(relevant.Count, MaxSequenceOutputsPerMapping);
+                    for (var i = 0; i < count; i++)
+                    {
+                        var value = relevant[i]?.IsOffsetOnly == true ? "OffsetOnly" : "Core";
+                        entries.Add(new WritebackEntry
+                        {
+                            CategoryName = category,
+                            PropertyName = SequencedPropertyName(ZoneOffsetMatchPropertyName, i),
+                            Value = value,
+                            Mode = WriteMode.Overwrite,
+                            AppendSeparator = string.Empty
+                        });
+                    }
+                }
+                else
+                {
+                    var hasOffsetOnly = relevant.Any(r => r?.IsOffsetOnly == true);
+                    var value = hasOffsetOnly ? "OffsetOnly" : "Core";
+                    entries.Add(new WritebackEntry
+                    {
+                        CategoryName = category,
+                        PropertyName = ZoneOffsetMatchPropertyName,
+                        Value = value,
+                        Mode = WriteMode.Overwrite,
+                        AppendSeparator = string.Empty
+                    });
+                }
+            }
+
             if (mappings == null || mappings.Count == 0)
             {
                 return entries;
@@ -1239,6 +1326,59 @@ namespace MicroEng.Navisworks
                     if (inter.IsPartial) summary.PartialCount++;
                 }
             }
+        }
+
+        private static SpaceMapperProcessingSettings CloneProcessingSettings(SpaceMapperProcessingSettings settings)
+        {
+            if (settings == null)
+            {
+                return new SpaceMapperProcessingSettings();
+            }
+
+            return new SpaceMapperProcessingSettings
+            {
+                ProcessingMode = settings.ProcessingMode,
+                TreatPartialAsContained = settings.TreatPartialAsContained,
+                TagPartialSeparately = settings.TagPartialSeparately,
+                EnableMultipleZones = settings.EnableMultipleZones,
+                Offset3D = settings.Offset3D,
+                OffsetTop = settings.OffsetTop,
+                OffsetBottom = settings.OffsetBottom,
+                OffsetSides = settings.OffsetSides,
+                Units = settings.Units,
+                OffsetMode = settings.OffsetMode,
+                MaxThreads = settings.MaxThreads,
+                BatchSize = settings.BatchSize,
+                IndexGranularity = settings.IndexGranularity,
+                PerformancePreset = settings.PerformancePreset,
+                ZoneBehaviorCategory = settings.ZoneBehaviorCategory,
+                ZoneBehaviorPropertyName = settings.ZoneBehaviorPropertyName,
+                ZoneBehaviorContainedValue = settings.ZoneBehaviorContainedValue,
+                ZoneBehaviorPartialValue = settings.ZoneBehaviorPartialValue,
+                UseOriginPointOnly = settings.UseOriginPointOnly,
+                FastTraversalMode = settings.FastTraversalMode,
+                WritebackStrategy = settings.WritebackStrategy,
+                ShowInternalPropertiesDuringWriteback = settings.ShowInternalPropertiesDuringWriteback,
+                CloseDockPanesDuringRun = settings.CloseDockPanesDuringRun,
+                SkipUnchangedWriteback = settings.SkipUnchangedWriteback,
+                PackWritebackProperties = settings.PackWritebackProperties,
+                ZoneBoundsMode = settings.ZoneBoundsMode,
+                ZoneKDopVariant = settings.ZoneKDopVariant,
+                TargetBoundsMode = settings.TargetBoundsMode,
+                TargetKDopVariant = settings.TargetKDopVariant,
+                TargetMidpointMode = settings.TargetMidpointMode,
+                ZoneContainmentEngine = settings.ZoneContainmentEngine,
+                ZoneResolutionStrategy = settings.ZoneResolutionStrategy,
+                ExcludeZonesFromTargets = settings.ExcludeZonesFromTargets,
+                WriteZoneBehaviorProperty = settings.WriteZoneBehaviorProperty,
+                WriteZoneContainmentPercentProperty = settings.WriteZoneContainmentPercentProperty,
+                ContainmentCalculationMode = settings.ContainmentCalculationMode,
+                GpuRayCount = settings.GpuRayCount,
+                DockPaneCloseDelaySeconds = settings.DockPaneCloseDelaySeconds,
+                EnableZoneOffsets = settings.EnableZoneOffsets,
+                EnableOffsetAreaPass = settings.EnableOffsetAreaPass,
+                WriteZoneOffsetMatchProperty = settings.WriteZoneOffsetMatchProperty
+            };
         }
 
         internal static SpaceMapperResolvedData ResolveData(SpaceMapperRequest request, Document doc, ScrapeSession session)
@@ -1662,7 +1802,7 @@ namespace MicroEng.Navisworks
 
         private static Aabb Inflate(Aabb bbox, SpaceMapperProcessingSettings settings)
         {
-            if (settings == null)
+            if (settings == null || !settings.EnableZoneOffsets)
             {
                 return bbox;
             }

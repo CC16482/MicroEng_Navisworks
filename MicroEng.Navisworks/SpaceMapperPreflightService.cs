@@ -348,7 +348,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
 
         private static Aabb Inflate(Aabb bbox, SpaceMapperProcessingSettings settings)
         {
-            if (settings == null)
+            if (settings == null || !settings.EnableZoneOffsets)
             {
                 return bbox;
             }
@@ -417,6 +417,9 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             var settings = request.ProcessingSettings ?? new SpaceMapperProcessingSettings();
             sb.Append(settings.ProcessingMode).Append('|');
             sb.Append(settings.GpuRayCount).Append('|');
+            sb.Append(settings.EnableZoneOffsets ? '1' : '0').Append('|');
+            sb.Append(settings.EnableOffsetAreaPass ? '1' : '0').Append('|');
+            sb.Append(settings.WriteZoneOffsetMatchProperty ? '1' : '0').Append('|');
             sb.Append(settings.Offset3D.ToString("0.###")).Append('|');
             sb.Append(settings.OffsetTop.ToString("0.###")).Append('|');
             sb.Append(settings.OffsetBottom.ToString("0.###")).Append('|');

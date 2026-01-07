@@ -272,6 +272,15 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 37)]
         public double DockPaneCloseDelaySeconds { get; set; } = 2;
+
+        [DataMember(Order = 38)]
+        public bool EnableZoneOffsets { get; set; } = false;
+
+        [DataMember(Order = 39)]
+        public bool EnableOffsetAreaPass { get; set; } = false;
+
+        [DataMember(Order = 40)]
+        public bool WriteZoneOffsetMatchProperty { get; set; } = false;
     }
 
     [DataContract]
@@ -382,6 +391,7 @@ namespace MicroEng.Navisworks
         public bool IsContained { get; set; }
         public bool IsPartial { get; set; }
         public double OverlapVolume { get; set; }
+        public bool IsOffsetOnly { get; set; }
         [DataMember(Order = 5, EmitDefaultValue = false)]
         public double? ContainmentFraction { get; set; }
     }

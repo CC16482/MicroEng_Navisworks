@@ -220,221 +220,238 @@
         <StackPanel>
           <ui:TextBlock Text="Zone Offsets" FontSize="14" FontWeight="SemiBold" />
 
-          <UniformGrid Columns="2" Rows="3" Margin="0,8,0,0">
-            <StackPanel Orientation="Horizontal" Margin="0,4">
-              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-                <TextBlock Text="3D Offset:" VerticalAlignment="Center" />
-                <Button x:Name="Offset3DFlyoutButton"
-                        Style="{StaticResource HelpFlyoutButtonStyle}">
-                  <ui:SymbolIcon Symbol="Info16" />
-                </Button>
-              </StackPanel>
-              <ui:Flyout x:Name="Offset3DFlyout"
-                         Placement="Top"
-                         Opened="OnOffset3DFlyoutOpened"
-                         Closed="OnOffset3DFlyoutClosed">
-                <StackPanel x:Name="Offset3DFlyoutContent" Width="480">
-                  <TextBlock Text="3D Offset"
-                             FontWeight="SemiBold"
-                             TextAlignment="Center"
-                             HorizontalAlignment="Center"
-                             Margin="0,0,0,4" />
-                  <TextBlock Text="Applies an overall 3D expansion to the zone volume before checking targets."
-                             TextWrapping="Wrap"
-                             Margin="0,0,0,6" />
-                  <Border CornerRadius="10"
-                          BorderBrush="#FFFFFFFF"
-                          BorderThickness="1"
-                          Width="432"
-                          Height="243"
-                          ClipToBounds="True">
-                    <MediaElement x:Name="Offset3DVideo"
-                                  LoadedBehavior="Manual"
-                                  UnloadedBehavior="Manual"
-                                  Stretch="Uniform"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Loaded="OnHelpVideoLoaded"
-                                  SizeChanged="OnHelpVideoSizeChanged"
-                                  IsMuted="True"
-                                  MediaOpened="OnHelpVideoOpened"
-                                  MediaEnded="OnHelpVideoEnded"
-                                  MediaFailed="OnHelpVideoFailed" />
-                  </Border>
-                </StackPanel>
-              </ui:Flyout>
-              <TextBox x:Name="Offset3DBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-            </StackPanel>
+          <CheckBox x:Name="EnableZoneOffsetsCheckControl"
+                    Content="Enable Zone Offsets"
+                    Margin="0,6,0,0" />
 
-            <StackPanel Orientation="Horizontal" Margin="0,4">
-              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-                <TextBlock Text="Offset Sides:" VerticalAlignment="Center" />
-                <Button x:Name="OffsetSidesFlyoutButton"
-                        Style="{StaticResource HelpFlyoutButtonStyle}">
-                  <ui:SymbolIcon Symbol="Info16" />
-                </Button>
-              </StackPanel>
-              <ui:Flyout x:Name="OffsetSidesFlyout"
-                         Placement="Top"
-                         Opened="OnOffsetSidesFlyoutOpened"
-                         Closed="OnOffsetSidesFlyoutClosed">
-                <StackPanel x:Name="OffsetSidesFlyoutContent" Width="480">
-                  <TextBlock Text="Offset Sides"
-                             FontWeight="SemiBold"
-                             TextAlignment="Center"
-                             HorizontalAlignment="Center"
-                             Margin="0,0,0,4" />
-                  <TextBlock Text="Expands the zone horizontally on all sides before testing targets."
-                             TextWrapping="Wrap"
-                             Margin="0,0,0,6" />
-                  <Border CornerRadius="10"
-                          BorderBrush="#FFFFFFFF"
-                          BorderThickness="1"
-                          Width="432"
-                          Height="243"
-                          ClipToBounds="True">
-                    <MediaElement x:Name="OffsetSidesVideo"
-                                  LoadedBehavior="Manual"
-                                  UnloadedBehavior="Manual"
-                                  Stretch="Uniform"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Loaded="OnHelpVideoLoaded"
-                                  SizeChanged="OnHelpVideoSizeChanged"
-                                  IsMuted="True"
-                                  MediaOpened="OnHelpVideoOpened"
-                                  MediaEnded="OnHelpVideoEnded"
-                                  MediaFailed="OnHelpVideoFailed" />
-                  </Border>
+          <Grid Margin="0,4,0,0"
+                IsEnabled="{Binding ElementName=EnableZoneOffsetsCheckControl, Path=IsChecked}">
+            <UniformGrid Columns="2" Rows="3" Margin="0,4,0,0">
+              <StackPanel Orientation="Horizontal" Margin="0,4">
+                <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                  <TextBlock Text="3D Offset:" VerticalAlignment="Center" />
+                  <Button x:Name="Offset3DFlyoutButton"
+                          Style="{StaticResource HelpFlyoutButtonStyle}">
+                    <ui:SymbolIcon Symbol="Info16" />
+                  </Button>
                 </StackPanel>
-              </ui:Flyout>
-              <TextBox x:Name="OffsetSidesBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-            </StackPanel>
+                <ui:Flyout x:Name="Offset3DFlyout"
+                           Placement="Top"
+                           Opened="OnOffset3DFlyoutOpened"
+                           Closed="OnOffset3DFlyoutClosed">
+                  <StackPanel x:Name="Offset3DFlyoutContent" Width="480">
+                    <TextBlock Text="3D Offset"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,4" />
+                    <TextBlock Text="Applies an overall 3D expansion to the zone volume before checking targets."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,6" />
+                    <Border CornerRadius="10"
+                            BorderBrush="#FFFFFFFF"
+                            BorderThickness="1"
+                            Width="432"
+                            Height="243"
+                            ClipToBounds="True">
+                      <MediaElement x:Name="Offset3DVideo"
+                                    LoadedBehavior="Manual"
+                                    UnloadedBehavior="Manual"
+                                    Stretch="Uniform"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Loaded="OnHelpVideoLoaded"
+                                    SizeChanged="OnHelpVideoSizeChanged"
+                                    IsMuted="True"
+                                    MediaOpened="OnHelpVideoOpened"
+                                    MediaEnded="OnHelpVideoEnded"
+                                    MediaFailed="OnHelpVideoFailed" />
+                    </Border>
+                  </StackPanel>
+                </ui:Flyout>
+                <TextBox x:Name="Offset3DBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+              </StackPanel>
 
-            <StackPanel Orientation="Horizontal" Margin="0,4">
-              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-                <TextBlock Text="Offset Bottom:" VerticalAlignment="Center" />
-                <Button x:Name="OffsetBottomFlyoutButton"
-                        Style="{StaticResource HelpFlyoutButtonStyle}">
-                  <ui:SymbolIcon Symbol="Info16" />
-                </Button>
-              </StackPanel>
-              <ui:Flyout x:Name="OffsetBottomFlyout"
-                         Placement="Top"
-                         Opened="OnOffsetBottomFlyoutOpened"
-                         Closed="OnOffsetBottomFlyoutClosed">
-                <StackPanel x:Name="OffsetBottomFlyoutContent" Width="480">
-                  <TextBlock Text="Offset Bottom"
-                             FontWeight="SemiBold"
-                             TextAlignment="Center"
-                             HorizontalAlignment="Center"
-                             Margin="0,0,0,4" />
-                  <TextBlock Text="Adds a vertical offset to the bottom of the zone before testing targets."
-                             TextWrapping="Wrap"
-                             Margin="0,0,0,6" />
-                  <Border CornerRadius="10"
-                          BorderBrush="#FFFFFFFF"
-                          BorderThickness="1"
-                          Width="432"
-                          Height="243"
-                          ClipToBounds="True">
-                    <MediaElement x:Name="OffsetBottomVideo"
-                                  LoadedBehavior="Manual"
-                                  UnloadedBehavior="Manual"
-                                  Stretch="Uniform"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Loaded="OnHelpVideoLoaded"
-                                  SizeChanged="OnHelpVideoSizeChanged"
-                                  IsMuted="True"
-                                  MediaOpened="OnHelpVideoOpened"
-                                  MediaEnded="OnHelpVideoEnded"
-                                  MediaFailed="OnHelpVideoFailed" />
-                  </Border>
+              <StackPanel Orientation="Horizontal" Margin="0,4">
+                <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                  <TextBlock Text="Offset Sides:" VerticalAlignment="Center" />
+                  <Button x:Name="OffsetSidesFlyoutButton"
+                          Style="{StaticResource HelpFlyoutButtonStyle}">
+                    <ui:SymbolIcon Symbol="Info16" />
+                  </Button>
                 </StackPanel>
-              </ui:Flyout>
-              <TextBox x:Name="OffsetBottomBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-            </StackPanel>
+                <ui:Flyout x:Name="OffsetSidesFlyout"
+                           Placement="Top"
+                           Opened="OnOffsetSidesFlyoutOpened"
+                           Closed="OnOffsetSidesFlyoutClosed">
+                  <StackPanel x:Name="OffsetSidesFlyoutContent" Width="480">
+                    <TextBlock Text="Offset Sides"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,4" />
+                    <TextBlock Text="Expands the zone horizontally on all sides before testing targets."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,6" />
+                    <Border CornerRadius="10"
+                            BorderBrush="#FFFFFFFF"
+                            BorderThickness="1"
+                            Width="432"
+                            Height="243"
+                            ClipToBounds="True">
+                      <MediaElement x:Name="OffsetSidesVideo"
+                                    LoadedBehavior="Manual"
+                                    UnloadedBehavior="Manual"
+                                    Stretch="Uniform"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Loaded="OnHelpVideoLoaded"
+                                    SizeChanged="OnHelpVideoSizeChanged"
+                                    IsMuted="True"
+                                    MediaOpened="OnHelpVideoOpened"
+                                    MediaEnded="OnHelpVideoEnded"
+                                    MediaFailed="OnHelpVideoFailed" />
+                    </Border>
+                  </StackPanel>
+                </ui:Flyout>
+                <TextBox x:Name="OffsetSidesBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+              </StackPanel>
 
-            <StackPanel Orientation="Horizontal" Margin="0,4">
-              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-                <TextBlock Text="Offset Top:" VerticalAlignment="Center" />
-                <Button x:Name="OffsetTopFlyoutButton"
-                        Style="{StaticResource HelpFlyoutButtonStyle}">
-                  <ui:SymbolIcon Symbol="Info16" />
-                </Button>
-              </StackPanel>
-              <ui:Flyout x:Name="OffsetTopFlyout"
-                         Placement="Top"
-                         Opened="OnOffsetTopFlyoutOpened"
-                         Closed="OnOffsetTopFlyoutClosed">
-                <StackPanel x:Name="OffsetTopFlyoutContent" Width="480">
-                  <TextBlock Text="Offset Top"
-                             FontWeight="SemiBold"
-                             TextAlignment="Center"
-                             HorizontalAlignment="Center"
-                             Margin="0,0,0,4" />
-                  <TextBlock Text="Adds a vertical offset to the top of the zone before testing targets."
-                             TextWrapping="Wrap"
-                             Margin="0,0,0,6" />
-                  <Border CornerRadius="10"
-                          BorderBrush="#FFFFFFFF"
-                          BorderThickness="1"
-                          Width="432"
-                          Height="243"
-                          ClipToBounds="True">
-                    <MediaElement x:Name="OffsetTopVideo"
-                                  LoadedBehavior="Manual"
-                                  UnloadedBehavior="Manual"
-                                  Stretch="Uniform"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"
-                                  Loaded="OnHelpVideoLoaded"
-                                  SizeChanged="OnHelpVideoSizeChanged"
-                                  IsMuted="True"
-                                  MediaOpened="OnHelpVideoOpened"
-                                  MediaEnded="OnHelpVideoEnded"
-                                  MediaFailed="OnHelpVideoFailed" />
-                  </Border>
+              <StackPanel Orientation="Horizontal" Margin="0,4">
+                <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                  <TextBlock Text="Offset Bottom:" VerticalAlignment="Center" />
+                  <Button x:Name="OffsetBottomFlyoutButton"
+                          Style="{StaticResource HelpFlyoutButtonStyle}">
+                    <ui:SymbolIcon Symbol="Info16" />
+                  </Button>
                 </StackPanel>
-              </ui:Flyout>
-              <TextBox x:Name="OffsetTopBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
-            </StackPanel>
+                <ui:Flyout x:Name="OffsetBottomFlyout"
+                           Placement="Top"
+                           Opened="OnOffsetBottomFlyoutOpened"
+                           Closed="OnOffsetBottomFlyoutClosed">
+                  <StackPanel x:Name="OffsetBottomFlyoutContent" Width="480">
+                    <TextBlock Text="Offset Bottom"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,4" />
+                    <TextBlock Text="Adds a vertical offset to the bottom of the zone before testing targets."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,6" />
+                    <Border CornerRadius="10"
+                            BorderBrush="#FFFFFFFF"
+                            BorderThickness="1"
+                            Width="432"
+                            Height="243"
+                            ClipToBounds="True">
+                      <MediaElement x:Name="OffsetBottomVideo"
+                                    LoadedBehavior="Manual"
+                                    UnloadedBehavior="Manual"
+                                    Stretch="Uniform"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Loaded="OnHelpVideoLoaded"
+                                    SizeChanged="OnHelpVideoSizeChanged"
+                                    IsMuted="True"
+                                    MediaOpened="OnHelpVideoOpened"
+                                    MediaEnded="OnHelpVideoEnded"
+                                    MediaFailed="OnHelpVideoFailed" />
+                    </Border>
+                  </StackPanel>
+                </ui:Flyout>
+                <TextBox x:Name="OffsetBottomBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+              </StackPanel>
 
-            <StackPanel Orientation="Horizontal" Margin="0,4">
-              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-                <TextBlock Text="Units:" VerticalAlignment="Center" />
-                <Button x:Name="UnitsFlyoutButton"
-                        Style="{StaticResource HelpFlyoutButtonStyle}">
-                  <ui:SymbolIcon Symbol="Info16" />
-                </Button>
-              </StackPanel>
-              <ui:Flyout x:Name="UnitsFlyout" Placement="Top">
-                <StackPanel x:Name="UnitsFlyoutContent" Width="240">
-                  <TextBlock TextWrapping="Wrap"
-                             Text="Units used for all offset inputs." />
+              <StackPanel Orientation="Horizontal" Margin="0,4">
+                <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                  <TextBlock Text="Offset Top:" VerticalAlignment="Center" />
+                  <Button x:Name="OffsetTopFlyoutButton"
+                          Style="{StaticResource HelpFlyoutButtonStyle}">
+                    <ui:SymbolIcon Symbol="Info16" />
+                  </Button>
                 </StackPanel>
-              </ui:Flyout>
-              <TextBox x:Name="UnitsBoxControl" Width="140" Text="Millimeters" />
-            </StackPanel>
+                <ui:Flyout x:Name="OffsetTopFlyout"
+                           Placement="Top"
+                           Opened="OnOffsetTopFlyoutOpened"
+                           Closed="OnOffsetTopFlyoutClosed">
+                  <StackPanel x:Name="OffsetTopFlyoutContent" Width="480">
+                    <TextBlock Text="Offset Top"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"
+                               HorizontalAlignment="Center"
+                               Margin="0,0,0,4" />
+                    <TextBlock Text="Adds a vertical offset to the top of the zone before testing targets."
+                               TextWrapping="Wrap"
+                               Margin="0,0,0,6" />
+                    <Border CornerRadius="10"
+                            BorderBrush="#FFFFFFFF"
+                            BorderThickness="1"
+                            Width="432"
+                            Height="243"
+                            ClipToBounds="True">
+                      <MediaElement x:Name="OffsetTopVideo"
+                                    LoadedBehavior="Manual"
+                                    UnloadedBehavior="Manual"
+                                    Stretch="Uniform"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Loaded="OnHelpVideoLoaded"
+                                    SizeChanged="OnHelpVideoSizeChanged"
+                                    IsMuted="True"
+                                    MediaOpened="OnHelpVideoOpened"
+                                    MediaEnded="OnHelpVideoEnded"
+                                    MediaFailed="OnHelpVideoFailed" />
+                    </Border>
+                  </StackPanel>
+                </ui:Flyout>
+                <TextBox x:Name="OffsetTopBoxControl" Width="100" Text="0.0" Margin="6,0,0,0" />
+              </StackPanel>
 
-            <StackPanel Orientation="Horizontal" Margin="0,4">
-              <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
-                <TextBlock Text="Offset Mode:" VerticalAlignment="Center" />
-                <Button x:Name="OffsetModeFlyoutButton"
-                        Style="{StaticResource HelpFlyoutButtonStyle}">
-                  <ui:SymbolIcon Symbol="Info16" />
-                </Button>
-              </StackPanel>
-              <ui:Flyout x:Name="OffsetModeFlyout" Placement="Top">
-                <StackPanel x:Name="OffsetModeFlyoutContent" Width="260">
-                  <TextBlock TextWrapping="Wrap"
-                             Text="Defines how offsets are applied relative to the zone geometry." />
+              <StackPanel Orientation="Horizontal" Margin="0,4">
+                <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                  <TextBlock Text="Units:" VerticalAlignment="Center" />
+                  <Button x:Name="UnitsFlyoutButton"
+                          Style="{StaticResource HelpFlyoutButtonStyle}">
+                    <ui:SymbolIcon Symbol="Info16" />
+                  </Button>
                 </StackPanel>
-              </ui:Flyout>
-              <TextBox x:Name="OffsetModeBoxControl" Width="160" Text="From Zone Geometry" />
-            </StackPanel>
-          </UniformGrid>
+                <ui:Flyout x:Name="UnitsFlyout" Placement="Top">
+                  <StackPanel x:Name="UnitsFlyoutContent" Width="240">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Units used for all offset inputs." />
+                  </StackPanel>
+                </ui:Flyout>
+                <TextBox x:Name="UnitsBoxControl" Width="140" Text="Millimeters" />
+              </StackPanel>
+
+              <StackPanel Orientation="Horizontal" Margin="0,4">
+                <StackPanel Orientation="Horizontal" Width="120" VerticalAlignment="Center">
+                  <TextBlock Text="Offset Mode:" VerticalAlignment="Center" />
+                  <Button x:Name="OffsetModeFlyoutButton"
+                          Style="{StaticResource HelpFlyoutButtonStyle}">
+                    <ui:SymbolIcon Symbol="Info16" />
+                  </Button>
+                </StackPanel>
+                <ui:Flyout x:Name="OffsetModeFlyout" Placement="Top">
+                  <StackPanel x:Name="OffsetModeFlyoutContent" Width="260">
+                    <TextBlock TextWrapping="Wrap"
+                               Text="Defines how offsets are applied relative to the zone geometry." />
+                  </StackPanel>
+                </ui:Flyout>
+                <TextBox x:Name="OffsetModeBoxControl" Width="160" Text="From Zone Geometry" />
+              </StackPanel>
+            </UniformGrid>
+          </Grid>
+
+          <CheckBox x:Name="EnableOffsetAreaPassCheckControl"
+                    Content="Detect offset-only matches (two-pass)"
+                    Margin="0,8,0,0"
+                    IsEnabled="{Binding ElementName=EnableZoneOffsetsCheckControl, Path=IsChecked}" />
+
+          <CheckBox x:Name="WriteOffsetMatchPropertyCheckControl"
+                    Content="Write offset-only match property"
+                    Margin="0,4,0,0"
+                    IsEnabled="{Binding ElementName=EnableOffsetAreaPassCheckControl, Path=IsChecked}" />
         </StackPanel>
       </ui:Card>
 

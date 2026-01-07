@@ -115,6 +115,24 @@ namespace MicroEng.Navisworks
                 CloseDockPanesCheckControl.Checked += (_, __) => UpdateProcessingUiState();
                 CloseDockPanesCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
             }
+
+            if (EnableZoneOffsetsCheckControl != null)
+            {
+                EnableZoneOffsetsCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                EnableZoneOffsetsCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (EnableOffsetAreaPassCheckControl != null)
+            {
+                EnableOffsetAreaPassCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                EnableOffsetAreaPassCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
+
+            if (WriteOffsetMatchPropertyCheckControl != null)
+            {
+                WriteOffsetMatchPropertyCheckControl.Checked += (_, __) => UpdateProcessingUiState();
+                WriteOffsetMatchPropertyCheckControl.Unchecked += (_, __) => UpdateProcessingUiState();
+            }
         }
 
         private static void WireHover(FrameworkElement trigger, WpfFlyout flyout)
@@ -147,6 +165,9 @@ namespace MicroEng.Navisworks
         internal TextBox OffsetSidesBox => OffsetSidesBoxControl;
         internal TextBox UnitsBox => UnitsBoxControl;
         internal TextBox OffsetModeBox => OffsetModeBoxControl;
+        internal CheckBox EnableZoneOffsetsCheck => EnableZoneOffsetsCheckControl;
+        internal CheckBox EnableOffsetAreaPassCheck => EnableOffsetAreaPassCheckControl;
+        internal CheckBox WriteOffsetMatchPropertyCheck => WriteOffsetMatchPropertyCheckControl;
         internal Slider ZoneBoundsSlider => ZoneBoundsSliderControl;
         internal Slider TargetBoundsSlider => TargetBoundsSliderControl;
         internal FrameworkElement ZoneKDopVariantRow => ZoneKDopVariantRowControl;
@@ -273,6 +294,29 @@ namespace MicroEng.Navisworks
                 var showCalc = writeBehavior || writePercent;
                 ContainmentCalculationPanelControl.IsEnabled = showCalc;
                 ContainmentCalculationPanelControl.Visibility = showCalc ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            var offsetsEnabled = EnableZoneOffsetsCheckControl?.IsChecked == true;
+            if (!offsetsEnabled)
+            {
+                if (EnableOffsetAreaPassCheckControl?.IsChecked == true)
+                {
+                    EnableOffsetAreaPassCheckControl.IsChecked = false;
+                }
+
+                if (WriteOffsetMatchPropertyCheckControl?.IsChecked == true)
+                {
+                    WriteOffsetMatchPropertyCheckControl.IsChecked = false;
+                }
+            }
+
+            if (EnableOffsetAreaPassCheckControl != null && WriteOffsetMatchPropertyCheckControl != null)
+            {
+                if (EnableOffsetAreaPassCheckControl.IsChecked != true
+                    && WriteOffsetMatchPropertyCheckControl.IsChecked == true)
+                {
+                    WriteOffsetMatchPropertyCheckControl.IsChecked = false;
+                }
             }
         }
 

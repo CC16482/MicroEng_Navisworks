@@ -408,7 +408,10 @@ namespace MicroEng.Navisworks
                 ZoneResolutionStrategy = settings.ZoneResolutionStrategy,
                 WriteZoneContainmentPercentProperty = settings.WriteZoneContainmentPercentProperty,
                 ContainmentCalculationMode = settings.ContainmentCalculationMode,
-                GpuRayCount = settings.GpuRayCount
+                GpuRayCount = settings.GpuRayCount,
+                EnableZoneOffsets = settings.EnableZoneOffsets,
+                EnableOffsetAreaPass = settings.EnableOffsetAreaPass,
+                WriteZoneOffsetMatchProperty = settings.WriteZoneOffsetMatchProperty
             };
         }
 
@@ -1686,7 +1689,7 @@ namespace MicroEng.Navisworks
 
         private static Aabb Inflate(Aabb bbox, SpaceMapperProcessingSettings settings)
         {
-            if (settings == null)
+            if (settings == null || !settings.EnableZoneOffsets)
             {
                 return bbox;
             }

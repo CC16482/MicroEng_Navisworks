@@ -245,6 +245,21 @@ namespace MicroEng.Navisworks
             _processingPage.OffsetSidesBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.UnitsBox.TextChanged += (s, e) => TriggerLivePreflight();
             _processingPage.OffsetModeBox.TextChanged += (s, e) => TriggerLivePreflight();
+            if (_processingPage.EnableZoneOffsetsCheck != null)
+            {
+                _processingPage.EnableZoneOffsetsCheck.Checked += (s, e) => TriggerLivePreflight();
+                _processingPage.EnableZoneOffsetsCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            }
+            if (_processingPage.EnableOffsetAreaPassCheck != null)
+            {
+                _processingPage.EnableOffsetAreaPassCheck.Checked += (s, e) => TriggerLivePreflight();
+                _processingPage.EnableOffsetAreaPassCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            }
+            if (_processingPage.WriteOffsetMatchPropertyCheck != null)
+            {
+                _processingPage.WriteOffsetMatchPropertyCheck.Checked += (s, e) => TriggerLivePreflight();
+                _processingPage.WriteOffsetMatchPropertyCheck.Unchecked += (s, e) => TriggerLivePreflight();
+            }
 
             _zonesPage.ZoneSourceCombo.SelectionChanged += (s, e) =>
             {
@@ -1871,6 +1886,19 @@ namespace MicroEng.Navisworks
             var writeContainmentPercent = _processingPage.WriteContainmentPercentCheck?.IsChecked == true;
             var containmentCalculationMode = GetSelectedContainmentCalculationMode();
             var gpuRayCount = GetSelectedGpuRayCount();
+            var enableZoneOffsets = _processingPage.EnableZoneOffsetsCheck?.IsChecked == true;
+            var enableOffsetAreaPass = _processingPage.EnableOffsetAreaPassCheck?.IsChecked == true;
+            var writeOffsetMatch = _processingPage.WriteOffsetMatchPropertyCheck?.IsChecked == true;
+
+            if (!enableZoneOffsets)
+            {
+                enableOffsetAreaPass = false;
+                writeOffsetMatch = false;
+            }
+            else if (!enableOffsetAreaPass)
+            {
+                writeOffsetMatch = false;
+            }
 
             // Tier A/B: user controls target representation even when MeshAccurate is selected.
             if (targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint)
@@ -1880,7 +1908,7 @@ namespace MicroEng.Navisworks
                 writeContainmentPercent = false;
             }
 
-            return new SpaceMapperProcessingSettings
+            var settings = new SpaceMapperProcessingSettings
             {
                 ProcessingMode = SpaceMapperProcessingMode.Auto,
                 TreatPartialAsContained = treatPartial,
@@ -1919,8 +1947,22 @@ namespace MicroEng.Navisworks
                 ZoneContainmentEngine = containmentEngine,
                 ZoneResolutionStrategy = resolutionStrategy,
                 UseOriginPointOnly = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint,
-                GpuRayCount = gpuRayCount
+                GpuRayCount = gpuRayCount,
+                EnableZoneOffsets = enableZoneOffsets,
+                EnableOffsetAreaPass = enableOffsetAreaPass,
+                WriteZoneOffsetMatchProperty = writeOffsetMatch
             };
+
+            if (!settings.EnableZoneOffsets)
+            {
+                settings.Offset3D = 0;
+                settings.OffsetTop = 0;
+                settings.OffsetBottom = 0;
+                settings.OffsetSides = 0;
+                settings.OffsetMode = "None";
+            }
+
+            return settings;
         }
 
         private static TimeSpan GetDockPaneDelay(SpaceMapperProcessingSettings settings)
@@ -2818,6 +2860,18 @@ namespace MicroEng.Navisworks
             {
                 _processingPage.ExcludeZonesFromTargetsCheck.IsChecked = settings.ExcludeZonesFromTargets;
             }
+            if (_processingPage.EnableZoneOffsetsCheck != null)
+            {
+                _processingPage.EnableZoneOffsetsCheck.IsChecked = settings.EnableZoneOffsets;
+            }
+            if (_processingPage.EnableOffsetAreaPassCheck != null)
+            {
+                _processingPage.EnableOffsetAreaPassCheck.IsChecked = settings.EnableOffsetAreaPass;
+            }
+            if (_processingPage.WriteOffsetMatchPropertyCheck != null)
+            {
+                _processingPage.WriteOffsetMatchPropertyCheck.IsChecked = settings.WriteZoneOffsetMatchProperty;
+            }
             _processingPage.Offset3DBox.Text = settings.Offset3D.ToString();
             _processingPage.OffsetTopBox.Text = settings.OffsetTop.ToString();
             _processingPage.OffsetBottomBox.Text = settings.OffsetBottom.ToString();
@@ -2850,6 +2904,7 @@ namespace MicroEng.Navisworks
                 _processingPage.DockPaneDelayBox.Text = settings.DockPaneCloseDelaySeconds.ToString();
             }
             ApplyBoundsSettings(settings);
+            _processingPage.UpdateProcessingUiState();
         }
 
         private void ApplyBoundsSettings(SpaceMapperProcessingSettings settings)

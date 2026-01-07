@@ -262,7 +262,7 @@ namespace MicroEng.Navisworks
 
         private static BoundingBox3D ApplyOffsets(BoundingBox3D bbox, SpaceMapperProcessingSettings settings)
         {
-            if (bbox == null || settings == null) return bbox;
+            if (bbox == null || settings == null || !settings.EnableZoneOffsets) return bbox;
             var offset = settings.Offset3D;
             var offsetSides = settings.OffsetSides;
             var top = settings.OffsetTop;
@@ -553,6 +553,19 @@ namespace MicroEng.Navisworks
                 var v = plane.Normal;
                 var val = v.X * point.X + v.Y * point.Y + v.Z * point.Z + plane.D;
                 if (val > Epsilon) return false;
+            }
+            return true;
+        }
+
+        public static bool IsInsideInflated(IReadOnlyList<PlaneEquation> planes, Vector3D point, double dx, double dy, double dz)
+        {
+            if (planes == null || planes.Count == 0) return false;
+            foreach (var plane in planes)
+            {
+                var v = plane.Normal;
+                var expand = (dx * Math.Abs(v.X)) + (dy * Math.Abs(v.Y)) + (dz * Math.Abs(v.Z));
+                var val = v.X * point.X + v.Y * point.Y + v.Z * point.Z + plane.D;
+                if (val > expand + Epsilon) return false;
             }
             return true;
         }

@@ -1,0 +1,374 @@
+Understood. I reviewed the latest code and XAML you provided, and there are two separate issues to address:
+
+1. **Your current “Zone Offsets” UI has no enable/disable gate**, so offsets are always “present” (even if zero), and the user has no clarity whether they are being applied.
+
+2. **More importantly: offsets are NOT being applied consistently across your engines.**
+   Right now, the offset values are only being used in one place in the intersection engine: the **AABB query bounds inflation** path (broad-phase culling / spatial index). In the actual *accurate* containment tests (Mesh Accurate, Hull/Planes), offsets are effectively ignored unless you explicitly incorporate them into the plane tests / mesh tests. That explains “not sure if this is working properly”.
+
+Additionally, your requested feature (“offset-only objects”) requires a deliberate two-pass run and a new “offset-only” tagging writeback.
+
+Below is a precise, Codex-ready change request with concrete code structure. You can paste this into your Codex prompt as-is.
+
+---
+
+# A) What I found in your current files (important)
+
+## 1) The UI currently has these named controls
+
+In `SpaceMapperStepProcessingPage.xaml` you currently have:
+
+* `Offset3DBoxControl`
+* `OffsetSidesBoxControl`
+* `OffsetBottomBoxControl`
+* `OffsetTopBoxControl`
+* `OffsetUnitsBoxControl`
+* `OffsetModeBoxControl`
+
+…and **no checkbox** gating them.
+
+## 2) Offsets are only applied in one place in the engine
+
+In `SpaceMapperEngines.cs`, offsets appear only in the AABB inflation path (GetZoneQueryBounds → Inflate).
+Your true containment logic:
+
+* `ZoneContainsPoint(...)`
+* `ZoneContainsBounds(...)`
+
+does not consistently apply offsets when using mesh/planes. So offsets won’t behave as the UI implies.
+
+This is why you can “max out” the UI and still see inaccurate matches.
+
+---
+
+# B) Implementation Plan (what needs to change)
+
+You asked for:
+
+1. A **tickbox** to enable zone offsets; when disabled, UI fields are greyed out and offsets are ignored.
+2. Offsets must **actually apply** in processing (not just the broad-phase AABB query).
+3. Optional “Offset Area Detection”: run once with offsets OFF, run again with offsets ON, and tag offset-only matches (objects that only match with offset).
+
+To deliver this cleanly we must add:
+
+✅ `EnableZoneOffsets` (bool)
+✅ `EnableOffsetAreaPass` (bool)
+✅ `WriteOffsetTagProperty` (bool) *(or automatically write it when pass enabled)*
+✅ `OffsetOnly` flag per intersection
+✅ Writeback property output: `Zone Offset Match` (and sequenced `(1)`, `(2)` when Sequence multi-zone mode is used)
+
+---
+
+# C) Codex-Ready Change Request (copy/paste)
+
+## 1) SpaceMapperModels.cs (new settings + new per-intersection flag)
+
+### Add to `SpaceMapperProcessingSettings`:
+
+```csharp
+public bool EnableZoneOffsets { get; set; } = false;
+
+// When enabled: run 2 passes (no offset + offset) and mark offset-only matches
+public bool EnableOffsetAreaPass { get; set; } = false;
+
+// Writeback output: writes Zone Offset Match (and sequenced variants if Sequence mode is used)
+public bool WriteZoneOffsetMatchProperty { get; set; } = false;
+```
+
+### Add to your intersection result model (where you store containment fraction etc)
+
+If you have something like `SpaceMapperIntersection` / `SpaceMapperIntersectionResult` / `TargetZoneIntersection`, add:
+
+```csharp
+public bool IsOffsetOnly { get; set; } = false;
+```
+
+---
+
+## 2) SpaceMapperStepProcessingPage.xaml (UI checkbox gate + disable fields)
+
+Add this checkbox above the Zone Offsets grid:
+
+```xml
+<CheckBox x:Name="EnableZoneOffsetsCheckControl"
+          Content="Enable Zone Offsets"
+          Margin="0,0,0,10"/>
+```
+
+Now wrap your existing offset grid in a container and bind its `IsEnabled`:
+
+```xml
+<Grid IsEnabled="{Binding ElementName=EnableZoneOffsetsCheckControl, Path=IsChecked}">
+    <!-- EXISTING Offset inputs:
+         Offset3DBoxControl, OffsetSidesBoxControl, OffsetBottomBoxControl,
+         OffsetTopBoxControl, OffsetUnitsBoxControl, OffsetModeBoxControl
+    -->
+</Grid>
+```
+
+Now add the second pass option (below offsets inputs):
+
+```xml
+<CheckBox x:Name="EnableOffsetAreaPassCheckControl"
+          Content="Detect offset-only matches (two-pass)"
+          Margin="0,10,0,0"
+          IsEnabled="{Binding ElementName=EnableZoneOffsetsCheckControl, Path=IsChecked}"/>
+
+<CheckBox x:Name="WriteOffsetMatchPropertyCheckControl"
+          Content="Write offset-only match property"
+          Margin="0,6,0,0"
+          IsEnabled="{Binding ElementName=EnableOffsetAreaPassCheckControl, Path=IsChecked}"/>
+```
+
+---
+
+## 3) SpaceMapperStepProcessingPage.xaml.cs (minimal wiring)
+
+Expose these controls so SpaceMapperControl can access them:
+
+```csharp
+public CheckBox EnableZoneOffsetsCheck => EnableZoneOffsetsCheckControl;
+public CheckBox EnableOffsetAreaPassCheck => EnableOffsetAreaPassCheckControl;
+public CheckBox WriteOffsetMatchPropertyCheck => WriteOffsetMatchPropertyCheckControl;
+```
+
+---
+
+## 4) SpaceMapperControl.xaml.cs (settings read/write + events)
+
+### In `ApplySettingsToUi(...)` add:
+
+```csharp
+ProcessingPage.EnableZoneOffsetsCheckControl.IsChecked = settings.EnableZoneOffsets;
+ProcessingPage.EnableOffsetAreaPassCheckControl.IsChecked = settings.EnableOffsetAreaPass;
+ProcessingPage.WriteOffsetMatchPropertyCheckControl.IsChecked = settings.WriteZoneOffsetMatchProperty;
+```
+
+### In `BuildSettingsFromUi()` add:
+
+```csharp
+processing.EnableZoneOffsets = ProcessingPage.EnableZoneOffsetsCheckControl.IsChecked == true;
+processing.EnableOffsetAreaPass = ProcessingPage.EnableOffsetAreaPassCheckControl.IsChecked == true;
+processing.WriteZoneOffsetMatchProperty = ProcessingPage.WriteOffsetMatchPropertyCheckControl.IsChecked == true;
+
+// If not enabled, force offsets to zero / mode none so engine ignores
+if (!processing.EnableZoneOffsets)
+{
+    processing.Offset3D = 0;
+    processing.OffsetSides = 0;
+    processing.OffsetTop = 0;
+    processing.OffsetBottom = 0;
+    processing.OffsetMode = "None";
+}
+```
+
+### Add event hooks similar to existing preflight triggers:
+
+```csharp
+ProcessingPage.EnableZoneOffsetsCheckControl.Checked += ProcessingInputsChanged;
+ProcessingPage.EnableZoneOffsetsCheckControl.Unchecked += ProcessingInputsChanged;
+
+ProcessingPage.EnableOffsetAreaPassCheckControl.Checked += ProcessingInputsChanged;
+ProcessingPage.EnableOffsetAreaPassCheckControl.Unchecked += ProcessingInputsChanged;
+
+ProcessingPage.WriteOffsetMatchPropertyCheckControl.Checked += ProcessingInputsChanged;
+ProcessingPage.WriteOffsetMatchPropertyCheckControl.Unchecked += ProcessingInputsChanged;
+```
+
+---
+
+## 5) SpaceMapperEngines.cs (make offsets actually apply, not just broad-phase)
+
+### Key point:
+
+Right now offsets only affect `GetZoneQueryBounds`.
+To make offsets real, they must influence `ZoneContainsPoint` and `ZoneContainsBounds`.
+
+**Minimum correct behavior**:
+
+* If offsets enabled, then plane-based tests should allow margin.
+* If mesh-accurate enabled, offsets must be handled via either:
+
+  * expanding mesh geometry (hard), OR
+  * sampling around the point within offset distance (reasonable + implementable now).
+
+### Implement helper:
+
+```csharp
+private static void GetOffsetParams(SpaceMapperProcessingSettings s, out double dx, out double dy, out double dz, out Vector3D shift)
+{
+    dx = dy = dz = 0;
+    shift = new Vector3D(0,0,0);
+
+    if (s == null || !s.EnableZoneOffsets) return;
+
+    // interpret top/bottom as +Z / -Z expansions
+    var side = s.OffsetSides + s.Offset3D;
+    var top = s.OffsetTop + s.Offset3D;
+    var bottom = s.OffsetBottom + s.Offset3D;
+
+    dx = side;
+    dy = side;
+    dz = (top + bottom) * 0.5;
+
+    // shift if top != bottom
+    var zShift = (top - bottom) * 0.5;
+    shift = new Vector3D(0, 0, zShift);
+}
+```
+
+### Update `ZoneContainsPoint(...)`
+
+Right before plane test and mesh test:
+
+```csharp
+GetOffsetParams(settings, out var dx, out var dy, out var dz, out var shift);
+var pShifted = point - shift;
+```
+
+#### Plane test inflation:
+
+Instead of:
+
+```csharp
+return GeometryMath.IsInside(zone.Planes, pointVec);
+```
+
+Use:
+
+```csharp
+return GeometryMath.IsInsideInflated(zone.Planes, pointVecShifted, dx, dy, dz);
+```
+
+(You’ll need to add `IsInsideInflated` to GeometryMath, shown below.)
+
+#### Mesh accurate offset:
+
+If mesh accurate says “outside”, and offsets enabled, do extra probes:
+
+```csharp
+if (!inside && settings.EnableZoneOffsets)
+{
+    // 6-direction probes + center (fast)
+    Span<Vector3D> probes = stackalloc Vector3D[]
+    {
+        pointVecShifted,
+        pointVecShifted + new Vector3D(dx,0,0),
+        pointVecShifted - new Vector3D(dx,0,0),
+        pointVecShifted + new Vector3D(0,dy,0),
+        pointVecShifted - new Vector3D(0,dy,0),
+        pointVecShifted + new Vector3D(0,0,dz),
+        pointVecShifted - new Vector3D(0,0,dz),
+    };
+
+    foreach (var q in probes)
+    {
+        if (ZonePointInMeshCpu(zone, q) /* or GPU */)
+        {
+            inside = true;
+            break;
+        }
+    }
+}
+```
+
+This is “reasonable accuracy” and matches your requirement without needing a full mesh offset operation.
+
+---
+
+## 6) SpaceMapperGeometry.cs (add inflated plane helper)
+
+Add:
+
+```csharp
+public static bool IsInsideInflated(IReadOnlyList<PlaneEquation> planes, Vector3D point, double dx, double dy, double dz)
+{
+    const double eps = 1e-8;
+
+    for (int i = 0; i < planes.Count; i++)
+    {
+        var pl = planes[i];
+        var n = pl.Normal; // assumed normalized
+
+        var expand = dx * Math.Abs(n.X) + dy * Math.Abs(n.Y) + dz * Math.Abs(n.Z);
+
+        var dist = n.DotProduct(point) + pl.D;
+        if (dist > expand + eps)
+            return false;
+    }
+    return true;
+}
+```
+
+---
+
+## 7) SpaceMapperService.cs (two-pass offset area detection + tag)
+
+When `EnableOffsetAreaPass` is on:
+
+* Run intersections pass 1 with offsets disabled (baseline)
+* Run intersections pass 2 with offsets enabled (final)
+* Mark any intersection present in pass2 but not pass1 as `IsOffsetOnly = true`
+* Continue writeback with pass2 results
+
+### Pseudocode shape (Codex should implement correctly)
+
+```csharp
+List<Intersection> baseline = null;
+
+if (settings.EnableOffsetAreaPass)
+{
+    var baselineSettings = settings.Clone();
+    baselineSettings.EnableZoneOffsets = false;
+    baselineSettings.Offset3D = baselineSettings.OffsetSides = baselineSettings.OffsetTop = baselineSettings.OffsetBottom = 0;
+    baselineSettings.OffsetMode = "None";
+
+    baseline = engine.ComputeIntersections(zones, targets, baselineSettings);
+}
+
+var final = engine.ComputeIntersections(zones, targets, settings);
+
+if (settings.EnableOffsetAreaPass && baseline != null)
+{
+    var baselineSet = new HashSet<string>(baseline.Select(i => $"{i.TargetKey}|{i.ZoneKey}"));
+
+    foreach (var i in final)
+    {
+        if (!baselineSet.Contains($"{i.TargetKey}|{i.ZoneKey}"))
+            i.IsOffsetOnly = true;
+    }
+}
+```
+
+### Writeback
+
+If `WriteZoneOffsetMatchProperty` is enabled, write:
+
+* Property name: `Zone Offset Match`
+* Value: `True` / `False` (or “OffsetOnly” / “Core”)
+* If Sequence multi-zone is selected: `Zone Offset Match(1)`, `(2)`, etc
+
+---
+
+# D) What is incomplete right now (so you know)
+
+I did NOT finish inspecting your `SpaceMapperService.Run` method structure in this reply (tool time limit), so I’m giving you a correct implementation *pattern* for the two-pass logic that Codex can integrate into your existing run pipeline.
+
+If you paste the above change request into Codex, it will need to place the two-pass logic in the same part of the service where you currently call `engine.ComputeIntersections(...)` and then do writeback.
+
+If you want, I can give you the exact insertion location once you confirm which method is currently orchestrating intersection computation (name/signature), and I’ll map it precisely to your file.
+
+---
+
+# Next step (for you)
+
+Reply with:
+
+1. Whether your coordinate “Up axis” should be treated as **Z (Navisworks standard)** or whether you intentionally coded **Y-up**.
+   This affects whether top/bottom offsets should apply on Z (recommended) or Y.
+
+2. Do you want “offset-only” tagging to:
+
+* mark only the additional matches (per zone), OR
+* mark the target globally (“this target was only captured by offset somewhere”)?
+
+Once you answer those two, I will refine the above into an even tighter Codex prompt with exact property naming and sequencing behavior aligned with your mapping rules.

@@ -263,6 +263,28 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private void SmartSetGenerator_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (IsDockPaneVisible("MicroEng.SmartSetGenerator.DockPane.MENG"))
+                {
+                    UpdateToolButtonStates();
+                    return;
+                }
+
+                MicroEngActions.SmartSetGenerator();
+                UpdateToolButtonStates();
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"[Smart Set Generator] failed to open: {ex}");
+                LogToPanel($"[Smart Set Generator] failed to open: {ex.Message}");
+                System.Windows.MessageBox.Show($"Smart Set Generator failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void Sequence4D_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -338,27 +360,29 @@ namespace MicroEng.Navisworks
 
         private void UpdateToolButtonStates()
         {
-            void SetButton(Wpf.Ui.Controls.Button button, bool isActive)
+            void SetCardActive(Wpf.Ui.Controls.CardAction card, bool isActive)
             {
-                if (button == null)
+                if (card == null)
                 {
                     return;
                 }
 
-                button.Appearance = isActive ? Wpf.Ui.Controls.ControlAppearance.Primary : Wpf.Ui.Controls.ControlAppearance.Secondary;
+                card.Tag = isActive;
             }
 
             var dataScraperOpen = MicroEngActions.IsDataScraperOpen;
             var dataMapperOpen = MicroEngActions.IsDataMapperOpen;
             var dataMatrixOpen = IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG");
+            var smartSetsOpen = IsDockPaneVisible("MicroEng.SmartSetGenerator.DockPane.MENG");
             var spaceMapperOpen = IsDockPaneVisible("MicroEng.SpaceMapper.DockPane.MENG");
             var sequence4dOpen = IsDockPaneVisible("MicroEng.Sequence4D.DockPane.MENG");
 
-            SetButton(DataScraperButton, dataScraperOpen);
-            SetButton(DataMapperButton, dataMapperOpen);
-            SetButton(DataMatrixButton, dataMatrixOpen);
-            SetButton(SpaceMapperButton, spaceMapperOpen);
-            SetButton(Sequence4DButton, sequence4dOpen);
+            SetCardActive(DataScraperButton, dataScraperOpen);
+            SetCardActive(DataMapperButton, dataMapperOpen);
+            SetCardActive(DataMatrixButton, dataMatrixOpen);
+            SetCardActive(SmartSetsButton, smartSetsOpen);
+            SetCardActive(SpaceMapperButton, spaceMapperOpen);
+            SetCardActive(Sequence4DButton, sequence4dOpen);
         }
 
         private void OnToolWindowStateChanged()

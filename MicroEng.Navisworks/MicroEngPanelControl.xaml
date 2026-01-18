@@ -16,10 +16,35 @@
 
   <UserControl.Resources>
     <ResourceDictionary>
-      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
       </ResourceDictionary.MergedDictionaries>
+      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <Style x:Key="ToolCardActionStyle"
+             TargetType="ui:CardAction"
+             BasedOn="{StaticResource {x:Type ui:CardAction}}">
+        <Setter Property="Margin" Value="0,0,0,10" />
+        <Setter Property="Padding" Value="14,12" />
+        <Setter Property="MinHeight" Value="64" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="IsChevronVisible" Value="True" />
+        <Style.Triggers>
+          <Trigger Property="Tag" Value="True">
+            <Setter Property="Background" Value="{DynamicResource CardBackgroundPressed}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+            <Setter Property="BorderThickness" Value="2,1,1,1" />
+          </Trigger>
+        </Style.Triggers>
+      </Style>
+      <Style x:Key="ToolCardIconStyle" TargetType="ui:SymbolIcon">
+        <Setter Property="FontSize" Value="26" />
+        <Setter Property="Filled" Value="False" />
+      </Style>
     </ResourceDictionary>
   </UserControl.Resources>
 
@@ -58,20 +83,80 @@
       </Grid>
     </ui:Card>
 
-    <ui:Card Grid.Row="1"
-             Padding="20,12"
-             Margin="0,0,0,12"
-             HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Top">
-      <StackPanel>
-        <ui:Button x:Name="DataScraperButton" Content="Data Scraper" Appearance="Secondary" Margin="0,0,0,8" Click="DataScraper_Click" />
-        <ui:Button x:Name="DataMapperButton" Content="Data Mapper" Appearance="Secondary" Margin="0,0,0,8" Click="AppendData_Click" />
-        <ui:Button x:Name="DataMatrixButton" Content="Data Matrix" Appearance="Secondary" Margin="0,0,0,8" Click="DataMatrix_Click" />
-        <ui:Button x:Name="SpaceMapperButton" Content="Space Mapper" Appearance="Secondary" Margin="0,0,0,8" Click="SpaceMapper_Click" />
-        <ui:Button x:Name="Sequence4DButton" Content="4D Sequence" Appearance="Secondary" Click="Sequence4D_Click" />
-      </StackPanel>
-    </ui:Card>
+    <StackPanel Grid.Row="1" Margin="0,0,0,12">
+      <ui:CardAction x:Name="DataScraperButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Click="DataScraper_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="DatabaseLightning20" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="Data Scraper" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Scan model properties into cache." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+
+      <ui:CardAction x:Name="DataMapperButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Click="AppendData_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="DocumentArrowRight24" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="Data Mapper" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Append mapped data to selection." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+
+      <ui:CardAction x:Name="DataMatrixButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Click="DataMatrix_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="TableSettings28" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="Data Matrix" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Browse scraped data in a grid." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+
+      <ui:CardAction x:Name="SmartSetsButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Click="SmartSetGenerator_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="TextBulletListAdd20" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="Smart Set Generator" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Build Search and Selection Sets fast." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+
+      <ui:CardAction x:Name="SpaceMapperButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Click="SpaceMapper_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="BoxMultiple20" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="Space Mapper" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Map targets to zones and write back." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+
+      <ui:CardAction x:Name="Sequence4DButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Margin="0"
+                     Click="Sequence4D_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="CalendarPlay24" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="4D Sequence" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Build Timeliner task sequences." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+    </StackPanel>
 
     <ui:Card Grid.Row="2"
              Padding="20,12"

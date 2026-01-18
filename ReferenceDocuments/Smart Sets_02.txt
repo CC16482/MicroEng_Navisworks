@@ -1,0 +1,1021 @@
+Understood — I’ll treat the Smart Set Generator as a **WPF‑UI styled dockable tool** that already exists (or is being created), and you now want three “next level” capabilities added:
+
+1. **Proper Property Picker control** (category/property search + samples + counts)
+2. **Fast Preview mode** (estimate matches using **Data Scraper cached RawEntries**, no model traversal)
+3. **Recipe persistence** (save/load builders as JSON on disk, compatible with MicroEng Overwatch later)
+
+Below is a **Codex-ready change request**, plus **drop‑in code** (new files + integration points). Codex will need to map it into your existing Smart Set Generator files (or create them if missing).
+
+---
+
+# 1) Proper Property Picker control
+
+## UX goals
+
+* User should never have to type `Category`/`Property` manually.
+* Picker must be **fast** and driven by the **current Data Scraper session**:
+
+  * Categories
+  * Property names
+  * Type
+  * ItemCount / DistinctCount (if available)
+  * Sample values (up to 10)
+
+## Implementation approach
+
+* Add a `Pick…` button per rule row.
+* Clicking it opens a **WPF‑UI styled dialog**:
+
+  * Search box (filters categories + properties)
+  * Properties grid (category, property, type, item count, distinct count, sample preview)
+  * Double‑click selects
+* Selecting a property populates the rule:
+
+  * `Rule.Category`
+  * `Rule.Property`
+  * Optionally sets value suggestions (sample values)
+
+---
+
+# 2) Fast Preview mode
+
+## UX goals
+
+* “Preview results” should be **instant** (or close) without building a Navisworks Search.
+* It should clearly say: **Fast preview = based on cached scrape data** and can differ slightly from a real search.
+* Output:
+
+  * estimated matching count
+  * optionally list top N item paths (for debugging)
+  * a “Verify (real model search)” button can remain later (optional)
+
+## How it works technically
+
+You already have Data Scraper caching:
+
+* `ScrapeSession.Properties` catalog
+* `ScrapeSession.RawEntries` “one row per item/property/value”
+
+Fast Preview computes matches by:
+
+* Building an **in-memory index** from RawEntries for only the properties used in rules
+* Evaluating each rule → a set of matching `ItemPath`
+* Combining rules using AND (Excel style), plus **optional OR groups** if you support grouping:
+
+  * AND within a group
+  * OR across groups
+
+Key point: this is CPU-only and uses cached strings — it should be very fast even on huge models, compared to navisworks search/COM calls.
+
+---
+
+# 3) Recipe persistence format
+
+## UX goals
+
+* Users can save a “recipe” that includes:
+
+  * recipe name
+  * selected Data Scraper profile
+  * output type (Search Set / Selection Set / Folder / Smart grouping)
+  * rules (category/property/operator/value)
+  * grouping spec
+* Users can load it later and continue editing
+* Storage location:
+
+  * Prefer **MicroEng plugin data folder** (ProgramData plugin dir or a MicroEng data folder)
+  * JSON for future Overwatch integration
+
+## Implementation approach
+
+* Add a `SmartSetRecipeStore`:
+
+  * `Save(recipe, path)`
+  * `Load(path)`
+  * `ListRecipes()`
+* Use **DataContractJsonSerializer** (built into .NET Framework 4.8) so you do **not** need new NuGets.
+
+---
+
+# Code: new files (drop-in examples)
+
+Below is a cohesive “mini module” you can drop into `MicroEng.Navisworks/SmartSets/…`
+
+## A) Models + recipe schema
+
+**File:** `MicroEng.Navisworks/SmartSets/SmartSetModels.cs`
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Runtime.Serialization;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public enum SmartSetOperator
+    {
+        Contains,
+        Equals,
+        NotEquals,
+        GreaterThan,
+        GreaterOrEqual,
+        LessThan,
+        LessOrEqual,
+        IsBlank,
+        IsNotBlank
+    }
+
+    public enum SmartSetOutputType
+    {
+        SearchSet,
+        SelectionSet,
+        FolderOnly
+    }
+
+    [DataContract]
+    public sealed class SmartSetRule
+    {
+        // Optional OR-grouping support: rules with same GroupId are AND’d; groups are OR’d.
+        [DataMember(Order = 1)] public string GroupId { get; set; } = "A";
+
+        [DataMember(Order = 2)] public string Category { get; set; } = "";
+        [DataMember(Order = 3)] public string Property { get; set; } = "";
+
+        [DataMember(Order = 4)] public SmartSetOperator Operator { get; set; } = SmartSetOperator.Contains;
+
+        [DataMember(Order = 5)] public string Value { get; set; } = "";
+
+        [DataMember(Order = 6)] public bool Enabled { get; set; } = true;
+
+        public string Key => $"{Category}::{Property}";
+    }
+
+    [DataContract]
+    public sealed class SmartSetGroupingSpec
+    {
+        // Keep it simple for now; extend later to your “Smart grouping” features.
+        [DataMember(Order = 1)] public bool EnableSmartGrouping { get; set; } = false;
+        [DataMember(Order = 2)] public string GroupByCategory { get; set; } = "";
+        [DataMember(Order = 3)] public string GroupByProperty { get; set; } = "";
+    }
+
+    [DataContract]
+    public sealed class SmartSetRecipe
+    {
+        [DataMember(Order = 1)] public int Version { get; set; } = 1;
+
+        [DataMember(Order = 2)] public string Name { get; set; } = "New Recipe";
+        [DataMember(Order = 3)] public string Description { get; set; } = "";
+
+        // Critical: tie recipe to a Data Scraper profile (cached sessions drive picker + fast preview)
+        [DataMember(Order = 4)] public string DataScraperProfile { get; set; } = "Default";
+
+        [DataMember(Order = 5)] public SmartSetOutputType OutputType { get; set; } = SmartSetOutputType.SearchSet;
+
+        [DataMember(Order = 6)] public List<SmartSetRule> Rules { get; set; } = new List<SmartSetRule>();
+
+        [DataMember(Order = 7)] public SmartSetGroupingSpec Grouping { get; set; } = new SmartSetGroupingSpec();
+
+        [DataMember(Order = 8)] public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+        [DataMember(Order = 9)] public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+    }
+
+    public sealed class ScrapedPropertyDescriptor
+    {
+        public string Category { get; }
+        public string Name { get; }
+        public string Type { get; }
+        public int ItemCount { get; }
+        public int DistinctCount { get; }
+        public IReadOnlyList<string> SampleValues { get; }
+
+        public ScrapedPropertyDescriptor(
+            string category,
+            string name,
+            string type,
+            int itemCount,
+            int distinctCount,
+            IReadOnlyList<string> sampleValues)
+        {
+            Category = category ?? "";
+            Name = name ?? "";
+            Type = type ?? "";
+            ItemCount = itemCount;
+            DistinctCount = distinctCount;
+            SampleValues = sampleValues ?? Array.Empty<string>();
+        }
+
+        public string Key => $"{Category}::{Name}";
+
+        public string SampleValuesPreview
+            => SampleValues == null || SampleValues.Count == 0
+                ? ""
+                : string.Join(", ", SampleValues);
+    }
+
+    public sealed class FastPreviewResult
+    {
+        public int EstimatedMatchCount { get; set; }
+        public List<string> SampleItemPaths { get; set; } = new List<string>();
+        public bool UsedCache { get; set; } = true;
+        public string Notes { get; set; } = "";
+    }
+}
+```
+
+---
+
+## B) Recipe persistence (JSON) — no extra packages
+
+**File:** `MicroEng.Navisworks/SmartSets/SmartSetRecipeStore.cs`
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.Serialization.Json;
+using System.Text;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public sealed class SmartSetRecipeStore
+    {
+        private readonly string _recipesDir;
+
+        public SmartSetRecipeStore(string recipesDir)
+        {
+            _recipesDir = recipesDir ?? throw new ArgumentNullException(nameof(recipesDir));
+            Directory.CreateDirectory(_recipesDir);
+        }
+
+        public string RecipesDirectory => _recipesDir;
+
+        public IEnumerable<string> ListRecipeFiles()
+        {
+            if (!Directory.Exists(_recipesDir))
+                yield break;
+
+            foreach (var f in Directory.EnumerateFiles(_recipesDir, "*.json").OrderBy(f => f))
+                yield return f;
+        }
+
+        public SmartSetRecipe Load(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Invalid recipe path.", nameof(path));
+            using (var fs = File.OpenRead(path))
+            {
+                var ser = new DataContractJsonSerializer(typeof(SmartSetRecipe));
+                return (SmartSetRecipe)ser.ReadObject(fs);
+            }
+        }
+
+        public void Save(SmartSetRecipe recipe, string path)
+        {
+            if (recipe == null) throw new ArgumentNullException(nameof(recipe));
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Invalid recipe path.", nameof(path));
+
+            recipe.UpdatedUtc = DateTime.UtcNow;
+
+            var tmp = path + ".tmp";
+            using (var fs = File.Create(tmp))
+            {
+                var ser = new DataContractJsonSerializer(typeof(SmartSetRecipe));
+                ser.WriteObject(fs, recipe);
+            }
+
+            // Atomic-ish replace
+            if (File.Exists(path))
+                File.Delete(path);
+
+            File.Move(tmp, path);
+        }
+
+        public static string MakeSafeFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                name = "Recipe";
+
+            foreach (var c in Path.GetInvalidFileNameChars())
+                name = name.Replace(c, '_');
+
+            return name.Trim();
+        }
+
+        public string GetDefaultPathForRecipe(string recipeName)
+        {
+            var safe = MakeSafeFileName(recipeName);
+            return Path.Combine(_recipesDir, safe + ".json");
+        }
+    }
+}
+```
+
+---
+
+## C) Fast preview evaluator using cached RawEntries
+
+This code expects you to **adapt** your existing Data Scraper session into a shape it can read (see “Adapter” section below).
+
+**File:** `MicroEng.Navisworks/SmartSets/SmartSetFastPreviewService.cs`
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public interface IDataScrapeSessionView
+    {
+        string ProfileName { get; }
+        IEnumerable<ScrapedPropertyDescriptor> Properties { get; }
+
+        // Raw rows: one row per item/property/value.
+        IEnumerable<ScrapedRawEntryView> RawEntries { get; }
+    }
+
+    public sealed class ScrapedRawEntryView
+    {
+        public string ItemPath { get; set; } = "";
+        public string Category { get; set; } = "";
+        public string Property { get; set; } = "";
+        public string Value { get; set; } = "";
+    }
+
+    public sealed class SmartSetFastPreviewService
+    {
+        // Cache property->(itemPath->values) to make repeated previews instant.
+        private readonly Dictionary<string, Dictionary<string, List<string>>> _propertyIndexCache =
+            new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
+
+        public FastPreviewResult Evaluate(
+            IDataScrapeSessionView session,
+            IReadOnlyList<SmartSetRule> rules,
+            int samplePathsToReturn,
+            CancellationToken ct)
+        {
+            var result = new FastPreviewResult();
+
+            if (session == null)
+            {
+                result.UsedCache = false;
+                result.Notes = "No Data Scraper session available. Run Data Scraper first.";
+                return result;
+            }
+
+            var enabledRules = rules?.Where(r => r != null && r.Enabled).ToList() ?? new List<SmartSetRule>();
+            if (enabledRules.Count == 0)
+            {
+                result.EstimatedMatchCount = 0;
+                result.Notes = "No enabled rules.";
+                return result;
+            }
+
+            // Grouping semantics:
+            // - AND within a group
+            // - OR across groups
+            var groupIds = enabledRules.Select(r => string.IsNullOrWhiteSpace(r.GroupId) ? "A" : r.GroupId.Trim()).Distinct().ToList();
+
+            var finalUnion = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var gid in groupIds)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var groupRules = enabledRules.Where(r => (r.GroupId ?? "A").Trim().Equals(gid, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (groupRules.Count == 0) continue;
+
+                HashSet<string> groupSet = null;
+
+                foreach (var rule in groupRules)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var ruleSet = EvaluateRule(session, rule, ct);
+
+                    if (groupSet == null)
+                        groupSet = ruleSet;
+                    else
+                        groupSet.IntersectWith(ruleSet);
+
+                    if (groupSet.Count == 0)
+                        break; // early out
+                }
+
+                if (groupSet != null && groupSet.Count > 0)
+                    finalUnion.UnionWith(groupSet);
+            }
+
+            result.EstimatedMatchCount = finalUnion.Count;
+            result.SampleItemPaths = finalUnion.Take(Math.Max(0, samplePathsToReturn)).ToList();
+            result.Notes = "Fast preview uses cached scrape entries; results may differ slightly from live Navisworks search.";
+            return result;
+        }
+
+        private HashSet<string> EvaluateRule(IDataScrapeSessionView session, SmartSetRule rule, CancellationToken ct)
+        {
+            var key = $"{rule.Category}::{rule.Property}";
+
+            // Build index lazily per property key.
+            if (!_propertyIndexCache.TryGetValue(key, out var itemToValues))
+            {
+                itemToValues = BuildIndexForProperty(session, rule.Category, rule.Property, ct);
+                _propertyIndexCache[key] = itemToValues;
+            }
+
+            var hits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kvp in itemToValues)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                var itemPath = kvp.Key;
+                var values = kvp.Value;
+
+                if (Matches(values, rule))
+                    hits.Add(itemPath);
+            }
+
+            // Blank checks: if property missing, it won’t be in index at all.
+            // If you want missing treated as blank, you can extend this by tracking “all items”.
+            return hits;
+        }
+
+        private Dictionary<string, List<string>> BuildIndexForProperty(
+            IDataScrapeSessionView session,
+            string category,
+            string property,
+            CancellationToken ct)
+        {
+            var index = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var e in session.RawEntries)
+            {
+                ct.ThrowIfCancellationRequested();
+
+                if (!string.Equals(e.Category ?? "", category ?? "", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (!string.Equals(e.Property ?? "", property ?? "", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var item = e.ItemPath ?? "";
+                if (string.IsNullOrWhiteSpace(item))
+                    continue;
+
+                if (!index.TryGetValue(item, out var list))
+                {
+                    list = new List<string>();
+                    index[item] = list;
+                }
+
+                list.Add(e.Value ?? "");
+            }
+
+            return index;
+        }
+
+        private static bool Matches(List<string> values, SmartSetRule rule)
+        {
+            values = values ?? new List<string>();
+            var needle = rule.Value ?? "";
+
+            switch (rule.Operator)
+            {
+                case SmartSetOperator.IsBlank:
+                    return values.Any(v => string.IsNullOrWhiteSpace(v));
+
+                case SmartSetOperator.IsNotBlank:
+                    return values.Any(v => !string.IsNullOrWhiteSpace(v));
+
+                case SmartSetOperator.Equals:
+                    return values.Any(v => string.Equals(v ?? "", needle, StringComparison.OrdinalIgnoreCase));
+
+                case SmartSetOperator.NotEquals:
+                    return values.Any(v => !string.Equals(v ?? "", needle, StringComparison.OrdinalIgnoreCase));
+
+                case SmartSetOperator.Contains:
+                default:
+                    return values.Any(v => (v ?? "").IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                case SmartSetOperator.GreaterThan:
+                case SmartSetOperator.GreaterOrEqual:
+                case SmartSetOperator.LessThan:
+                case SmartSetOperator.LessOrEqual:
+                    // numeric compare best-effort
+                    if (!double.TryParse(needle, out var rhs))
+                        return false;
+
+                    foreach (var v in values)
+                    {
+                        if (!double.TryParse(v, out var lhs))
+                            continue;
+
+                        switch (rule.Operator)
+                        {
+                            case SmartSetOperator.GreaterThan: if (lhs > rhs) return true; break;
+                            case SmartSetOperator.GreaterOrEqual: if (lhs >= rhs) return true; break;
+                            case SmartSetOperator.LessThan: if (lhs < rhs) return true; break;
+                            case SmartSetOperator.LessOrEqual: if (lhs <= rhs) return true; break;
+                        }
+                    }
+                    return false;
+            }
+        }
+    }
+}
+```
+
+---
+
+## D) Property Picker dialog (WPF‑UI styled)
+
+### XAML
+
+**File:** `MicroEng.Navisworks/SmartSets/PropertyPickerWindow.xaml`
+
+```xml
+<Window x:Class="MicroEng.Navisworks.SmartSets.PropertyPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        Title="Pick Property"
+        Width="920" Height="620"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <ui:TextBox Grid.Row="0"
+                    Margin="0,0,0,10"
+                    PlaceholderText="Search category or property..."
+                    Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"/>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="240"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <ui:Card Grid.Column="0" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Categories" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <ListBox ItemsSource="{Binding Categories}"
+                             SelectedItem="{Binding SelectedCategory}"
+                             MinHeight="300"/>
+                </DockPanel>
+            </ui:Card>
+
+            <ui:Card Grid.Column="2" Padding="10">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="Properties" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <DataGrid ItemsSource="{Binding FilteredProperties}"
+                              SelectedItem="{Binding SelectedProperty}"
+                              AutoGenerateColumns="False"
+                              CanUserReorderColumns="True"
+                              CanUserSortColumns="True"
+                              IsReadOnly="True"
+                              MouseDoubleClick="DataGrid_MouseDoubleClick">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="2*"/>
+                            <DataGridTextColumn Header="Property" Binding="{Binding Name}" Width="3*"/>
+                            <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="120"/>
+                            <DataGridTextColumn Header="Items" Binding="{Binding ItemCount}" Width="90"/>
+                            <DataGridTextColumn Header="Distinct" Binding="{Binding DistinctCount}" Width="90"/>
+                            <DataGridTextColumn Header="Samples" Binding="{Binding SampleValuesPreview}" Width="4*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </ui:Card>
+        </Grid>
+
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,10,0,0">
+            <ui:Button Content="Cancel" Click="Cancel_Click" Margin="0,0,8,0"/>
+            <ui:Button Content="Use Selected"
+                       Appearance="Primary"
+                       Click="Ok_Click"
+                       IsEnabled="{Binding CanAccept}"/>
+        </StackPanel>
+    </Grid>
+</Window>
+```
+
+### Code-behind + VM
+
+**File:** `MicroEng.Navisworks/SmartSets/PropertyPickerWindow.xaml.cs`
+
+```csharp
+using System;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Windows;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public partial class PropertyPickerWindow : Window
+    {
+        public PropertyPickerViewModel VM { get; }
+
+        public ScrapedPropertyDescriptor Selected => VM.SelectedProperty;
+
+        public PropertyPickerWindow(PropertyPickerViewModel vm)
+        {
+            InitializeComponent();
+            VM = vm ?? throw new ArgumentNullException(nameof(vm));
+            DataContext = VM;
+
+            // Ensure WPF-UI theme is applied for this window too
+            try { MicroEngWpfUiTheme.ApplyTo(this); } catch { /* ignore */ }
+        }
+
+        private void Ok_Click(object sender, RoutedEventArgs e)
+        {
+            if (VM.SelectedProperty == null) return;
+            DialogResult = true;
+            Close();
+        }
+
+        private void Cancel_Click(object sender, RoutedEventArgs e)
+        {
+            DialogResult = false;
+            Close();
+        }
+
+        private void DataGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (VM.SelectedProperty == null) return;
+            DialogResult = true;
+            Close();
+        }
+    }
+
+    public sealed class PropertyPickerViewModel : INotifyPropertyChanged
+    {
+        public ObservableCollection<string> Categories { get; } = new ObservableCollection<string>();
+        public ObservableCollection<ScrapedPropertyDescriptor> AllProperties { get; } = new ObservableCollection<ScrapedPropertyDescriptor>();
+        public ObservableCollection<ScrapedPropertyDescriptor> FilteredProperties { get; } = new ObservableCollection<ScrapedPropertyDescriptor>();
+
+        private string _searchText = "";
+        public string SearchText
+        {
+            get => _searchText;
+            set { _searchText = value ?? ""; OnPropertyChanged(); Refilter(); }
+        }
+
+        private string _selectedCategory;
+        public string SelectedCategory
+        {
+            get => _selectedCategory;
+            set { _selectedCategory = value; OnPropertyChanged(); Refilter(); }
+        }
+
+        private ScrapedPropertyDescriptor _selectedProperty;
+        public ScrapedPropertyDescriptor SelectedProperty
+        {
+            get => _selectedProperty;
+            set { _selectedProperty = value; OnPropertyChanged(); OnPropertyChanged(nameof(CanAccept)); }
+        }
+
+        public bool CanAccept => SelectedProperty != null;
+
+        public PropertyPickerViewModel(System.Collections.Generic.IEnumerable<ScrapedPropertyDescriptor> props)
+        {
+            var list = (props ?? Enumerable.Empty<ScrapedPropertyDescriptor>()).ToList();
+
+            foreach (var p in list)
+                AllProperties.Add(p);
+
+            foreach (var c in list.Select(p => p.Category).Distinct().OrderBy(s => s))
+                Categories.Add(c);
+
+            SelectedCategory = Categories.FirstOrDefault();
+
+            Refilter();
+        }
+
+        private void Refilter()
+        {
+            var q = (SearchText ?? "").Trim();
+
+            var catFilter = SelectedCategory;
+            var items = AllProperties.AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(catFilter))
+                items = items.Where(p => string.Equals(p.Category, catFilter, StringComparison.OrdinalIgnoreCase));
+
+            if (!string.IsNullOrWhiteSpace(q))
+            {
+                items = items.Where(p =>
+                    (p.Category ?? "").IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    (p.Name ?? "").IndexOf(q, StringComparison.OrdinalIgnoreCase) >= 0);
+            }
+
+            var result = items.OrderBy(p => p.Category).ThenBy(p => p.Name).ToList();
+
+            FilteredProperties.Clear();
+            foreach (var r in result)
+                FilteredProperties.Add(r);
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+}
+```
+
+> Note: this uses `MicroEngWpfUiTheme.ApplyTo(this)` which you already use elsewhere. If the method is in a different namespace, Codex should fix the reference.
+
+---
+
+# Adapter: hook the picker + preview into your Data Scraper cache
+
+You need one adapter that converts your existing `ScrapeSession` into `IDataScrapeSessionView`.
+
+Create a file:
+
+**File:** `MicroEng.Navisworks/SmartSets/DataScraperSessionAdapter.cs`
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public sealed class DataScraperSessionAdapter : IDataScrapeSessionView
+    {
+        private readonly dynamic _session;
+
+        public DataScraperSessionAdapter(dynamic session)
+        {
+            _session = session ?? throw new ArgumentNullException(nameof(session));
+        }
+
+        public string ProfileName => (string)(_session.ProfileName ?? "");
+
+        public IEnumerable<ScrapedPropertyDescriptor> Properties
+        {
+            get
+            {
+                // Expect: session.Properties contains objects with Category/Name/Type/ItemCount/DistinctCount/SampleValues
+                foreach (var p in _session.Properties)
+                {
+                    string cat = p.Category ?? p.CategoryName ?? "";
+                    string name = p.Name ?? p.PropertyName ?? "";
+                    string type = p.Type ?? p.DataType ?? "";
+
+                    int itemCount = 0;
+                    int distinct = 0;
+                    try { itemCount = (int)(p.ItemCount ?? 0); } catch { }
+                    try { distinct = (int)(p.DistinctCount ?? 0); } catch { }
+
+                    var samples = new List<string>();
+                    try
+                    {
+                        foreach (var s in p.SampleValues)
+                            samples.Add((s ?? "").ToString());
+                    }
+                    catch { }
+
+                    yield return new ScrapedPropertyDescriptor(cat, name, type, itemCount, distinct, samples);
+                }
+            }
+        }
+
+        public IEnumerable<ScrapedRawEntryView> RawEntries
+        {
+            get
+            {
+                // Expect raw rows include: ItemPath, Category, Name/PropertyName, Value
+                foreach (var r in _session.RawEntries)
+                {
+                    yield return new ScrapedRawEntryView
+                    {
+                        ItemPath = (r.ItemPath ?? r.Path ?? "").ToString(),
+                        Category = (r.Category ?? r.Tab ?? "").ToString(),
+                        Property = (r.Name ?? r.PropertyName ?? "").ToString(),
+                        Value = (r.Value ?? "").ToString()
+                    };
+                }
+            }
+        }
+    }
+}
+```
+
+This uses `dynamic` on purpose so Codex can map your real model types without breaking compilation **while still giving you a single standardized view** used by:
+
+* property picker
+* fast preview
+
+If you’d rather avoid `dynamic`, tell Codex to reference your concrete `ScrapeSession`, `ScrapedProperty`, `RawEntry` types directly.
+
+---
+
+# Integration: how to wire into Smart Set Generator UI
+
+## Add to rule grid
+
+* Add a “Pick…” button per rule row → opens picker → fills Category/Property.
+
+### Example handler (code-behind style)
+
+Add something like this in your SmartSetGenerator control/window:
+
+```csharp
+private void PickPropertyForRule(SmartSetRule rule)
+{
+    // 1) get active data scraper session for the selected profile
+    var session = DataScraperCache.LastSession; // or DataScraperCache.GetLatest(profileName)
+    if (session == null)
+    {
+        MicroEngLog.Warn("No Data Scraper session. Run Data Scraper first.");
+        return;
+    }
+
+    var view = new DataScraperSessionAdapter(session);
+    var props = view.Properties.ToList();
+
+    var vm = new PropertyPickerViewModel(props);
+    var win = new PropertyPickerWindow(vm) { Owner = System.Windows.Application.Current?.MainWindow };
+
+    if (win.ShowDialog() == true && win.Selected != null)
+    {
+        rule.Category = win.Selected.Category;
+        rule.Property = win.Selected.Name;
+
+        // Optional: prefill value with first sample if empty
+        if (string.IsNullOrWhiteSpace(rule.Value) && win.Selected.SampleValues.Count > 0)
+            rule.Value = win.Selected.SampleValues[0];
+
+        RefreshRulesGrid();
+    }
+}
+```
+
+Codex should wire this to the “Pick…” button in the row template.
+
+---
+
+## Add Fast Preview toggle + Preview button
+
+* UI: checkbox “Fast preview (cached)” and a “Preview” button.
+* On click: run fast preview on a background thread (no UI slowdown), then update the UI.
+
+Example:
+
+```csharp
+private readonly SmartSetFastPreviewService _fastPreview = new SmartSetFastPreviewService();
+private CancellationTokenSource _previewCts;
+
+private async void Preview_Click(object sender, RoutedEventArgs e)
+{
+    _previewCts?.Cancel();
+    _previewCts = new CancellationTokenSource();
+
+    var session = DataScraperCache.LastSession; // or selected
+    if (session == null) return;
+
+    var view = new DataScraperSessionAdapter(session);
+    var rules = CurrentRecipe.Rules; // or your rule list
+
+    try
+    {
+        PreviewStatusText = "Previewing…";
+        var ct = _previewCts.Token;
+
+        var result = await System.Threading.Tasks.Task.Run(() =>
+            _fastPreview.Evaluate(view, rules, samplePathsToReturn: 25, ct), ct);
+
+        PreviewStatusText = $"Matches (fast): {result.EstimatedMatchCount}";
+        PreviewDetailsText = string.Join("\n", result.SampleItemPaths);
+    }
+    catch (OperationCanceledException)
+    {
+        PreviewStatusText = "Preview cancelled.";
+    }
+    catch (Exception ex)
+    {
+        PreviewStatusText = "Preview failed: " + ex.Message;
+    }
+}
+```
+
+---
+
+## Add Save/Load recipe buttons
+
+* Save: writes JSON file into `…\MicroEng.Navisworks\SmartSets\Recipes`
+* Load: reads and replaces current recipe
+
+Example:
+
+```csharp
+private SmartSetRecipeStore _recipeStore;
+
+private void InitRecipeStore()
+{
+    // Prefer your existing plugin data dir helper; otherwise use ProgramData.
+    var baseDir = System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "Autodesk", "Navisworks Manage 2025", "Plugins", "MicroEng.Navisworks",
+        "SmartSets", "Recipes");
+
+    _recipeStore = new SmartSetRecipeStore(baseDir);
+}
+
+private void SaveRecipe()
+{
+    var path = _recipeStore.GetDefaultPathForRecipe(CurrentRecipe.Name);
+    _recipeStore.Save(CurrentRecipe, path);
+    MicroEngLog.Info("Saved Smart Set recipe: " + path);
+}
+
+private void LoadRecipe(string path)
+{
+    var recipe = _recipeStore.Load(path);
+    CurrentRecipe = recipe;
+    RebindUiFromRecipe();
+}
+```
+
+If you want a file picker dialog, Codex can add it (`Microsoft.Win32.OpenFileDialog` / `SaveFileDialog`).
+
+---
+
+# Codex prompt (paste as-is)
+
+Use this as your next Codex chat message:
+
+---
+
+**Codex Change Request: Smart Set Generator “Pro” UX Enhancements (Property Picker + Fast Preview + Recipe Persistence)**
+
+You are working in the MicroEng.Navisworks (net48) plugin. Implement the following in the Smart Set Generator tool (dockable WPF/WPF‑UI styled panel). Add three capabilities:
+
+1. **Property Picker Dialog**
+
+* Add a per-rule “Pick…” button that opens a WPF‑UI styled dialog.
+* Dialog must show:
+
+  * Search box
+  * Categories list
+  * Properties grid: Category, Property, Type, ItemCount, DistinctCount, SampleValues preview
+* Drive the dialog from the current Data Scraper cache (latest session for selected Data Scraper profile).
+* When user selects property:
+
+  * populate rule.Category and rule.Property
+  * optionally prefill rule.Value with first sample if empty
+
+2. **Fast Preview (Cached)**
+
+* Add a checkbox “Fast preview (cached)” and a “Preview” button.
+* Implement a fast preview engine that evaluates rules using **Data Scraper RawEntries** (no model traversal / no COM / no Navisworks search).
+* Use AND within a group and OR across groups (rule has GroupId, default “A”).
+* Show estimated match count and optional list of sample item paths (top 25).
+* Run preview in Task.Run and update UI via Dispatcher; must not freeze Navisworks.
+
+3. **Recipe persistence**
+
+* Add Save / Load / Save As buttons.
+* Persist the builder state as JSON in a Recipes folder under ProgramData plugin directory:
+  `%ProgramData%\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`
+* Use DataContractJsonSerializer (no new NuGet packages).
+* Recipe schema includes: Name, Description, DataScraperProfile, OutputType, Rules, GroupingSpec, CreatedUtc, UpdatedUtc.
+
+Implementation notes:
+
+* Create new folder `MicroEng.Navisworks/SmartSets/`.
+* Add the following new files (use/adjust code from the assistant):
+
+  * SmartSetModels.cs
+  * SmartSetRecipeStore.cs
+  * SmartSetFastPreviewService.cs
+  * DataScraperSessionAdapter.cs (adapt to real ScrapeSession types; avoid breaking compile)
+  * PropertyPickerWindow.xaml / .xaml.cs (WPF‑UI styled; apply MicroEngWpfUiTheme.ApplyTo(window))
+* Wire everything into the existing Smart Set Generator control/viewmodel.
+* Ensure `dotnet build` succeeds and the UI is WPF‑UI consistent.
+
+After implementing:
+
+* Add a small log line when:
+
+  * recipe saved/loaded
+  * preview completed (count + ms)
+
+---
+
+If you want, send me a screenshot of your current Smart Set Generator UI (or the file names involved), and I’ll tighten the exact “where to patch” instructions so Codex hits the right places on the first try.

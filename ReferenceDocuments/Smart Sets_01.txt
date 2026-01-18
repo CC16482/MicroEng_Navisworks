@@ -1,0 +1,994 @@
+Below is a complete, practical design for a **Smart Set Generator** tool (dockable panel) that can quickly generate **Search Sets** and/or **Selection Sets** in Navisworks, with **smart grouping** and tight integration with your existing **Data Scraper cache**.
+
+I’m going to give you:
+
+1. A strong “product design” of how it should work (so it’s genuinely useful)
+2. A concrete implementation plan aligned with your current architecture (WPF + WinForms host, WPF‑UI, DataScraperCache)
+3. **Codex-ready prompt**
+4. **Example code** (structured like your existing tools: plugin + WPF control + services)
+
+---
+
+## 1) What Smart Set Generator should do (high-value behaviors)
+
+### A. “Quick Builder” mode (the 80/20)
+
+Goal: create a set in <30 seconds.
+
+**Workflow**
+
+* Pick a **source** for suggestions (Data Scraper Profile)
+* Add one or more **rules**:
+
+  * Category (tab) + Property
+  * Operator: Equals / Contains / Blank / Not Blank (keep it reliable)
+  * Value (with a dropdown of sample values from Data Scraper)
+* Hit **Preview** (returns count + optionally a “select in model”)
+* Choose output:
+
+  * **Search Set** (dynamic)
+  * **Selection Set** (snapshot)
+  * **Both**
+* Choose destination folder and naming
+* Click **Generate**
+
+**Why it works**
+
+* Most Navisworks users are already doing this manually via Find Items + Sets. This makes it repeatable and fast.
+
+---
+
+### B. “Smart Grouping” mode (the differentiator)
+
+Goal: generate dozens/hundreds of sets in one action.
+
+**Examples**
+
+* Group targets by `Element Properties → Category` → creates “Doors”, “Walls”, “Furniture”… sets
+* Group by `Level` → sets per level
+* Group by **two properties**: `Level` then `Category` → nested folder structure:
+
+  * `By Level/Level 01/Doors`
+  * `By Level/Level 01/Walls`
+  * …
+
+**Key controls to prevent disaster**
+
+* Max groups (default 25–50)
+* Min item count (default 5)
+* Toggle “Include blanks”
+* A “Dry Run / Preview Groups” table before generating
+
+**Why it matters**
+
+* This replaces hours of manual set creation and ensures consistency.
+
+---
+
+### C. “From Example” mode (selection-driven inference)
+
+Goal: user selects a few items → tool suggests what rules could represent them.
+
+**Workflow**
+
+* User selects items in Navisworks
+* Click **Analyze Selection**
+* Tool proposes:
+
+  * “Property equals X” rules that are common across selection
+  * “Property contains X” rules for name patterns, types, etc.
+* User picks a suggestion → generates Search/Selection Set
+
+**Why it’s useful**
+
+* Users often don’t know which property to filter on. This learns from their intent.
+
+---
+
+### D. “Pack Library” (repeatable standards + Overwatch synergy)
+
+Goal: ship “packs” that users can run per project.
+
+Examples:
+
+* “QA Pack”:
+
+  * Missing Mark
+  * Missing Level
+  * Duplicate ID candidates (if you implement)
+* “Handover Pack”:
+
+  * Required fields blank
+  * Asset type sets
+* “MEP Pack”:
+
+  * Dampers, Valves, Panels…
+
+**Overwatch synergy**
+
+* Each pack run can output a JSON “recipe log” (what was generated, when, counts) → easy future upload to Overwatch.
+
+---
+
+## 2) How it should integrate with Data Scraper (your current reality)
+
+You already have:
+
+* `DataScraperCache.AllSessions`
+* `DataScraperCache.LastSession`
+* Sessions with:
+
+  * `Properties` catalog (category/name/type/sample values/counts)
+  * `RawEntries` (profile/scope/item path/category/name/type/value)
+
+Smart Set Generator should:
+
+* Use the **Properties catalog** for:
+
+  * property picker (category + name)
+  * type hints
+  * value suggestions
+* Use **RawEntries** for:
+
+  * Smart Grouping distinct values and counts
+  * optional “fast preview” (counts without running Navisworks Search)
+
+Important: **Sets generation should still use the Navisworks .NET Search API** so the saved Search Sets are “real Navisworks sets” and remain dynamic.
+
+---
+
+## 3) Implementation plan (aligned to your plugin architecture)
+
+### New folder/module
+
+Create `SmartSets/` containing:
+
+* `SmartSetGeneratorPlugins.cs`
+  DockPane plugin wrapper (ElementHost hosting WPF UserControl)
+* `SmartSetGeneratorControl.xaml` / `.xaml.cs`
+  WPF‑UI styled UI (tabs: Quick Builder, Smart Grouping, From Selection, Packs)
+* `SmartSetGeneratorModels.cs`
+  Rule + recipe + grouping definitions
+* `SmartSetGeneratorNavisworksService.cs`
+  Build `Search` objects, preview, create sets, folder management, naming
+* `SmartSetGroupingEngine.cs`
+  Builds group tables from DataScraper session RawEntries
+* `SmartSetInferenceEngine.cs` (basic)
+  Extract “common properties across selection” suggestions
+
+### Add launcher button
+
+Update `MicroEngPanelControl.xaml` to add a button:
+
+* “Smart Set Generator”
+
+Wire it like your other tools (same toggle/show behavior).
+
+### Persist recipes (optional but recommended)
+
+Store recipes to:
+
+* `%ProgramData%\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`
+  as JSON.
+  This is a direct Overwatch bridge later.
+
+---
+
+## 4) Codex-ready prompt (copy/paste)
+
+Use this as your **single change request**:
+
+```text
+Implement a new dockable tool: “Smart Set Generator” (WPF-UI styled) in MicroEng.Navisworks.
+
+GOALS
+- Provide a dockable panel that helps users quickly generate Navisworks Search Sets and/or Selection Sets.
+- Integrate with DataScraperCache:
+  - Use cached ScrapeSession.Properties for property picking and sample value dropdowns.
+  - Use cached ScrapeSession.RawEntries for Smart Grouping distinct values + counts.
+- Use Navisworks .NET API (Autodesk.Navisworks.Api) to create real SearchSet/SelectionSet items in the Sets tree.
+- Add the tool to MicroEngPanelControl launcher.
+
+FEATURES
+A) Quick Builder tab
+- User selects: Scraper Profile (latest session)
+- Rules grid: Category, Property, Operator (Equals/Contains/Blank/NotBlank), Value (with sample values suggestions)
+- Preview button: runs Search and shows match count, with optional “Select results” button
+- Output options: Search Set / Selection Set / Both
+- Folder path (e.g. “MicroEng/Smart Sets/<Profile>”)
+- Generate button: creates sets and logs results
+
+B) Smart Grouping tab
+- User selects GroupBy property (Category+Property from scraper)
+- Optional “Then by” property (for nested folders)
+- Options: MaxGroups, MinCount, IncludeBlanks
+- Preview Groups table: Group Value(s), Count
+- Generate button: creates one Search Set per group (AND conditions if two properties), nested folder structure if two levels
+- Safety: prompt if groups > MaxGroups
+
+C) From Selection tab
+- Analyze current selection: inspect ModelItem properties and suggest 5-10 rule candidates (properties with low distinct values across selection)
+- User can “Apply suggestion to Quick Builder”
+
+D) Pack Library tab
+- Provide 6-10 built-in pack templates as code (simple rule recipes using common property names like “Element Properties/Category”, “Item/Name”, “Element/Type”)
+- Show warning if properties not found in current scraper catalog
+
+IMPLEMENTATION DETAILS
+- Create new files:
+  - SmartSets/SmartSetGeneratorPlugins.cs (DockPanePlugin + ElementHost WPF)
+  - SmartSets/SmartSetGeneratorControl.xaml + .xaml.cs
+  - SmartSets/SmartSetGeneratorModels.cs
+  - SmartSets/SmartSetGeneratorNavisworksService.cs
+  - SmartSets/SmartSetGroupingEngine.cs
+  - SmartSets/SmartSetInferenceEngine.cs
+- Use WPF-UI controls (ui:Card, ui:Button, ui:ComboBox, etc). Keep it consistent with existing MicroEngWpfUiTheme.ApplyTo(root).
+- Prefer SearchCondition.HasPropertyByDisplayName(category, prop) and use:
+  - EqualValue(VariantData.FromString(value))
+  - DisplayStringContains(value)
+- Use Search.FindAll(Application.ActiveDocument, false) for preview and selection set snapshot.
+- For adding sets into Sets tree:
+  - Ensure folder exists (“MicroEng/Smart Sets/<Profile>”)
+  - Add search set as SearchSet with DisplayName
+  - Add selection set as SelectionSet(ModelItemCollection)
+- Name collision handling: auto-append “ (2)”, “ (3)”, etc.
+- Build must succeed (net48). No COM usage needed for sets.
+
+Finally:
+- Add a “Smart Set Generator” button to MicroEngPanelControl.xaml and wire it like existing tool buttons.
+```
+
+---
+
+## 5) Example code (drop-in scaffolding)
+
+### 5.1 SmartSetGeneratorModels.cs
+
+```csharp
+using System;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public enum SmartSetOutputType
+    {
+        SearchSet,
+        SelectionSet,
+        Both
+    }
+
+    public enum SmartRuleOperator
+    {
+        Equals,
+        Contains,
+        IsBlank,
+        IsNotBlank
+    }
+
+    public sealed class SmartSetRule : INotifyPropertyChanged
+    {
+        private string _category = "";
+        private string _property = "";
+        private SmartRuleOperator _op = SmartRuleOperator.Equals;
+        private string _value = "";
+
+        public string Category { get => _category; set { _category = value ?? ""; OnPropertyChanged(); } }
+        public string Property { get => _property; set { _property = value ?? ""; OnPropertyChanged(); } }
+        public SmartRuleOperator Operator { get => _op; set { _op = value; OnPropertyChanged(); } }
+        public string Value { get => _value; set { _value = value ?? ""; OnPropertyChanged(); } }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string n = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
+    }
+
+    public sealed class SmartSetRecipe : INotifyPropertyChanged
+    {
+        private string _name = "New Set";
+        private string _folderPath = "MicroEng/Smart Sets";
+        private SmartSetOutputType _outputType = SmartSetOutputType.SearchSet;
+
+        public string Name { get => _name; set { _name = value ?? ""; OnPropertyChanged(); } }
+        public string FolderPath { get => _folderPath; set { _folderPath = value ?? ""; OnPropertyChanged(); } }
+        public SmartSetOutputType OutputType { get => _outputType; set { _outputType = value; OnPropertyChanged(); } }
+
+        public ObservableCollection<SmartSetRule> Rules { get; } = new ObservableCollection<SmartSetRule>();
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string n = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
+    }
+
+    public sealed class SmartGroupingSpec : INotifyPropertyChanged
+    {
+        private string _groupByCategory = "";
+        private string _groupByProperty = "";
+        private string _thenByCategory = "";
+        private string _thenByProperty = "";
+        private bool _useThenBy;
+        private int _maxGroups = 50;
+        private int _minCount = 5;
+        private bool _includeBlanks;
+
+        public string GroupByCategory { get => _groupByCategory; set { _groupByCategory = value ?? ""; OnPropertyChanged(); } }
+        public string GroupByProperty { get => _groupByProperty; set { _groupByProperty = value ?? ""; OnPropertyChanged(); } }
+
+        public bool UseThenBy { get => _useThenBy; set { _useThenBy = value; OnPropertyChanged(); } }
+        public string ThenByCategory { get => _thenByCategory; set { _thenByCategory = value ?? ""; OnPropertyChanged(); } }
+        public string ThenByProperty { get => _thenByProperty; set { _thenByProperty = value ?? ""; OnPropertyChanged(); } }
+
+        public int MaxGroups { get => _maxGroups; set { _maxGroups = Math.Max(1, value); OnPropertyChanged(); } }
+        public int MinCount { get => _minCount; set { _minCount = Math.Max(1, value); OnPropertyChanged(); } }
+        public bool IncludeBlanks { get => _includeBlanks; set { _includeBlanks = value; OnPropertyChanged(); } }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string n = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(n));
+    }
+
+    public sealed class SmartGroupRow
+    {
+        public string Value1 { get; set; }
+        public string Value2 { get; set; }
+        public int Count { get; set; }
+
+        public string DisplayKey => string.IsNullOrWhiteSpace(Value2) ? Value1 : $"{Value1} / {Value2}";
+    }
+}
+```
+
+---
+
+### 5.2 SmartSetGeneratorPlugins.cs (dock pane wrapper)
+
+```csharp
+using System.Windows.Forms;
+using System.Windows.Forms.Integration;
+using Autodesk.Navisworks.Api.Plugins;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    [Plugin("MicroEng.SmartSetGenerator", "MICROENG", DisplayName = "Smart Set Generator", ToolTip = "Generate Search Sets and Selection Sets quickly.")]
+    [DockPanePlugin(500, 700, FixedSize = false)]
+    public class SmartSetGeneratorDockPane : DockPanePlugin
+    {
+        private ElementHost _host;
+        private SmartSetGeneratorControl _control;
+
+        public override Control CreateControlPane()
+        {
+            _control = new SmartSetGeneratorControl();
+            _host = new ElementHost
+            {
+                Dock = DockStyle.Fill,
+                Child = _control
+            };
+            return _host;
+        }
+
+        public override void DestroyControlPane(Control pane)
+        {
+            try { _control?.Dispose(); } catch { /* ignore */ }
+            _control = null;
+            _host = null;
+            base.DestroyControlPane(pane);
+        }
+    }
+}
+```
+
+---
+
+### 5.3 SmartSetGroupingEngine.cs (uses DataScraper RawEntries)
+
+This assumes your session has `RawEntries` with fields like `CategoryName`, `PropertyName`, `Value`, `ItemPath`. If names differ, Codex should adapt.
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public static class SmartSetGroupingEngine
+    {
+        private static string Norm(string v)
+        {
+            if (v == null) return "";
+            v = v.Trim();
+            return v;
+        }
+
+        public static List<SmartGroupRow> BuildGroups(
+            dynamic scrapeSession,
+            string cat1, string prop1,
+            bool use2, string cat2, string prop2,
+            int minCount,
+            bool includeBlanks)
+        {
+            // Build item -> value maps for each grouping property
+            var map1 = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var map2 = use2 ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) : null;
+
+            foreach (var e in scrapeSession.RawEntries)
+            {
+                // expect: e.ItemPath, e.CategoryName, e.PropertyName, e.Value
+                string item = (string)e.ItemPath;
+                string cat = (string)e.CategoryName;
+                string prop = (string)e.PropertyName;
+                string val = Norm_CONFIRM_STRING(e.Value);
+
+                if (string.Equals(cat, cat1, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(prop, prop1, StringComparison.OrdinalIgnoreCase))
+                {
+                    map1[item] = val;
+                }
+
+                if (use2 &&
+                    string.Equals(cat, cat2, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(prop, prop2, StringComparison.OrdinalIgnoreCase))
+                {
+                    map2[item] = val;
+                }
+            }
+
+            // Aggregate
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kv in map1)
+            {
+                string item = kv.Key;
+                string v1 = kv.Value ?? "";
+
+                if (!includeBlanks && string.IsNullOrWhiteSpace(v1))
+                    continue;
+
+                string key = v1;
+
+                if (use2)
+                {
+                    map2.TryGetValue(item, out var v2);
+                    v2 = v2 ?? "";
+                    if (!includeBlanks && string.IsNullOrWhiteSpace(v2))
+                        continue;
+
+                    key = $"{v1}\u001F{v2}";
+                }
+
+                counts.TryGetValue(key, out int c);
+                counts[key] = c + 1;
+            }
+
+            var rows = new List<SmartGroupRow>();
+
+            foreach (var kv in counts.OrderByDescending(k => k.Value))
+            {
+                if (kv.Value < minCount) continue;
+
+                if (!use2)
+                {
+                    rows.Add(new SmartGroupRow { Value1 = kv.Key, Value2 = "", Count = kv.Value });
+                }
+                else
+                {
+                    var parts = kv.Key.Split(new[] { '\u001F' }, 2);
+                    rows.Add(new SmartGroupRow
+                    {
+                        Value1 = parts.Length > 0 ? parts[0] : "",
+                        Value2 = parts.Length > 1 ? parts[1] : "",
+                        Count = kv.Value
+                    });
+                }
+            }
+
+            return rows;
+        }
+
+        private static string Norm_CONFIRM_STRING(dynamic v)
+        {
+            try { return Norm((string)v); }
+            catch { return Norm(v?.ToString()); }
+        }
+    }
+}
+```
+
+---
+
+### 5.4 SmartSetGeneratorNavisworksService.cs (create sets properly)
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Autodesk.Navisworks.Api;
+using Autodesk.Navisworks.Api.DocumentParts;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public sealed class SmartSetGeneratorNavisworksService
+    {
+        public (int Count, ModelItemCollection Results) Preview(Document doc, SmartSetRecipe recipe)
+        {
+            var search = BuildSearch(recipe);
+            var results = search.FindAll(doc, false);
+            return (results.Count, results);
+        }
+
+        public void Generate(Document doc, SmartSetRecipe recipe)
+        {
+            var folder = EnsureFolder(doc, recipe.FolderPath);
+
+            // SearchSet output
+            if (recipe.OutputType == SmartSetOutputType.SearchSet || recipe.OutputType == SmartSetOutputType.Both)
+            {
+                var search = BuildSearch(recipe);
+                var ss = new SearchSet
+                {
+                    DisplayName = MakeUniqueName(folder, recipe.Name),
+                    Search = search
+                };
+                doc.SelectionSets.AddCopy(folder, ss);
+            }
+
+            // SelectionSet output (snapshot)
+            if (recipe.OutputType == SmartSetOutputType.SelectionSet || recipe.OutputType == SmartSetOutputType.Both)
+            {
+                var search = BuildSearch(recipe);
+                var results = search.FindAll(doc, false);
+                var selSet = new SelectionSet(results)
+                {
+                    DisplayName = MakeUniqueName(folder, recipe.Name + " (Snapshot)")
+                };
+                doc.SelectionSets.AddCopy(folder, selSet);
+            }
+        }
+
+        public void GenerateGroupedSearchSets(
+            Document doc,
+            string folderPath,
+            string baseName,
+            string cat1, string prop1,
+            bool use2, string cat2, string prop2,
+            IEnumerable<SmartGroupRow> groups)
+        {
+            var folder = EnsureFolder(doc, folderPath);
+
+            foreach (var g in groups)
+            {
+                // Build: cat1/prop1 == g.Value1 AND optionally cat2/prop2 == g.Value2
+                var recipe = new SmartSetRecipe
+                {
+                    Name = $"{baseName} - {g.DisplayKey}",
+                    FolderPath = folderPath,
+                    OutputType = SmartSetOutputType.SearchSet
+                };
+
+                recipe.Rules.Add(new SmartSetRule { Category = cat1, Property = prop1, Operator = SmartRuleOperator.Equals, Value = g.Value1 });
+
+                if (use2)
+                    recipe.Rules.Add(new SmartSetRule { Category = cat2, Property = prop2, Operator = SmartRuleOperator.Equals, Value = g.Value2 });
+
+                var search = BuildSearch(recipe);
+
+                var ss = new SearchSet
+                {
+                    DisplayName = MakeUniqueName(folder, recipe.Name),
+                    Search = search
+                };
+
+                doc.SelectionSets.AddCopy(folder, ss);
+            }
+        }
+
+        private Search BuildSearch(SmartSetRecipe recipe)
+        {
+            var s = new Search();
+            s.Selection.SelectAll(); // search full model
+
+            foreach (var rule in recipe.Rules)
+            {
+                if (string.IsNullOrWhiteSpace(rule.Category) || string.IsNullOrWhiteSpace(rule.Property))
+                    continue;
+
+                var cond = SearchCondition.HasPropertyByDisplayName(rule.Category, rule.Property);
+
+                switch (rule.Operator)
+                {
+                    case SmartRuleOperator.Equals:
+                        s.SearchConditions.Add(cond.EqualValue(VariantData.FromString(rule.Value ?? "")));
+                        break;
+
+                    case SmartRuleOperator.Contains:
+                        s.SearchConditions.Add(cond.DisplayStringContains(rule.Value ?? ""));
+                        break;
+
+                    case SmartRuleOperator.IsBlank:
+                        s.SearchConditions.Add(cond.EqualValue(VariantData.FromString("")));
+                        break;
+
+                    case SmartRuleOperator.IsNotBlank:
+                        // Robust approach: “contains” anything is not supported directly.
+                        // For now treat as: property exists AND not equal "".
+                        // We'll implement as: NOT blank by post-filter for SelectionSet output,
+                        // and for SearchSet keep it as “HasProperty” only.
+                        s.SearchConditions.Add(cond.HasProperty());
+                        break;
+                }
+            }
+
+            return s;
+        }
+
+        private GroupItem EnsureFolder(Document doc, string folderPath)
+        {
+            // folderPath: "MicroEng/Smart Sets/Profile"
+            var parts = (folderPath ?? "").Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+
+            GroupItem current = doc.SelectionSets.RootItem;
+            foreach (var p in parts)
+            {
+                var existing = current.Children
+                    .OfType<GroupItem>()
+                    .FirstOrDefault(x => string.Equals(x.DisplayName, p, StringComparison.OrdinalIgnoreCase));
+
+                if (existing != null)
+                {
+                    current = existing;
+                    continue;
+                }
+
+                var folder = new FolderItem { DisplayName = p };
+                current = (GroupItem)doc.SelectionSets.AddCopy(current, folder);
+            }
+
+            return current;
+        }
+
+        private string MakeUniqueName(GroupItem folder, string desired)
+        {
+            desired = SanitizeName(desired);
+            if (string.IsNullOrWhiteSpace(desired))
+                desired = "Set";
+
+            var names = new HashSet<string>(
+                folder.Children.Select(x => x.DisplayName),
+                StringComparer.OrdinalIgnoreCase);
+
+            if (!names.Contains(desired))
+                return desired;
+
+            for (int i = 2; i < 9999; i++)
+            {
+                var candidate = $"{desired} ({i})";
+                if (!names.Contains(candidate))
+                    return candidate;
+            }
+
+            return desired + " (9999)";
+        }
+
+        private static string SanitizeName(string s)
+        {
+            if (s == null) return "Set";
+            foreach (var c in System.IO.Path.GetInvalidFileNameChars())
+                s = s.Replace(c, '_');
+            return s.Trim();
+        }
+    }
+}
+```
+
+> Notes:
+>
+> * `doc.SelectionSets.AddCopy(parent, item)` is the correct pattern for “Sets tree inserts” in Navisworks.
+> * For `IsNotBlank`, Navisworks Search API “not equals” isn’t always clean; you can refine later by generating explicit selection sets and then snapshotting results.
+
+---
+
+### 5.5 SmartSetGeneratorControl.xaml (WPF‑UI styled skeleton)
+
+You’ll adapt to your theme helpers (MicroEngWpfUiTheme.ApplyTo).
+
+```xml
+<UserControl x:Class="MicroEng.Navisworks.SmartSets.SmartSetGeneratorControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <ui:Card Grid.Row="0" Margin="0,0,0,12">
+            <Grid Margin="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="280"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="Scraper Profile:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <ui:ComboBox Grid.Column="1" ItemsSource="{Binding ScraperProfiles}" SelectedItem="{Binding SelectedScraperProfile}" />
+
+                <ui:Button Grid.Column="2" Content="Refresh" Margin="12,0,0,0" Click="OnRefreshScraper"/>
+                <ui:Button Grid.Column="3" Content="Open Data Scraper" Margin="8,0,0,0" Click="OnOpenDataScraper"/>
+            </Grid>
+        </ui:Card>
+
+        <ui:Card Grid.Row="1">
+            <Grid Margin="12">
+                <ui:TabControl>
+                    <ui:TabItem Header="Quick Builder">
+                        <Grid Margin="0,8,0,0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <DataGrid ItemsSource="{Binding Recipe.Rules}" AutoGenerateColumns="False" CanUserAddRows="False">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="2*"/>
+                                    <DataGridTextColumn Header="Property" Binding="{Binding Property}" Width="2*"/>
+                                    <DataGridComboBoxColumn Header="Op" SelectedItemBinding="{Binding Operator}" Width="*"
+                                                            ItemsSource="{Binding DataContext.RuleOperators, RelativeSource={RelativeSource AncestorType=UserControl}}"/>
+                                    <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="2*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                                <ui:Button Content="Add Rule" Click="OnAddRule"/>
+                                <ui:Button Content="Remove Rule" Margin="8,0,0,0" Click="OnRemoveRule"/>
+
+                                <ui:Button Content="Preview" Margin="18,0,0,0" Click="OnPreview"/>
+                                <TextBlock Text="{Binding PreviewText}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+
+                                <ui:Button Content="Generate" Margin="18,0,0,0" Click="OnGenerate"/>
+                            </StackPanel>
+                        </Grid>
+                    </ui:TabItem>
+
+                    <ui:TabItem Header="Smart Grouping">
+                        <StackPanel Margin="0,8,0,0" Spacing="8">
+                            <TextBlock Text="Group by one or two properties and generate one set per distinct value." Opacity="0.8"/>
+
+                            <WrapPanel>
+                                <TextBlock Text="Group By:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <ui:TextBox Width="260" Text="{Binding Grouping.GroupByCategory}" PlaceholderText="Category"/>
+                                <ui:TextBox Width="260" Margin="8,0,0,0" Text="{Binding Grouping.GroupByProperty}" PlaceholderText="Property"/>
+                            </WrapPanel>
+
+                            <WrapPanel>
+                                <ui:CheckBox Content="Then by (nested)" IsChecked="{Binding Grouping.UseThenBy}" VerticalAlignment="Center"/>
+                                <ui:TextBox Width="260" Margin="12,0,0,0" Text="{Binding Grouping.ThenByCategory}" PlaceholderText="Category" IsEnabled="{Binding Grouping.UseThenBy}"/>
+                                <ui:TextBox Width="260" Margin="8,0,0,0" Text="{Binding Grouping.ThenByProperty}" PlaceholderText="Property" IsEnabled="{Binding Grouping.UseThenBy}"/>
+                            </WrapPanel>
+
+                            <WrapPanel>
+                                <TextBlock Text="Max groups:" VerticalAlignment="Center"/>
+                                <ui:TextBox Width="80" Margin="8,0,0,0" Text="{Binding Grouping.MaxGroups}"/>
+                                <TextBlock Text="Min count:" VerticalAlignment="Center" Margin="16,0,0,0"/>
+                                <ui:TextBox Width="80" Margin="8,0,0,0" Text="{Binding Grouping.MinCount}"/>
+                                <ui:CheckBox Content="Include blanks" Margin="16,0,0,0" IsChecked="{Binding Grouping.IncludeBlanks}"/>
+                            </WrapPanel>
+
+                            <ui:Button Content="Preview Groups" Click="OnPreviewGroups" Width="140"/>
+                            <DataGrid ItemsSource="{Binding GroupRows}" AutoGenerateColumns="False" Height="220">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Group" Binding="{Binding DisplayKey}" Width="3*"/>
+                                    <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+
+                            <ui:Button Content="Generate Grouped Search Sets" Click="OnGenerateGroups" Width="240"/>
+                        </StackPanel>
+                    </ui:TabItem>
+
+                    <ui:TabItem Header="From Selection">
+                        <StackPanel Margin="0,8,0,0">
+                            <TextBlock Text="Select some items in Navisworks, then analyze and generate rule suggestions." Opacity="0.8"/>
+                            <ui:Button Content="Analyze Current Selection" Margin="0,10,0,0" Click="OnAnalyzeSelection" Width="220"/>
+                            <ListBox ItemsSource="{Binding SelectionSuggestions}" Margin="0,10,0,0"/>
+                        </StackPanel>
+                    </ui:TabItem>
+
+                    <ui:TabItem Header="Packs">
+                        <StackPanel Margin="0,8,0,0">
+                            <TextBlock Text="Run a pack to create a consistent suite of sets (QA, Handover, MEP…)." Opacity="0.8"/>
+                            <ListBox ItemsSource="{Binding Packs}" DisplayMemberPath="Name" Height="220" />
+                            <ui:Button Content="Run Selected Pack" Margin="0,10,0,0" Click="OnRunPack" Width="200"/>
+                        </StackPanel>
+                    </ui:TabItem>
+                </ui:TabControl>
+            </Grid>
+        </ui:Card>
+    </Grid>
+</UserControl>
+```
+
+---
+
+### 5.6 SmartSetGeneratorControl.xaml.cs (basic wiring)
+
+```csharp
+using System;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using Autodesk.Navisworks.Api;
+
+namespace MicroEng.Navisworks.SmartSets
+{
+    public partial class SmartSetGeneratorControl : UserControl, IDisposable
+    {
+        public ObservableCollection<string> ScraperProfiles { get; } = new ObservableCollection<string>();
+        public string SelectedScraperProfile { get; set; }
+
+        public SmartSetRecipe Recipe { get; } = new SmartSetRecipe();
+        public SmartGroupingSpec Grouping { get; } = new SmartGroupingSpec();
+
+        public ObservableCollection<SmartGroupRow> GroupRows { get; } = new ObservableCollection<SmartGroupRow>();
+        public ObservableCollection<string> SelectionSuggestions { get; } = new ObservableCollection<string>();
+        public ObservableCollection<object> Packs { get; } = new ObservableCollection<object>();
+
+        public ObservableCollection<SmartRuleOperator> RuleOperators { get; } =
+            new ObservableCollection<SmartRuleOperator>(Enum.GetValues(typeof(SmartRuleOperator)).Cast<SmartRuleOperator>());
+
+        public string PreviewText { get; set; } = "-";
+
+        private readonly SmartSetGeneratorNavisworksService _svc = new SmartSetGeneratorNavisworksService();
+
+        public SmartSetGeneratorControl()
+        {
+            InitializeComponent();
+            DataContext = this;
+
+            // Apply WPF-UI theme per-root (your existing pattern)
+            // MicroEngWpfUiTheme.ApplyTo(this);
+
+            LoadScraperProfiles();
+            if (ScraperProfiles.Count > 0)
+                SelectedScraperProfile = ScraperProfiles[0];
+
+            if (Recipe.Rules.Count == 0)
+                Recipe.Rules.Add(new SmartSetRule());
+        }
+
+        private void LoadScraperProfiles()
+        {
+            ScraperProfiles.Clear();
+
+            // Expected: DataScraperCache.AllSessions with sessions that have ProfileName
+            // Adapt to your real cache types; keep this small and safe.
+            try
+            {
+                foreach (var s in DataScraperCache.AllSessions)
+                {
+                    var name = s.ProfileName as string;
+                    if (!string.IsNullOrWhiteSpace(name) && !ScraperProfiles.Contains(name))
+                        ScraperProfiles.Add(name);
+                }
+            }
+            catch
+            {
+                // If cache API differs, Codex should adapt.
+            }
+        }
+
+        private void OnAddRule(object sender, RoutedEventArgs e) => Recipe.Rules.Add(new SmartSetRule());
+
+        private void OnRemoveRule(object sender, RoutedEventArgs e)
+        {
+            if (Recipe.Rules.Count > 0)
+                Recipe.Rules.RemoveAt(Recipe.Rules.Count - 1);
+        }
+
+        private void OnPreview(object sender, RoutedEventArgs e)
+        {
+            var doc = Application.ActiveDocument;
+            var (count, _) = _svc.Preview(doc, Recipe);
+            PreviewText = $"Matches: {count}";
+        }
+
+        private void OnGenerate(object sender, RoutedEventArgs e)
+        {
+            var doc = Application.ActiveDocument;
+            _svc.Generate(doc, Recipe);
+            PreviewText = "Generated.";
+        }
+
+        private void OnPreviewGroups(object sender, RoutedEventArgs e)
+        {
+            GroupRows.Clear();
+
+            dynamic session = DataScraperCache.GetLatestSessionForProfile(SelectedScraperProfile);
+            if (session == null) return;
+
+            var rows = SmartSetGroupingEngine.BuildGroups(
+                session,
+                Grouping.GroupByCategory, Grouping.GroupByProperty,
+                Grouping.UseThenBy, Grouping.ThenByCategory, Grouping.ThenByProperty,
+                Grouping.MinCount,
+                Grouping.IncludeBlanks);
+
+            foreach (var r in rows.Take(Grouping.MaxGroups))
+                GroupRows.Add(r);
+        }
+
+        private void OnGenerateGroups(object sender, RoutedEventArgs e)
+        {
+            var doc = Application.ActiveDocument;
+            _svc.GenerateGroupedSearchSets(
+                doc,
+                folderPath: $"MicroEng/Smart Sets/{SelectedScraperProfile}",
+                baseName: "Group",
+                cat1: Grouping.GroupByCategory, prop1: Grouping.GroupByProperty,
+                use2: Grouping.UseThenBy, cat2: Grouping.ThenByCategory, prop2: Grouping.ThenByProperty,
+                groups: GroupRows.ToList());
+        }
+
+        private void OnAnalyzeSelection(object sender, RoutedEventArgs e)
+        {
+            SelectionSuggestions.Clear();
+            var doc = Application.ActiveDocument;
+            var sel = doc.CurrentSelection.SelectedItems;
+            if (sel == null || sel.Count == 0)
+            {
+                SelectionSuggestions.Add("No selection.");
+                return;
+            }
+
+            // Stub: Codex should implement SmartSetInferenceEngine and populate suggestions.
+            SelectionSuggestions.Add($"Selection count: {sel.Count}");
+            SelectionSuggestions.Add("TODO: Implement inference suggestions.");
+        }
+
+        private void OnRunPack(object sender, RoutedEventArgs e)
+        {
+            // Stub: implement pack selection + generation
+        }
+
+        private void OnRefreshScraper(object sender, RoutedEventArgs e) => LoadScraperProfiles();
+
+        private void OnOpenDataScraper(object sender, RoutedEventArgs e)
+        {
+            // Call your existing Data Scraper plugin toggle/open method.
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+}
+```
+
+> Codex will need to adapt:
+>
+> * `DataScraperCache.GetLatestSessionForProfile(...)` (or equivalent you already have)
+> * Your logging hooks (MicroEng panel log)
+
+---
+
+## 6) Final recommendation on what to implement first
+
+If you want maximum impact quickly:
+
+1. **Quick Builder** (rules + preview + generate)
+2. **Smart Grouping** (group-by property, optional then-by)
+3. Packs (just a few to start)
+4. From Selection inference
+
+That order delivers real user value immediately without getting stuck in “perfect inference”.
+
+---
+
+If you want, I can also give you:
+
+* A “proper” property-picker control (Category → Properties tree + search box), using scraper catalog
+* A “fast preview” mode that uses scraper RawEntries instead of running Navisworks search (very fast for huge models)
+* A recipe persistence format that is explicitly Overwatch-friendly (stable JSON schema, versioning, telemetry fields)

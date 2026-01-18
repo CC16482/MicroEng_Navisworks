@@ -1,0 +1,290 @@
+<UserControl x:Class="MicroEng.Navisworks.SmartSets.SmartSetGeneratorControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             mc:Ignorable="d"
+             d:DesignHeight="640"
+             d:DesignWidth="900"
+             Background="{DynamicResource ApplicationBackgroundBrush}"
+             Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <ui:Card Grid.Row="0" Padding="12" Margin="0,0,0,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="260" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <ui:TextBlock Text="Scraper Profile" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox Grid.Column="1"
+                          ItemsSource="{Binding ScraperProfiles}"
+                          SelectedItem="{Binding SelectedScraperProfile}" />
+
+                <ui:Button Grid.Column="2" Content="Refresh" Margin="10,0,0,0" Click="RefreshProfiles_Click" />
+                <ui:Button Grid.Column="3" Content="Open Data Scraper" Margin="8,0,0,0" Click="OpenDataScraper_Click" />
+
+                <ui:TextBlock Grid.Column="4" Text="Uses Data Scraper cache for property pickers and fast preview." VerticalAlignment="Center" Margin="12,0,0,0" Appearance="Secondary" />
+            </Grid>
+        </ui:Card>
+
+        <ui:Card Grid.Row="1" Padding="12">
+            <Grid>
+                <TabControl>
+                    <TabItem Header="Quick Builder">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="0,8,0,0">
+                                <ui:Card Padding="12" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Grid.Column="0" Grid.Row="0" Margin="0,0,12,8">
+                                            <ui:TextBlock Text="Recipe Name" />
+                                            <ui:TextBox Text="{Binding CurrentRecipe.Name}" PlaceholderText="New Set" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Grid.Row="0" Margin="0,0,12,8">
+                                            <ui:TextBlock Text="Output Type" />
+                                            <ComboBox ItemsSource="{Binding OutputTypes}" SelectedItem="{Binding CurrentRecipe.OutputType}" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2" Grid.Row="0" Margin="0,0,12,8">
+                                            <ui:TextBlock Text="Folder Path" />
+                                            <ui:TextBox Text="{Binding CurrentRecipe.FolderPath}" PlaceholderText="MicroEng/Smart Sets" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="3" Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="0,0,0,8">
+                                            <ui:Button Content="Save" Margin="0,0,8,0" Click="SaveRecipe_Click" />
+                                            <ui:Button Content="Save As" Margin="0,0,8,0" Click="SaveRecipeAs_Click" />
+                                            <ui:Button Content="Load" Click="LoadRecipe_Click" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="0" Grid.Row="1" Margin="0,0,12,0">
+                                            <ui:TextBlock Text="Description" />
+                                            <ui:TextBox Text="{Binding CurrentRecipe.Description}" PlaceholderText="Optional notes" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="1" Grid.Row="1" Margin="0,0,12,0">
+                                            <ui:TextBlock Text="Recipe File" />
+                                            <ComboBox ItemsSource="{Binding RecipeFiles}" SelectedItem="{Binding SelectedRecipeFile}" DisplayMemberPath="DisplayName" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Column="2" Grid.Row="1" />
+                                    </Grid>
+                                </ui:Card>
+
+                                <ui:Card Padding="12" Margin="0,0,0,12">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <ui:DataGrid x:Name="RulesGrid"
+                                                     ItemsSource="{Binding CurrentRecipe.Rules}"
+                                                     SelectedItem="{Binding SelectedRule}"
+                                                     AutoGenerateColumns="False"
+                                                     CanUserAddRows="False"
+                                                     IsReadOnly="False"
+                                                     PreviewMouseLeftButtonDown="RulesGrid_PreviewMouseLeftButtonDown">
+                                            <ui:DataGrid.Columns>
+                                                <DataGridCheckBoxColumn Header="On" Binding="{Binding Enabled}" Width="50" />
+                                                <DataGridTextColumn Header="Group" Binding="{Binding GroupId}" Width="70" />
+                                                <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="2*" />
+                                                <DataGridTextColumn Header="Property" Binding="{Binding Property}" Width="2*" />
+                                                <DataGridTemplateColumn Header="Pick" Width="80">
+                                                    <DataGridTemplateColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <ui:Button Content="Pick" Padding="6,2" Click="PickProperty_Click" />
+                                                        </DataTemplate>
+                                                    </DataGridTemplateColumn.CellTemplate>
+                                                </DataGridTemplateColumn>
+                                                <DataGridComboBoxColumn Header="Condition"
+                                                                        Width="140"
+                                                                        DisplayMemberPath="Label"
+                                                                        SelectedValuePath="Value"
+                                                                        SelectedValueBinding="{Binding Operator, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                                    <DataGridComboBoxColumn.ElementStyle>
+                                                        <Style TargetType="ComboBox">
+                                                            <Setter Property="ItemsSource" Value="{Binding DataContext.ConditionOptions, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
+                                                            <Setter Property="MinWidth" Value="120" />
+                                                            <Setter Property="IsHitTestVisible" Value="False" />
+                                                            <Setter Property="Focusable" Value="False" />
+                                                        </Style>
+                                                    </DataGridComboBoxColumn.ElementStyle>
+                                                    <DataGridComboBoxColumn.EditingElementStyle>
+                                                        <Style TargetType="ComboBox">
+                                                            <Setter Property="ItemsSource" Value="{Binding DataContext.ConditionOptions, RelativeSource={RelativeSource AncestorType=DataGrid}}" />
+                                                            <Setter Property="MinWidth" Value="120" />
+                                                            <Setter Property="IsDropDownOpen" Value="True" />
+                                                        </Style>
+                                                    </DataGridComboBoxColumn.EditingElementStyle>
+                                                </DataGridComboBoxColumn>
+                                                <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="2*" />
+                                            </ui:DataGrid.Columns>
+                                        </ui:DataGrid>
+
+                                        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                                            <ui:Button Content="Add Rule" Click="AddRule_Click" />
+                                            <ui:Button Content="Remove Rule" Margin="8,0,0,0" Click="RemoveRule_Click" />
+                                            <ui:Button Content="Duplicate Rule" Margin="8,0,0,0" Click="DuplicateRule_Click" />
+                                        </StackPanel>
+
+                                        <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                                            <ui:TextBlock Text="Sample Values" Appearance="Secondary" />
+                                            <ListBox ItemsSource="{Binding SelectedRule.SampleValues}" Height="70" />
+                                        </StackPanel>
+                                    </Grid>
+                                </ui:Card>
+
+                                <ui:Card Padding="12">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Orientation="Horizontal">
+                                            <CheckBox Content="Fast preview (cached)" IsChecked="{Binding UseFastPreview}" />
+                                            <ui:Button Content="Preview" Margin="12,0,0,0" Click="Preview_Click" />
+                                            <ui:Button Content="Select Results" Margin="8,0,0,0" Click="SelectResults_Click" IsEnabled="{Binding CanSelectPreviewResults}" />
+                                            <ui:Button Content="Generate" Margin="18,0,0,0" Appearance="Primary" Click="Generate_Click" />
+                                        </StackPanel>
+
+                                        <ui:TextBlock Grid.Row="1" Text="{Binding PreviewStatusText}" Margin="0,8,0,0" />
+
+                                        <TextBox Grid.Row="2"
+                                                 Text="{Binding PreviewDetailsText}"
+                                                 AcceptsReturn="True"
+                                                 IsReadOnly="True"
+                                                 Height="120"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                 BorderThickness="1"
+                                                 Padding="8" />
+                                    </Grid>
+                                </ui:Card>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <TabItem Header="Smart Grouping">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="0,8,0,0">
+                                <ui:Card Padding="12" Margin="0,0,0,12">
+                                    <StackPanel>
+                                        <ui:TextBlock Text="Group by property values and generate one Search Set per group." Appearance="Secondary" />
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <ui:TextBox Width="240" Text="{Binding CurrentRecipe.Grouping.GroupByCategory}" PlaceholderText="Group By Category" />
+                                            <ui:TextBox Width="240" Text="{Binding CurrentRecipe.Grouping.GroupByProperty}" PlaceholderText="Group By Property" />
+                                            <ui:Button Content="Pick" Click="PickGroupBy_Click" />
+                                        </StackPanel>
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <CheckBox Content="Then by (nested)" IsChecked="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+                                            <ui:TextBox Width="240" Text="{Binding CurrentRecipe.Grouping.ThenByCategory}" PlaceholderText="Then By Category" IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+                                            <ui:TextBox Width="240" Text="{Binding CurrentRecipe.Grouping.ThenByProperty}" PlaceholderText="Then By Property" IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+                                            <ui:Button Content="Pick" Click="PickThenBy_Click" IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+                                        </StackPanel>
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <ui:TextBlock Text="Max Groups" VerticalAlignment="Center" />
+                                            <ui:TextBox Width="80" Text="{Binding CurrentRecipe.Grouping.MaxGroups}" />
+                                            <ui:TextBlock Text="Min Count" VerticalAlignment="Center" Margin="12,0,0,0" />
+                                            <ui:TextBox Width="80" Text="{Binding CurrentRecipe.Grouping.MinCount}" />
+                                            <CheckBox Content="Include blanks" Margin="12,0,0,0" IsChecked="{Binding CurrentRecipe.Grouping.IncludeBlanks}" />
+                                        </StackPanel>
+
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <ui:Button Content="Preview Groups" Click="PreviewGroups_Click" />
+                                            <ui:Button Content="Generate Grouped Search Sets" Click="GenerateGroups_Click" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </ui:Card>
+
+                                <ui:Card Padding="12">
+                                    <ui:DataGrid ItemsSource="{Binding GroupRows}"
+                                                 AutoGenerateColumns="False"
+                                                 CanUserAddRows="False"
+                                                 Height="320">
+                                        <ui:DataGrid.Columns>
+                                            <DataGridTextColumn Header="Group" Binding="{Binding DisplayKey}" Width="3*" />
+                                            <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="*" />
+                                        </ui:DataGrid.Columns>
+                                    </ui:DataGrid>
+                                </ui:Card>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </TabItem>
+
+                    <TabItem Header="From Selection">
+                        <StackPanel Margin="0,8,0,0">
+                            <ui:Card Padding="12" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <ui:TextBlock Text="Analyze the current selection and suggest rules that describe it." Appearance="Secondary" />
+                                    <ui:Button Content="Analyze Current Selection" Click="AnalyzeSelection_Click" Width="220" />
+                                </StackPanel>
+                            </ui:Card>
+
+                            <ui:Card Padding="12">
+                                <StackPanel>
+                                    <ui:TextBlock Text="Suggestions" FontWeight="SemiBold" />
+                                    <ListBox ItemsSource="{Binding SelectionSuggestions}"
+                                             SelectedItem="{Binding SelectedSuggestion}"
+                                             DisplayMemberPath="Display"
+                                             Height="220" />
+                                    <ui:Button Content="Apply to Quick Builder" Click="ApplySuggestion_Click" IsEnabled="{Binding CanApplySuggestion}" Width="220" />
+                                </StackPanel>
+                            </ui:Card>
+                        </StackPanel>
+                    </TabItem>
+
+                    <TabItem Header="Packs">
+                        <StackPanel Margin="0,8,0,0">
+                            <ui:Card Padding="12" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <ui:TextBlock Text="Run a pack to create a suite of common sets." Appearance="Secondary" />
+                                    <ListBox ItemsSource="{Binding Packs}"
+                                             SelectedItem="{Binding SelectedPack}"
+                                             Height="260">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel>
+                                                    <ui:TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                    <ui:TextBlock Text="{Binding Description}" Appearance="Secondary" TextWrapping="Wrap" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <ui:Button Content="Run Selected Pack" Click="RunPack_Click" IsEnabled="{Binding CanRunPack}" Width="200" />
+                                </StackPanel>
+                            </ui:Card>
+                        </StackPanel>
+                    </TabItem>
+                </TabControl>
+            </Grid>
+        </ui:Card>
+    </Grid>
+</UserControl>

@@ -434,6 +434,31 @@ namespace MicroEng.Navisworks
             }
         }
 
+        public static void SmartSetGenerator()
+        {
+            const string dockPanePluginId = "MicroEng.SmartSetGenerator.DockPane.MENG";
+            Log("SmartSetGenerator: locating plugin record");
+            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find Smart Set Generator dock pane plugin '{dockPanePluginId}'.",
+                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!record.IsLoaded)
+            {
+                Log("SmartSetGenerator: loading plugin");
+                record.LoadPlugin();
+            }
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+            {
+                Log("SmartSetGenerator: setting pane visible");
+                pane.Visible = true;
+            }
+        }
+
         public static void Sequence4D()
         {
             const string dockPanePluginId = "MicroEng.Sequence4D.DockPane.MENG";

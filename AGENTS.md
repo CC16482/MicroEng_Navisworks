@@ -1,12 +1,20 @@
-# Space Mapper Handoff
+# MicroEng Handoff
 
 ## Status
-- Last build: `dotnet build` (succeeded; deploy to ProgramData completed).
+- Last build: not rerun after Smart Set Generator/UI updates (rerun `dotnet build` to confirm).
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
-- Working tree includes build outputs and generated files.
+- Working tree was clean at last check (no uncommitted changes).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
+- Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 
 ## Recent changes
+- MicroEng Tools panel buttons now use card-style `ui:CardAction` with icons; added Smart Set Generator entry.
+- Smart Set Generator dock pane + command added (`MicroEng.SmartSetGenerator.DockPane` / `MicroEng.SmartSetGenerator.Command`).
+- Smart Set Generator UI includes Quick Builder, Smart Grouping, From Selection, and Packs tabs.
+- Property picker dialog added (category/property search + samples); fast preview uses Data Scraper cache.
+- Condition operators match Navisworks Find Items: Equals, not equals, Contains, Wildcard, Defined, Undefined.
+- Recipe save/load implemented via JSON in ProgramData.
+- Panel icons updated: Data Scraper `DatabaseLightning20`, Data Matrix `TableSettings28`, Space Mapper `BoxMultiple20`, Smart Sets `TextBulletListAdd20`.
 - Fast preset uses origin-point classification (target bbox center in zone AABB); partial tagging only occurs when Tag Partial Separately or Treat Partial as Contained is enabled.
 - Preflight signature and reuse updated to include processing mode and origin-point settings; point-based target indexing when partials are off.
 - Advanced Performance adds Fast Traversal (Auto/Zone-major/Target-major). Target-major is only valid when partials are off.
@@ -29,7 +37,25 @@
 - GPU diagnostics: batch metrics and per-zone GPU eligibility table (skip reasons, thresholds) in run reports.
 - Variation check: baseline CPU variant + GPU variant added for direct CPU vs GPU comparison.
 
+## Open issues
+- Smart Set Generator: Condition dropdown in the rules grid is not rendering in the UI. Likely needs a template-based ComboBox in the DataGrid cell or Wpf.Ui DataGrid style adjustment.
+
 ## Key files touched
+- `MicroEng.Navisworks/MicroEngPanelControl.xaml`
+- `MicroEng.Navisworks/MicroEngPanelControl.xaml.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetGeneratorControl.xaml`
+- `MicroEng.Navisworks/SmartSets/SmartSetGeneratorControl.xaml.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetGeneratorPlugins.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetGeneratorNavisworksService.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetModels.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetFastPreviewService.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetRecipeStore.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetGroupingEngine.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetInferenceEngine.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetPackDefinitions.cs`
+- `MicroEng.Navisworks/SmartSets/DataScraperSessionAdapter.cs`
+- `MicroEng.Navisworks/SmartSets/PropertyPickerWindow.xaml`
+- `MicroEng.Navisworks/SmartSets/PropertyPickerWindow.xaml.cs`
 - `MicroEng.Navisworks/SpaceMapperModels.cs`
 - `MicroEng.Navisworks/SpaceMapperEngines.cs`
 - `MicroEng.Navisworks/SpaceMapperGeometry.cs`
@@ -50,6 +76,11 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
+- Smart Sets: Condition dropdown appears and is editable in Quick Builder rules grid.
+- Smart Sets: Property picker opens and populates Category/Property + sample values.
+- Smart Sets: Fast preview returns counts from Data Scraper cache; live preview still works.
+- Smart Sets: Save/Load recipes create JSON in ProgramData.
+- Panel: card-style tool buttons show icons and toggle the correct panes.
 - Step 3: Benchmark button creates a report and shows a summary in the "Latest benchmark" card.
 - Fast preset: origin-point containment works; partial tagging only appears when partial options are enabled.
 - Advanced Performance: Target-major is disabled or falls back when partials are enabled; Auto picks Target-major when partials are off and targets >> zones.

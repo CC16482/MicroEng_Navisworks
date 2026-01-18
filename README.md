@@ -8,6 +8,7 @@
 - Settings: open via the gear button in the panel. Theme toggle + accent mode (System, Custom, Black/White) + DataGrid gridline color apply live to all open MicroEng windows.
 - Step 3 Benchmark & Testing: Benchmark button runs multi-preset comparisons (Compute only / Simulate writeback / Full writeback). Options include writeback strategy, skip unchanged (signature), pack outputs, show internal properties, and close Navisworks panes (restore after). Reports save to `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
 - Advanced Performance: Fast Traversal (Auto/Zone-major/Target-major). Target-major is only valid when partial options are off.
+- Smart Set Generator: dockable panel for Search/Selection Sets with Quick Builder, Smart Grouping, From Selection, and Packs. Uses Data Scraper cache for pickers/fast preview; recipes save to `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 - Log file: `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\MicroEng.log` (fallback: `%TEMP%\MicroEng.log`).
 - If UI is blank or a window fails to open, check the log for XAML resource errors (missing resource keys or Wpf.Ui.dll not found).
 - Known UI issue to verify: some labels/text still render black in Dark mode; fix by removing local `Foreground` overrides or ensuring `MicroEngWpfUiTheme.ApplyTextResources` updates `TextFillColor*` brushes.
@@ -24,12 +25,13 @@
 - `MicroEngUiKit.xaml` provides shared spacing/typography/card/button styles but should not override WPF-UI implicit styles for `ComboBox`, `CheckBox`, `RadioButton`, etc.
 - `MicroEngWpfUiTheme.cs` handles theme/accents/gridlines and broadcasts changes to registered roots; uses `TextFillColor*` resources to fix dark-mode text.
 - Primary UI files: `MicroEngPanelControl.xaml`, `DataScraperWindow.xaml`, `AppendIntegrateDialog.xaml`, `DataMatrixControl.xaml`, `SpaceMapperControl.xaml`.
+- Smart Set UI files: `SmartSets/SmartSetGeneratorControl.xaml(.cs)` and `SmartSets/PropertyPickerWindow.xaml(.cs)`.
 
 ## Overview
 - Navisworks 2025 automation toolkit written in C# targeting .NET Framework 4.8 (`net48`).
 - Main assembly: `MicroEng.Navisworks.dll` with WPF UI (`UseWPF` + `UseWindowsForms` for ElementHost).
-- Dockable MicroEng panel (`MicroEng.DockPane`) hosts buttons for Data Scraper, Data Mapper (Append Data), Data Matrix, Space Mapper, and 4D Sequence. Reconstruct / Zone Finder remain add-in stubs only.
-- Data Matrix and Space Mapper are WPF dock panes; Data Scraper opens its own window; the panel log captures messages raised via `MicroEngActions.Log`.
+- Dockable MicroEng panel (`MicroEng.DockPane`) hosts buttons for Data Scraper, Data Mapper (Append Data), Data Matrix, Smart Set Generator, Space Mapper, and 4D Sequence. Reconstruct / Zone Finder remain add-in stubs only.
+- Data Matrix, Smart Set Generator, and Space Mapper are WPF dock panes; Data Scraper opens its own window; the panel log captures messages raised via `MicroEngActions.Log`.
 - Branding/colours come from `MICROENG_THEME_GUIDE.md` and the `Logos` folder (`microeng_logotray.png`, `microeng-logo2.png`).
 
 ## Repository Layout (trimmed)
@@ -39,6 +41,7 @@ MicroEng_Navisworks
 │  ├─ MicroEng.Navisworks.csproj     # net48, UseWPF, Navisworks refs
 │  ├─ MicroEngPlugins.cs             # Plugin registrations, shared actions
 │  ├─ MicroEngPanelControl.xaml(.cs) # Docked launcher + log
+│  ├─ SmartSets/                     # Smart Set Generator (dock pane + services)
 │  ├─ DataMatrixControl.xaml(.cs)    # WPF Data Matrix dock pane
 │  ├─ SpaceMapperControl.xaml(.cs)   # WPF Space Mapper dock pane
 │  ├─ AppendIntegrate*.cs            # Data Mapper (Append & Integrate) engine/templates
@@ -75,6 +78,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 3. Add-Ins tab shows:
    - MicroEng Data Mapper (Append Data)
    - MicroEng Data Matrix (dockable)
+   - MicroEng Smart Set Generator (dockable)
    - MicroEng Space Mapper (dockable)
    - MicroEng 4D Sequence (dockable)
    - MicroEng Data Scraper
@@ -85,6 +89,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 - **Data Mapper (`MicroEng.AppendData`)**: Opens the Data Mapper UI (`AppendIntegrateDialog`). Uses Data Scraper cache for property pickers/type hints; no auto-tagging logic remains.
 - **Data Scraper**: Scans model properties into `DataScraperCache` (profiles, distinct properties, raw entries). Source of truth for Data Matrix/Space Mapper metadata.
 - **Data Matrix** (dock pane `MicroEng.DataMatrix.DockPane`): WPF grid built from the latest ScrapeSession. Supports column chooser (toggle properties on/off), presets per profile, selection sync back to Navisworks, and CSV export (filtered/all).
+- **Smart Set Generator** (dock pane `MicroEng.SmartSetGenerator.DockPane`): Quick Builder rules, smart grouping, selection-driven suggestions, and pack presets. Property picker and fast preview use Data Scraper cache; recipes persist to ProgramData.
 - **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata and CPU engine (GPU stubs remain). Presets Fast/Normal/Accurate; Fast uses origin-point containment (bbox center in zone AABB). Advanced Performance includes Fast Traversal (Auto/Zone-major/Target-major). Step 3 includes Benchmark & Testing (compute/simulate/full), writeback strategy, skip-unchanged signature, packed writeback option, and optional pane-closing during runs.
 - **4D Sequence** (dock pane `MicroEng.Sequence4D.DockPane`): WPF UI that captures selection, orders targets, and generates Timeliner task sequences; includes delete-by-name for regeneration.
 - **MicroEng Panel**: WPF launcher with branding/logo and log textbox that listens to `MicroEngActions.LogMessage`.
@@ -97,8 +102,9 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 ## Known issues / tips
 - Space Mapper UI clipping: keep `SpaceMapperControl.xaml` rooted in a simple Grid (header row + content row) and ensure the dock pane is `[DockPanePlugin(..., FixedSize=false, AutoScroll=true)]` with `ElementHost` docked fill. If the pane looks truncated, delete old plugin copies from `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\` (and any AppData bundle), rebuild, redeploy, then dock the pane before resizing.
 - Target-major traversal only applies when partial options are off (Fast origin-point mode). When partial tagging is enabled, Fast traversal falls back to Zone-major.
+- Smart Set Generator: Condition column dropdown may render blank in the rules grid; verify the DataGridComboBoxColumn binding or switch to a template-based ComboBox if needed.
 
 ## Working with Codex
 - Primary entry points live in `MicroEngPlugins.cs`.
-- UI work: `MicroEngPanelControl.xaml`, `DataMatrixControl.xaml`, `SpaceMapperControl.xaml`.
+- UI work: `MicroEngPanelControl.xaml`, `DataMatrixControl.xaml`, `SpaceMapperControl.xaml`, `SmartSets/SmartSetGeneratorControl.xaml`.
 - Do not rename plugin IDs/classes (`MicroEng.AppendData`, `MicroEng.DockPane`, `MicroEng.DataMatrix.DockPane`, `MicroEng.SpaceMapper.DockPane`, etc.).

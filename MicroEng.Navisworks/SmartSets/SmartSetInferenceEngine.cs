@@ -120,7 +120,7 @@ namespace MicroEng.Navisworks.SmartSets
                 {
                     Category = cat,
                     Property = prop,
-                    Operator = string.IsNullOrWhiteSpace(top.Key) ? SmartSetOperator.Undefined : SmartSetOperator.Equals,
+                    Operator = string.IsNullOrWhiteSpace(top.Key) ? SmartSetOperator.Defined : SmartSetOperator.Equals,
                     Value = top.Key,
                     MatchCount = top.Value,
                     TotalCount = selectionCount

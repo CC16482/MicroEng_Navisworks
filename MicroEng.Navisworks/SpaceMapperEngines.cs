@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -117,16 +117,19 @@ namespace MicroEng.Navisworks
             SpatialHashGrid grid;
             Aabb[] targetBounds;
             string[] targetKeys;
+            int[] targetIndices;
 
             var buildSw = Stopwatch.StartNew();
             if (preflightCache?.Grid != null
                 && preflightCache.TargetBounds != null
                 && preflightCache.TargetKeys != null
+                && preflightCache.TargetIndices != null
                 && preflightCache.PointIndex == usePointIndex)
             {
                 grid = preflightCache.Grid;
                 targetBounds = preflightCache.TargetBounds;
                 targetKeys = preflightCache.TargetKeys;
+                targetIndices = preflightCache.TargetIndices;
                 diagnostics.UsedPreflightIndex = true;
             }
             else
@@ -135,10 +138,20 @@ namespace MicroEng.Navisworks
                 var prepared = BuildTargetBounds(targets, targetBoundsMode, targetMidpointMode);
                 targetBounds = prepared.Bounds;
                 targetKeys = prepared.Keys;
+                targetIndices = prepared.TargetIndices;
                 if (targetBounds.Length == 0)
                 {
                     buildSw.Stop();
                     diagnostics.BuildIndexTime = buildSw.Elapsed;
+                    if (diagnostics.TargetsTotal <= 0)
+                    {
+                        diagnostics.TargetsTotal = targets.Count;
+                    }
+                    diagnostics.TargetsWithBounds = 0;
+                    diagnostics.TargetsWithoutBounds = diagnostics.TargetsTotal;
+                    diagnostics.TargetsSampled = 0;
+                    diagnostics.TargetsSampleSkippedNoBounds = diagnostics.TargetsWithoutBounds;
+                    diagnostics.TargetsSampleSkippedNoGeometry = 0;
                     return results;
                 }
 
@@ -148,6 +161,12 @@ namespace MicroEng.Navisworks
             }
             buildSw.Stop();
             diagnostics.BuildIndexTime = buildSw.Elapsed;
+            if (diagnostics.TargetsTotal <= 0)
+            {
+                diagnostics.TargetsTotal = targets.Count;
+            }
+            diagnostics.TargetsWithBounds = targetBounds.Length;
+            diagnostics.TargetsWithoutBounds = Math.Max(0, diagnostics.TargetsTotal - targetBounds.Length);
 
             if (grid == null || targetBounds == null || targetBounds.Length == 0)
             {
@@ -155,15 +174,40 @@ namespace MicroEng.Navisworks
             }
 
             IReadOnlyList<Vector3D>[] targetSamplePoints = null;
-            if (needsFraction
+            var wantsTargetGeometrySamples = needsFraction
                 && (containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
-                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu))
+                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu);
+            if (wantsTargetGeometrySamples)
             {
-                targetSamplePoints = BuildTargetGeometrySamples(targets);
+                targetSamplePoints = BuildTargetGeometrySamples(targets, targetIndices);
                 if (targetSamplePoints == null || targetSamplePoints.Length != targetBounds.Length)
                 {
                     targetSamplePoints = null;
                 }
+            }
+            if (wantsTargetGeometrySamples)
+            {
+                var sampled = 0;
+                if (targetSamplePoints != null)
+                {
+                    for (int i = 0; i < targetSamplePoints.Length; i++)
+                    {
+                        if (targetSamplePoints[i] != null && targetSamplePoints[i].Count > 0)
+                        {
+                            sampled++;
+                        }
+                    }
+                }
+
+                diagnostics.TargetsSampled = sampled;
+                diagnostics.TargetsSampleSkippedNoBounds = diagnostics.TargetsWithoutBounds;
+                diagnostics.TargetsSampleSkippedNoGeometry = Math.Max(0, diagnostics.TargetsWithBounds - sampled);
+            }
+            else
+            {
+                diagnostics.TargetsSampled = 0;
+                diagnostics.TargetsSampleSkippedNoBounds = 0;
+                diagnostics.TargetsSampleSkippedNoGeometry = 0;
             }
 
             runProgress?.SetStage(
@@ -451,6 +495,7 @@ namespace MicroEng.Navisworks
             diagnostics.AvgCandidatesPerZone = totalZones == 0 ? 0 : candidatePairs / (double)totalZones;
             diagnostics.MaxCandidatesPerTarget = 0;
             diagnostics.AvgCandidatesPerTarget = 0;
+            diagnostics.CandidateTargetStatsAvailable = false;
             diagnostics.SlowZoneThresholdSeconds = SlowZoneThresholdSeconds;
             if (!slowZones.IsEmpty)
             {
@@ -598,12 +643,14 @@ namespace MicroEng.Navisworks
             SpatialHashGrid zoneGrid = null;
             Aabb[] targetBounds;
             string[] targetKeys;
+            int[] targetIndices;
             int[] zoneIndexMap = null;
 
             var buildSw = Stopwatch.StartNew();
             if (preflightCache?.ZoneGrid != null
                 && preflightCache.TargetBounds != null
                 && preflightCache.TargetKeys != null
+                && preflightCache.TargetIndices != null
                 && preflightCache.ZoneBoundsInflated != null
                 && preflightCache.ZoneIndexMap != null
                 && preflightCache.PointIndex == usePointIndex)
@@ -611,6 +658,7 @@ namespace MicroEng.Navisworks
                 zoneGrid = preflightCache.ZoneGrid;
                 targetBounds = preflightCache.TargetBounds;
                 targetKeys = preflightCache.TargetKeys;
+                targetIndices = preflightCache.TargetIndices;
                 zoneIndexMap = preflightCache.ZoneIndexMap;
                 diagnostics.UsedPreflightIndex = true;
             }
@@ -620,10 +668,20 @@ namespace MicroEng.Navisworks
                 var prepared = BuildTargetBounds(targets, targetBoundsMode, targetMidpointMode);
                 targetBounds = prepared.Bounds;
                 targetKeys = prepared.Keys;
+                targetIndices = prepared.TargetIndices;
                 if (targetBounds.Length == 0)
                 {
                     buildSw.Stop();
                     diagnostics.BuildIndexTime = buildSw.Elapsed;
+                    if (diagnostics.TargetsTotal <= 0)
+                    {
+                        diagnostics.TargetsTotal = targets.Count;
+                    }
+                    diagnostics.TargetsWithBounds = 0;
+                    diagnostics.TargetsWithoutBounds = diagnostics.TargetsTotal;
+                    diagnostics.TargetsSampled = 0;
+                    diagnostics.TargetsSampleSkippedNoBounds = diagnostics.TargetsWithoutBounds;
+                    diagnostics.TargetsSampleSkippedNoGeometry = 0;
                     return results;
                 }
 
@@ -654,6 +712,12 @@ namespace MicroEng.Navisworks
             }
             buildSw.Stop();
             diagnostics.BuildIndexTime = buildSw.Elapsed;
+            if (diagnostics.TargetsTotal <= 0)
+            {
+                diagnostics.TargetsTotal = targets.Count;
+            }
+            diagnostics.TargetsWithBounds = targetBounds.Length;
+            diagnostics.TargetsWithoutBounds = Math.Max(0, diagnostics.TargetsTotal - targetBounds.Length);
 
             if (zoneGrid == null || targetBounds == null || targetBounds.Length == 0 || zoneIndexMap == null || zoneIndexMap.Length == 0)
             {
@@ -661,15 +725,40 @@ namespace MicroEng.Navisworks
             }
 
             IReadOnlyList<Vector3D>[] targetSamplePoints = null;
-            if (needsFraction
+            var wantsTargetGeometrySamples = needsFraction
                 && (containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
-                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu))
+                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu);
+            if (wantsTargetGeometrySamples)
             {
-                targetSamplePoints = BuildTargetGeometrySamples(targets);
+                targetSamplePoints = BuildTargetGeometrySamples(targets, targetIndices);
                 if (targetSamplePoints == null || targetSamplePoints.Length != targetBounds.Length)
                 {
                     targetSamplePoints = null;
                 }
+            }
+            if (wantsTargetGeometrySamples)
+            {
+                var sampled = 0;
+                if (targetSamplePoints != null)
+                {
+                    for (int i = 0; i < targetSamplePoints.Length; i++)
+                    {
+                        if (targetSamplePoints[i] != null && targetSamplePoints[i].Count > 0)
+                        {
+                            sampled++;
+                        }
+                    }
+                }
+
+                diagnostics.TargetsSampled = sampled;
+                diagnostics.TargetsSampleSkippedNoBounds = diagnostics.TargetsWithoutBounds;
+                diagnostics.TargetsSampleSkippedNoGeometry = Math.Max(0, diagnostics.TargetsWithBounds - sampled);
+            }
+            else
+            {
+                diagnostics.TargetsSampled = 0;
+                diagnostics.TargetsSampleSkippedNoBounds = 0;
+                diagnostics.TargetsSampleSkippedNoGeometry = 0;
             }
 
             var trackNarrow = Mode == SpaceMapperProcessingMode.Debug;
@@ -728,9 +817,12 @@ namespace MicroEng.Navisworks
                         && Interlocked.CompareExchange(ref lastDetailTicks, nowTicks, prevTicks) == prevTicks)
                     {
                         string targetName = null;
-                        if (targetIndex < targets.Count)
+                        var originalIndex = (targetIndices != null && targetIndex < targetIndices.Length)
+                            ? targetIndices[targetIndex]
+                            : targetIndex;
+                        if (originalIndex < targets.Count)
                         {
-                            targetName = targets[targetIndex]?.DisplayName;
+                            targetName = targets[originalIndex]?.DisplayName;
                         }
                         if (string.IsNullOrWhiteSpace(targetName) && targetKeys != null && targetIndex < targetKeys.Length)
                         {
@@ -856,6 +948,7 @@ namespace MicroEng.Navisworks
             diagnostics.AvgCandidatesPerTarget = targetBounds.Length == 0 ? 0 : candidatePairs / (double)targetBounds.Length;
             diagnostics.MaxCandidatesPerZone = 0;
             diagnostics.AvgCandidatesPerZone = 0;
+            diagnostics.CandidateTargetStatsAvailable = true;
             if (trackNarrow)
             {
                 diagnostics.NarrowPhaseTime = ToTimeSpan(narrowTicks);
@@ -1456,25 +1549,27 @@ namespace MicroEng.Navisworks
                 && z >= zoneBounds.MinZ && z <= zoneBounds.MaxZ;
         }
 
-        internal static (Aabb[] Bounds, string[] Keys) BuildTargetBounds(
+        internal static (Aabb[] Bounds, string[] Keys, int[] TargetIndices) BuildTargetBounds(
             IReadOnlyList<TargetGeometry> targets,
             SpaceMapperTargetBoundsMode targetBoundsMode,
             SpaceMapperMidpointMode midpointMode)
         {
             var bounds = new List<Aabb>(targets.Count);
             var keys = new List<string>(targets.Count);
+            var indices = new List<int>(targets.Count);
             var useMidpoint = targetBoundsMode == SpaceMapperTargetBoundsMode.Midpoint;
 
             for (int i = 0; i < targets.Count; i++)
             {
                 var target = targets[i];
-                var bbox = target?.BoundingBox;
+                var bbox = target?.BoundingBox ?? target?.ModelItem?.BoundingBox();
                 if (bbox == null) continue;
                 bounds.Add(useMidpoint ? ToMidpointAabb(bbox, midpointMode) : ToAabb(bbox));
                 keys.Add(target.ItemKey);
+                indices.Add(i);
             }
 
-            return (bounds.ToArray(), keys.ToArray());
+            return (bounds.ToArray(), keys.ToArray(), indices.ToArray());
         }
 
         internal static Aabb ToAabb(BoundingBox3D bbox)
@@ -1880,17 +1975,23 @@ namespace MicroEng.Navisworks
             return fraction;
         }
 
-        internal static IReadOnlyList<Vector3D>[] BuildTargetGeometrySamples(IReadOnlyList<TargetGeometry> targets)
+        internal static IReadOnlyList<Vector3D>[] BuildTargetGeometrySamples(IReadOnlyList<TargetGeometry> targets, int[] targetIndices)
         {
-            if (targets == null || targets.Count == 0)
+            if (targets == null || targets.Count == 0 || targetIndices == null || targetIndices.Length == 0)
             {
                 return null;
             }
 
-            var samples = new IReadOnlyList<Vector3D>[targets.Count];
-            for (int i = 0; i < targets.Count; i++)
+            var samples = new IReadOnlyList<Vector3D>[targetIndices.Length];
+            for (int i = 0; i < targetIndices.Length; i++)
             {
-                var target = targets[i];
+                var targetIndex = targetIndices[i];
+                if (targetIndex < 0 || targetIndex >= targets.Count)
+                {
+                    continue;
+                }
+
+                var target = targets[targetIndex];
                 var vertices = target?.TriangleVertices;
                 if (vertices == null || vertices.Count < 3)
                 {
@@ -2187,16 +2288,19 @@ namespace MicroEng.Navisworks
             SpatialHashGrid grid;
             Aabb[] targetBounds;
             string[] targetKeys;
+            int[] targetIndices;
 
             var buildSw = Stopwatch.StartNew();
             if (preflightCache?.Grid != null
                 && preflightCache.TargetBounds != null
                 && preflightCache.TargetKeys != null
+                && preflightCache.TargetIndices != null
                 && preflightCache.PointIndex == usePointIndex)
             {
                 grid = preflightCache.Grid;
                 targetBounds = preflightCache.TargetBounds;
                 targetKeys = preflightCache.TargetKeys;
+                targetIndices = preflightCache.TargetIndices;
                 diagnostics.UsedPreflightIndex = true;
             }
             else
@@ -2205,10 +2309,20 @@ namespace MicroEng.Navisworks
                 var prepared = CpuIntersectionEngine.BuildTargetBounds(targets, targetBoundsMode, targetMidpointMode);
                 targetBounds = prepared.Bounds;
                 targetKeys = prepared.Keys;
+                targetIndices = prepared.TargetIndices;
                 if (targetBounds.Length == 0)
                 {
                     buildSw.Stop();
                     diagnostics.BuildIndexTime = buildSw.Elapsed;
+                    if (diagnostics.TargetsTotal <= 0)
+                    {
+                        diagnostics.TargetsTotal = targets.Count;
+                    }
+                    diagnostics.TargetsWithBounds = 0;
+                    diagnostics.TargetsWithoutBounds = diagnostics.TargetsTotal;
+                    diagnostics.TargetsSampled = 0;
+                    diagnostics.TargetsSampleSkippedNoBounds = diagnostics.TargetsWithoutBounds;
+                    diagnostics.TargetsSampleSkippedNoGeometry = 0;
                     return results;
                 }
 
@@ -2218,6 +2332,12 @@ namespace MicroEng.Navisworks
             }
             buildSw.Stop();
             diagnostics.BuildIndexTime = buildSw.Elapsed;
+            if (diagnostics.TargetsTotal <= 0)
+            {
+                diagnostics.TargetsTotal = targets.Count;
+            }
+            diagnostics.TargetsWithBounds = targetBounds.Length;
+            diagnostics.TargetsWithoutBounds = Math.Max(0, diagnostics.TargetsTotal - targetBounds.Length);
 
             if (grid == null || targetBounds == null || targetBounds.Length == 0)
             {
@@ -2225,15 +2345,40 @@ namespace MicroEng.Navisworks
             }
 
             IReadOnlyList<Vector3D>[] targetSamplePoints = null;
-            if (needsFraction
+            var wantsTargetGeometrySamples = needsFraction
                 && (containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometry
-                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu))
+                    || containmentCalculationMode == SpaceMapperContainmentCalculationMode.TargetGeometryGpu);
+            if (wantsTargetGeometrySamples)
             {
-                targetSamplePoints = CpuIntersectionEngine.BuildTargetGeometrySamples(targets);
+                targetSamplePoints = CpuIntersectionEngine.BuildTargetGeometrySamples(targets, targetIndices);
                 if (targetSamplePoints == null || targetSamplePoints.Length != targetBounds.Length)
                 {
                     targetSamplePoints = null;
                 }
+            }
+            if (wantsTargetGeometrySamples)
+            {
+                var sampled = 0;
+                if (targetSamplePoints != null)
+                {
+                    for (int i = 0; i < targetSamplePoints.Length; i++)
+                    {
+                        if (targetSamplePoints[i] != null && targetSamplePoints[i].Count > 0)
+                        {
+                            sampled++;
+                        }
+                    }
+                }
+
+                diagnostics.TargetsSampled = sampled;
+                diagnostics.TargetsSampleSkippedNoBounds = diagnostics.TargetsWithoutBounds;
+                diagnostics.TargetsSampleSkippedNoGeometry = Math.Max(0, diagnostics.TargetsWithBounds - sampled);
+            }
+            else
+            {
+                diagnostics.TargetsSampled = 0;
+                diagnostics.TargetsSampleSkippedNoBounds = 0;
+                diagnostics.TargetsSampleSkippedNoGeometry = 0;
             }
 
             runProgress?.SetStage(
@@ -3460,6 +3605,7 @@ namespace MicroEng.Navisworks
             diagnostics.AvgCandidatesPerZone = zoneCount == 0 ? 0 : candidatePairs / (double)zoneCount;
             diagnostics.MaxCandidatesPerTarget = 0;
             diagnostics.AvgCandidatesPerTarget = 0;
+            diagnostics.CandidateTargetStatsAvailable = false;
             diagnostics.CandidateQueryTime = TimeSpan.FromSeconds(candidateTicks / (double)Stopwatch.Frequency);
             diagnostics.NarrowPhaseTime = TimeSpan.FromSeconds(narrowTicks / (double)Stopwatch.Frequency);
             diagnostics.GpuZonesProcessed = gpuZonesProcessed;
@@ -3851,3 +3997,4 @@ namespace MicroEng.Navisworks
         }
     }
 }
+

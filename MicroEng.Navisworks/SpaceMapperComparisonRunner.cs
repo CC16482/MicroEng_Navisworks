@@ -762,6 +762,7 @@ namespace MicroEng.Navisworks
                     MaxCandidatesPerZone = diagnostics.MaxCandidatesPerZone,
                     AvgCandidatesPerTarget = diagnostics.AvgCandidatesPerTarget,
                     MaxCandidatesPerTarget = diagnostics.MaxCandidatesPerTarget,
+                    CandidateTargetStatsAvailable = diagnostics.CandidateTargetStatsAvailable,
                     ContainedHits = assignmentSummary.ContainedHits,
                     PartialHits = assignmentSummary.PartialHits,
                     UnmatchedTargets = assignmentSummary.UnmatchedTargets,
@@ -1396,9 +1397,17 @@ namespace MicroEng.Navisworks
                         sb.AppendLine($"  - Targets processed: {variant.Workload.TargetsProcessed:N0}");
                         sb.AppendLine($"  - Candidate pairs: {variant.Workload.CandidatePairs:N0}");
                         sb.AppendLine($"  - Avg candidates/zone: {variant.Workload.AvgCandidatesPerZone:N0}");
-                        sb.AppendLine($"  - Avg candidates/target: {variant.Workload.AvgCandidatesPerTarget:N0}");
                         sb.AppendLine($"  - Max candidates/zone: {variant.Workload.MaxCandidatesPerZone:N0}");
-                        sb.AppendLine($"  - Max candidates/target: {variant.Workload.MaxCandidatesPerTarget:N0}");
+                        if (variant.Workload.CandidateTargetStatsAvailable)
+                        {
+                            sb.AppendLine($"  - Avg candidates/target: {variant.Workload.AvgCandidatesPerTarget:N0}");
+                            sb.AppendLine($"  - Max candidates/target: {variant.Workload.MaxCandidatesPerTarget:N0}");
+                        }
+                        else
+                        {
+                            sb.AppendLine("  - Avg candidates/target: n/a (zone-major)");
+                            sb.AppendLine("  - Max candidates/target: n/a (zone-major)");
+                        }
                         sb.AppendLine($"  - Contained hits: {variant.Workload.ContainedHits:N0}");
                         sb.AppendLine($"  - Partial hits: {variant.Workload.PartialHits:N0}");
                         sb.AppendLine($"  - Unmatched targets: {variant.Workload.UnmatchedTargets:N0}");
@@ -2183,6 +2192,9 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 18)]
         public int SkippedUnchanged { get; set; }
+
+        [DataMember(Order = 19)]
+        public bool CandidateTargetStatsAvailable { get; set; }
     }
 
     [DataContract]

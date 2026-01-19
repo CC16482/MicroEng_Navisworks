@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -34,6 +36,13 @@ namespace MicroEng.Navisworks.SmartSets
         private RecipeFileItem _selectedRecipeFile;
         private SmartSetSuggestion _selectedSuggestion;
         private SmartSetPackDefinition _selectedPack;
+        private readonly Dictionary<string, List<string>> _propertyOptionsByCategory = new(StringComparer.OrdinalIgnoreCase);
+        private readonly SmartSetGeneratorQuickBuilderPage _quickBuilderPage;
+        private readonly SmartSetGeneratorSmartGroupingPage _smartGroupingPage;
+        private readonly SmartSetGeneratorFromSelectionPage _fromSelectionPage;
+        private readonly SmartSetGeneratorPacksPage _packsPage;
+        private readonly Dictionary<Type, UserControl> _pageMap = new();
+        private bool _initialized;
 
         public SmartSetGeneratorControl()
         {
@@ -50,6 +59,9 @@ namespace MicroEng.Navisworks.SmartSets
             }
 
             ConditionOptions = new ObservableCollection<ConditionOption>(BuildConditionOptions());
+            SearchSetModeOptions = new ObservableCollection<SearchSetModeOption>(BuildSearchSetModeOptions());
+            SearchInModeOptions = new ObservableCollection<SearchInModeOption>(BuildSearchInModeOptions());
+            ScopeModeOptions = new ObservableCollection<ScopeModeOption>(BuildScopeModeOptions());
             OutputTypes = new ObservableCollection<SmartSetOutputType>(Enum.GetValues(typeof(SmartSetOutputType)).Cast<SmartSetOutputType>());
 
             CurrentRecipe = new SmartSetRecipe();
@@ -63,25 +75,135 @@ namespace MicroEng.Navisworks.SmartSets
             RefreshScraperProfiles();
             BuildPackList();
 
+            _quickBuilderPage = new SmartSetGeneratorQuickBuilderPage(this);
+            _smartGroupingPage = new SmartSetGeneratorSmartGroupingPage(this);
+            _fromSelectionPage = new SmartSetGeneratorFromSelectionPage(this);
+            _packsPage = new SmartSetGeneratorPacksPage(this);
+
+            _pageMap[typeof(SmartSetGeneratorQuickBuilderPage)] = _quickBuilderPage;
+            _pageMap[typeof(SmartSetGeneratorSmartGroupingPage)] = _smartGroupingPage;
+            _pageMap[typeof(SmartSetGeneratorFromSelectionPage)] = _fromSelectionPage;
+            _pageMap[typeof(SmartSetGeneratorPacksPage)] = _packsPage;
+
+            Loaded += OnLoaded;
+
             DataScraperCache.SessionAdded += OnSessionAdded;
             Unloaded += (_, __) => DataScraperCache.SessionAdded -= OnSessionAdded;
         }
 
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            if (_initialized)
+            {
+                return;
+            }
+
+            _initialized = true;
+            RefreshSavedSelectionSets();
+            NavigateToPage(typeof(SmartSetGeneratorQuickBuilderPage));
+        }
+
+        private void NavigateToPage(Type pageType)
+        {
+            if (pageType == null)
+            {
+                return;
+            }
+
+            if (_pageMap.TryGetValue(pageType, out var page))
+            {
+                if (!ReferenceEquals(SmartSetHost.Content, page))
+                {
+                    SmartSetHost.Content = page;
+                }
+
+                UpdateNavButtonStates(pageType);
+            }
+        }
+
+        private void UpdateNavButtonStates(Type pageType)
+        {
+            SetNavButtonState(QuickBuilderNavButton, pageType == typeof(SmartSetGeneratorQuickBuilderPage));
+            SetNavButtonState(SmartGroupingNavButton, pageType == typeof(SmartSetGeneratorSmartGroupingPage));
+            SetNavButtonState(FromSelectionNavButton, pageType == typeof(SmartSetGeneratorFromSelectionPage));
+            SetNavButtonState(PacksNavButton, pageType == typeof(SmartSetGeneratorPacksPage));
+        }
+
+        private static void SetNavButtonState(Wpf.Ui.Controls.Button button, bool isActive)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            button.Appearance = isActive
+                ? Wpf.Ui.Controls.ControlAppearance.Primary
+                : Wpf.Ui.Controls.ControlAppearance.Secondary;
+            button.FontWeight = isActive ? FontWeights.SemiBold : FontWeights.Normal;
+        }
+
+        private void QuickBuilderNav_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateToPage(typeof(SmartSetGeneratorQuickBuilderPage));
+        }
+
+        private void SmartGroupingNav_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateToPage(typeof(SmartSetGeneratorSmartGroupingPage));
+        }
+
+        private void FromSelectionNav_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateToPage(typeof(SmartSetGeneratorFromSelectionPage));
+        }
+
+        private void PacksNav_Click(object sender, RoutedEventArgs e)
+        {
+            NavigateToPage(typeof(SmartSetGeneratorPacksPage));
+        }
+
         public ObservableCollection<string> ScraperProfiles { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> CategoryOptions { get; } = new ObservableCollection<string>();
         public ObservableCollection<ConditionOption> ConditionOptions { get; }
+        public ObservableCollection<SearchSetModeOption> SearchSetModeOptions { get; }
+        public ObservableCollection<SearchInModeOption> SearchInModeOptions { get; }
+        public ObservableCollection<ScopeModeOption> ScopeModeOptions { get; }
         public ObservableCollection<SmartSetOutputType> OutputTypes { get; }
         public ObservableCollection<SmartGroupRow> GroupRows { get; } = new ObservableCollection<SmartGroupRow>();
         public ObservableCollection<SmartSetSuggestion> SelectionSuggestions { get; } = new ObservableCollection<SmartSetSuggestion>();
         public ObservableCollection<SmartSetPackDefinition> Packs { get; } = new ObservableCollection<SmartSetPackDefinition>();
         public ObservableCollection<RecipeFileItem> RecipeFiles { get; } = new ObservableCollection<RecipeFileItem>();
+        public ObservableCollection<string> SavedSelectionSets { get; } = new ObservableCollection<string>();
 
         public SmartSetRecipe CurrentRecipe
         {
             get => _currentRecipe;
             set
             {
+                if (ReferenceEquals(_currentRecipe, value))
+                {
+                    return;
+                }
+
+                if (_currentRecipe != null)
+                {
+                    UnhookRecipe(_currentRecipe);
+                }
+
                 _currentRecipe = value ?? new SmartSetRecipe();
+                _currentRecipe.Rules ??= new ObservableCollection<SmartSetRule>();
+                EnsureScopeDefaults(_currentRecipe);
+                HookRecipe(_currentRecipe);
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(CanUseFastPreview));
+                EnforcePreviewCompatibility(showStatus: false);
+
+                if (_currentRecipe.SearchSetMode == SmartSetSearchSetMode.Single && _currentRecipe.GenerateMultipleSearchSets)
+                {
+                    _currentRecipe.SearchSetMode = SmartSetSearchSetMode.SplitByValue;
+                }
+
+                RefreshCategoryAndPropertyOptions();
             }
         }
 
@@ -100,6 +222,7 @@ namespace MicroEng.Navisworks.SmartSets
                     }
                 }
                 OnPropertyChanged();
+                RefreshCategoryAndPropertyOptions();
             }
         }
 
@@ -118,6 +241,19 @@ namespace MicroEng.Navisworks.SmartSets
             get => _useFastPreview;
             set
             {
+                if (value && !CanUseFastPreview)
+                {
+                    _useFastPreview = false;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(CanSelectPreviewResults));
+                    return;
+                }
+
+                if (_useFastPreview == value)
+                {
+                    return;
+                }
+
                 _useFastPreview = value;
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(CanSelectPreviewResults));
@@ -178,6 +314,7 @@ namespace MicroEng.Navisworks.SmartSets
 
         public bool CanApplySuggestion => SelectedSuggestion != null;
         public bool CanRunPack => SelectedPack != null;
+        public bool CanUseFastPreview => CurrentRecipe == null || !CurrentRecipe.IsScopeConstrained;
         public bool CanSelectPreviewResults => !UseFastPreview && _lastPreviewResults != null && _lastPreviewResults.Count > 0;
 
         private void OnSessionAdded(ScrapeSession session)
@@ -207,6 +344,342 @@ namespace MicroEng.Navisworks.SmartSets
                     SelectedScraperProfile = profiles[0];
                 }
             }
+
+            RefreshCategoryAndPropertyOptions();
+        }
+
+        private void RefreshSavedSelectionSets()
+        {
+            SavedSelectionSets.Clear();
+
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null)
+            {
+                return;
+            }
+
+            foreach (var name in _navisworksService.GetSavedSelectionSetNames(doc))
+            {
+                SavedSelectionSets.Add(name);
+            }
+        }
+
+        private void HookRecipe(SmartSetRecipe recipe)
+        {
+            if (recipe == null)
+            {
+                return;
+            }
+
+            recipe.PropertyChanged += OnRecipePropertyChanged;
+            if (recipe.Rules == null)
+            {
+                return;
+            }
+
+            recipe.Rules.CollectionChanged += OnRulesCollectionChanged;
+            foreach (var rule in recipe.Rules)
+            {
+                HookRule(rule);
+            }
+        }
+
+        private void UnhookRecipe(SmartSetRecipe recipe)
+        {
+            if (recipe == null)
+            {
+                return;
+            }
+
+            recipe.PropertyChanged -= OnRecipePropertyChanged;
+            if (recipe.Rules == null)
+            {
+                return;
+            }
+
+            recipe.Rules.CollectionChanged -= OnRulesCollectionChanged;
+            foreach (var rule in recipe.Rules)
+            {
+                UnhookRule(rule);
+            }
+        }
+
+        private void OnRecipePropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not SmartSetRecipe recipe)
+            {
+                return;
+            }
+
+            if (string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeMode), StringComparison.Ordinal))
+            {
+                if (recipe.ScopeMode == SmartSetScopeMode.AllModel)
+                {
+                    recipe.ScopeSelectionSetName = "";
+                    recipe.ScopeSummary = "Entire model";
+                }
+                else if (recipe.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
+                {
+                    recipe.ScopeSummary = string.IsNullOrWhiteSpace(recipe.ScopeSelectionSetName)
+                        ? "Saved selection set"
+                        : $"Saved selection set: {recipe.ScopeSelectionSetName}";
+                    RefreshSavedSelectionSets();
+                }
+                else if (recipe.ScopeMode == SmartSetScopeMode.CurrentSelection)
+                {
+                    recipe.ScopeSummary = "Current selection";
+                }
+
+                OnPropertyChanged(nameof(CanUseFastPreview));
+                EnforcePreviewCompatibility(showStatus: true);
+            }
+            else if (string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeSelectionSetName), StringComparison.Ordinal))
+            {
+                if (recipe.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
+                {
+                    recipe.ScopeSummary = string.IsNullOrWhiteSpace(recipe.ScopeSelectionSetName)
+                        ? "Saved selection set"
+                        : $"Saved selection set: {recipe.ScopeSelectionSetName}";
+                }
+            }
+        }
+
+        private static void EnsureScopeDefaults(SmartSetRecipe recipe)
+        {
+            if (recipe == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(recipe.ScopeSummary))
+            {
+                if (recipe.ScopeMode == SmartSetScopeMode.AllModel)
+                {
+                    recipe.ScopeSummary = "Entire model";
+                }
+                else if (recipe.ScopeMode == SmartSetScopeMode.CurrentSelection)
+                {
+                    recipe.ScopeSummary = "Current selection";
+                }
+                else if (recipe.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
+                {
+                    recipe.ScopeSummary = string.IsNullOrWhiteSpace(recipe.ScopeSelectionSetName)
+                        ? "Saved selection set"
+                        : $"Saved selection set: {recipe.ScopeSelectionSetName}";
+                }
+                else
+                {
+                    recipe.ScopeSummary = "Scope active";
+                }
+            }
+
+            recipe.ScopeSelectionSetName ??= "";
+        }
+
+        private void EnforcePreviewCompatibility(bool showStatus)
+        {
+            if (CurrentRecipe?.IsScopeConstrained == true && UseFastPreview)
+            {
+                UseFastPreview = false;
+                if (showStatus)
+                {
+                    PreviewStatusText = "Scope active: using live preview.";
+                }
+            }
+        }
+
+        private void OnRulesCollectionChanged(object sender, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.OldItems != null)
+            {
+                foreach (var item in e.OldItems)
+                {
+                    if (item is SmartSetRule rule)
+                    {
+                        UnhookRule(rule);
+                    }
+                }
+            }
+
+            if (e.NewItems != null)
+            {
+                foreach (var item in e.NewItems)
+                {
+                    if (item is SmartSetRule rule)
+                    {
+                        HookRule(rule);
+                    }
+                }
+            }
+        }
+
+        private void HookRule(SmartSetRule rule)
+        {
+            if (rule == null)
+            {
+                return;
+            }
+
+            rule.PropertyChanged += OnRulePropertyChanged;
+            EnsureCategoryOption(rule.Category);
+            UpdateRulePropertyOptions(rule);
+        }
+
+        private void UnhookRule(SmartSetRule rule)
+        {
+            if (rule == null)
+            {
+                return;
+            }
+
+            rule.PropertyChanged -= OnRulePropertyChanged;
+        }
+
+        private void OnRulePropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not SmartSetRule rule)
+            {
+                return;
+            }
+
+            if (string.Equals(e.PropertyName, nameof(SmartSetRule.Category), StringComparison.Ordinal))
+            {
+                EnsureCategoryOption(rule.Category);
+                UpdateRulePropertyOptions(rule);
+            }
+            else if (string.Equals(e.PropertyName, nameof(SmartSetRule.Property), StringComparison.Ordinal))
+            {
+                EnsurePropertyOption(rule);
+            }
+        }
+
+        private void RefreshCategoryAndPropertyOptions()
+        {
+            _propertyOptionsByCategory.Clear();
+            var session = GetSelectedSession();
+            var properties = session?.Properties ?? Enumerable.Empty<ScrapedProperty>();
+
+            foreach (var prop in properties)
+            {
+                var category = prop?.Category ?? "";
+                var name = prop?.Name ?? "";
+                if (string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                if (!_propertyOptionsByCategory.TryGetValue(category, out var list))
+                {
+                    list = new List<string>();
+                    _propertyOptionsByCategory[category] = list;
+                }
+
+                if (!ContainsIgnoreCase(list, name))
+                {
+                    list.Add(name);
+                }
+            }
+
+            foreach (var list in _propertyOptionsByCategory.Values)
+            {
+                list.Sort(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var categories = new List<string>(_propertyOptionsByCategory.Keys);
+            if (CurrentRecipe?.Rules != null)
+            {
+                foreach (var rule in CurrentRecipe.Rules)
+                {
+                    var cat = rule?.Category;
+                    if (!string.IsNullOrWhiteSpace(cat) && !ContainsIgnoreCase(categories, cat))
+                    {
+                        categories.Add(cat);
+                    }
+                }
+            }
+
+            categories = categories
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            CategoryOptions.Clear();
+            foreach (var cat in categories)
+            {
+                CategoryOptions.Add(cat);
+            }
+
+            if (CurrentRecipe?.Rules != null)
+            {
+                foreach (var rule in CurrentRecipe.Rules)
+                {
+                    UpdateRulePropertyOptions(rule);
+                }
+            }
+        }
+
+        private void UpdateRulePropertyOptions(SmartSetRule rule)
+        {
+            if (rule == null)
+            {
+                return;
+            }
+
+            rule.PropertyOptions.Clear();
+            if (!string.IsNullOrWhiteSpace(rule.Category)
+                && _propertyOptionsByCategory.TryGetValue(rule.Category, out var options))
+            {
+                foreach (var option in options)
+                {
+                    rule.PropertyOptions.Add(option);
+                }
+            }
+
+            EnsurePropertyOption(rule);
+        }
+
+        private void EnsureCategoryOption(string category)
+        {
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                return;
+            }
+
+            if (ContainsIgnoreCase(CategoryOptions, category))
+            {
+                return;
+            }
+
+            CategoryOptions.Add(category);
+        }
+
+        private void EnsurePropertyOption(SmartSetRule rule)
+        {
+            if (rule == null)
+            {
+                return;
+            }
+
+            var value = rule.Property;
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            if (!ContainsIgnoreCase(rule.PropertyOptions, value))
+            {
+                rule.PropertyOptions.Insert(0, value);
+            }
+        }
+
+        private static bool ContainsIgnoreCase(IEnumerable<string> items, string value)
+        {
+            if (items == null || string.IsNullOrWhiteSpace(value))
+            {
+                return false;
+            }
+
+            return items.Any(item => string.Equals(item, value, StringComparison.OrdinalIgnoreCase));
         }
 
         private void InitRecipeStore()
@@ -255,12 +728,12 @@ namespace MicroEng.Navisworks.SmartSets
             return $"MicroEng/Smart Sets/{profile}";
         }
 
-        private void AddRule_Click(object sender, RoutedEventArgs e)
+        internal void AddRule_Click(object sender, RoutedEventArgs e)
         {
             CurrentRecipe.Rules.Add(new SmartSetRule());
         }
 
-        private void RemoveRule_Click(object sender, RoutedEventArgs e)
+        internal void RemoveRule_Click(object sender, RoutedEventArgs e)
         {
             if (SelectedRule != null)
             {
@@ -272,7 +745,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private void DuplicateRule_Click(object sender, RoutedEventArgs e)
+        internal void DuplicateRule_Click(object sender, RoutedEventArgs e)
         {
             if (SelectedRule == null)
             {
@@ -288,6 +761,36 @@ namespace MicroEng.Navisworks.SmartSets
                 Value = SelectedRule.Value,
                 Enabled = SelectedRule.Enabled
             });
+        }
+
+        internal void UseCurrentSelectionScope_Click(object sender, RoutedEventArgs e)
+        {
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null)
+            {
+                PreviewStatusText = "No active document.";
+                return;
+            }
+
+            var selection = doc.CurrentSelection?.SelectedItems;
+            if (selection == null || selection.Count == 0)
+            {
+                PreviewStatusText = "No current selection to use for scope.";
+                return;
+            }
+
+            CurrentRecipe.ScopeMode = SmartSetScopeMode.CurrentSelection;
+            CurrentRecipe.ScopeSelectionSetName = "";
+            CurrentRecipe.ScopeSummary = $"Current selection ({selection.Count} items)";
+            EnforcePreviewCompatibility(showStatus: true);
+        }
+
+        internal void ClearScope_Click(object sender, RoutedEventArgs e)
+        {
+            CurrentRecipe.ScopeMode = SmartSetScopeMode.AllModel;
+            CurrentRecipe.ScopeSelectionSetName = "";
+            CurrentRecipe.ScopeSummary = "Entire model";
+            PreviewStatusText = "Scope cleared.";
         }
 
         private void PickProperty_Click(object sender, RoutedEventArgs e)
@@ -331,7 +834,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private void RulesGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        internal void RulesGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             var cell = FindParent<DataGridCell>(e.OriginalSource as DependencyObject);
             if (cell == null || cell.IsEditing || cell.IsReadOnly)
@@ -341,22 +844,44 @@ namespace MicroEng.Navisworks.SmartSets
 
             if (cell.Column is DataGridComboBoxColumn && sender is DataGrid grid && !grid.IsReadOnly)
             {
+                if (!grid.IsKeyboardFocusWithin)
+                {
+                    grid.Focus();
+                }
+
                 if (!cell.IsFocused)
                 {
                     cell.Focus();
                 }
 
-                grid.BeginEdit();
-                e.Handled = true;
+                if (grid.CurrentCell.Item != cell.DataContext || grid.CurrentCell.Column != cell.Column)
+                {
+                    grid.SelectedItem = cell.DataContext;
+                    grid.CurrentCell = new DataGridCellInfo(cell.DataContext, cell.Column);
+                }
+
+                if (grid.BeginEdit())
+                {
+                    e.Handled = true;
+                }
             }
         }
 
-        private void PickGroupBy_Click(object sender, RoutedEventArgs e)
+        internal void RulesGrid_PreparingCellForEdit(object sender, DataGridPreparingCellForEditEventArgs e)
+        {
+            if (e.Column is DataGridComboBoxColumn && e.EditingElement is ComboBox combo)
+            {
+                combo.Focus();
+                combo.IsDropDownOpen = true;
+            }
+        }
+
+        internal void PickGroupBy_Click(object sender, RoutedEventArgs e)
         {
             PickGroupingProperty(isThenBy: false);
         }
 
-        private void PickThenBy_Click(object sender, RoutedEventArgs e)
+        internal void PickThenBy_Click(object sender, RoutedEventArgs e)
         {
             PickGroupingProperty(isThenBy: true);
         }
@@ -389,7 +914,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private async void Preview_Click(object sender, RoutedEventArgs e)
+        internal async void Preview_Click(object sender, RoutedEventArgs e)
         {
             _previewCts?.Cancel();
             _previewCts = new CancellationTokenSource();
@@ -397,6 +922,11 @@ namespace MicroEng.Navisworks.SmartSets
             var rules = CurrentRecipe.Rules.ToList();
             _lastPreviewResults = null;
             OnPropertyChanged(nameof(CanSelectPreviewResults));
+
+            if (!SmartSetFastPreviewService.IsCompatibleWithFastPreview(CurrentRecipe))
+            {
+                EnforcePreviewCompatibility(showStatus: true);
+            }
 
             if (UseFastPreview)
             {
@@ -421,7 +951,18 @@ namespace MicroEng.Navisworks.SmartSets
 
                     sw.Stop();
                     PreviewStatusText = $"Matches (fast): {result.EstimatedMatchCount} ({sw.ElapsedMilliseconds} ms)";
-                    PreviewDetailsText = string.Join(Environment.NewLine, result.SampleItemPaths);
+                    var sessionLabel = string.IsNullOrWhiteSpace(result.SessionLabel)
+                        ? string.Empty
+                        : $"Session: {result.SessionLabel}";
+                    var samples = string.Join(Environment.NewLine, result.SampleItemPaths);
+                    if (!string.IsNullOrWhiteSpace(sessionLabel) && !string.IsNullOrWhiteSpace(samples))
+                    {
+                        PreviewDetailsText = sessionLabel + Environment.NewLine + samples;
+                    }
+                    else
+                    {
+                        PreviewDetailsText = string.IsNullOrWhiteSpace(sessionLabel) ? samples : sessionLabel;
+                    }
                     MicroEngActions.Log($"SmartSets preview (fast): {result.EstimatedMatchCount} in {sw.ElapsedMilliseconds} ms");
                 }
                 catch (OperationCanceledException)
@@ -449,7 +990,7 @@ namespace MicroEng.Navisworks.SmartSets
 
             try
             {
-                var preview = _navisworksService.Preview(doc, rules);
+                var preview = _navisworksService.Preview(doc, CurrentRecipe, rules);
                 _lastPreviewResults = preview.Results;
                 realSw.Stop();
 
@@ -468,7 +1009,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private void SelectResults_Click(object sender, RoutedEventArgs e)
+        internal void SelectResults_Click(object sender, RoutedEventArgs e)
         {
             var doc = NavisApp.ActiveDocument;
             if (doc == null || _lastPreviewResults == null)
@@ -481,7 +1022,7 @@ namespace MicroEng.Navisworks.SmartSets
             selection.AddRange(_lastPreviewResults);
         }
 
-        private void Generate_Click(object sender, RoutedEventArgs e)
+        internal void Generate_Click(object sender, RoutedEventArgs e)
         {
             var doc = NavisApp.ActiveDocument;
             if (doc == null)
@@ -497,6 +1038,85 @@ namespace MicroEng.Navisworks.SmartSets
 
             try
             {
+                var mode = CurrentRecipe.SearchSetMode;
+                if (mode == SmartSetSearchSetMode.Single && CurrentRecipe.GenerateMultipleSearchSets)
+                {
+                    mode = SmartSetSearchSetMode.SplitByValue;
+                }
+
+                if (mode == SmartSetSearchSetMode.SplitByValue)
+                {
+                    var session = GetSelectedSession();
+                    if (session == null)
+                    {
+                        MessageBox.Show("No Data Scraper session available. Run Data Scraper first.", "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    var enabledRules = CurrentRecipe.Rules?.Where(r => r != null && r.Enabled).ToList() ?? new List<SmartSetRule>();
+                    var definedRules = enabledRules
+                        .Where(r => r.Operator == SmartSetOperator.Defined
+                            && !string.IsNullOrWhiteSpace(r.Category)
+                            && !string.IsNullOrWhiteSpace(r.Property))
+                        .ToList();
+                    if (definedRules.Count != 1)
+                    {
+                        MessageBox.Show("Multiple Search Sets requires exactly one Defined rule with Category and Property.", "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    var groupIds = enabledRules
+                        .Select(r => string.IsNullOrWhiteSpace(r.GroupId) ? "A" : r.GroupId.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (groupIds.Count > 1)
+                    {
+                        MessageBox.Show("Multiple Search Sets supports a single group only.", "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    var created = _navisworksService.GenerateSplitSearchSets(doc, CurrentRecipe, session, msg => MicroEngActions.Log(msg));
+                    MicroEngActions.Log($"SmartSets: generated {created} sets for recipe: {CurrentRecipe.Name}");
+                    PreviewStatusText = created > 0 ? "Generated sets." : "No sets generated.";
+                    return;
+                }
+                if (mode == SmartSetSearchSetMode.ExpandValuesSingleSet)
+                {
+                    var session = GetSelectedSession();
+                    if (session == null)
+                    {
+                        MessageBox.Show("No Data Scraper session available. Run Data Scraper first.", "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    var enabledRules = CurrentRecipe.Rules?.Where(r => r != null && r.Enabled).ToList() ?? new List<SmartSetRule>();
+                    var definedRules = enabledRules
+                        .Where(r => r.Operator == SmartSetOperator.Defined
+                            && !string.IsNullOrWhiteSpace(r.Category)
+                            && !string.IsNullOrWhiteSpace(r.Property))
+                        .ToList();
+                    if (definedRules.Count != 1)
+                    {
+                        MessageBox.Show("Expand Values requires exactly one Defined rule with Category and Property.", "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    var groupIds = enabledRules
+                        .Select(r => string.IsNullOrWhiteSpace(r.GroupId) ? "A" : r.GroupId.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (groupIds.Count > 1)
+                    {
+                        MessageBox.Show("Expand Values supports a single group only.", "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Information);
+                        return;
+                    }
+
+                    var created = _navisworksService.GenerateExpandedSearchSet(doc, CurrentRecipe, session, msg => MicroEngActions.Log(msg));
+                    MicroEngActions.Log($"SmartSets: generated {created} sets for recipe: {CurrentRecipe.Name}");
+                    PreviewStatusText = created > 0 ? "Generated sets." : "No sets generated.";
+                    return;
+                }
+
                 _navisworksService.Generate(doc, CurrentRecipe, msg => MicroEngActions.Log(msg));
                 MicroEngActions.Log("SmartSets: generated sets for recipe: " + CurrentRecipe.Name);
                 PreviewStatusText = "Generated sets.";
@@ -507,7 +1127,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private void PreviewGroups_Click(object sender, RoutedEventArgs e)
+        internal void PreviewGroups_Click(object sender, RoutedEventArgs e)
         {
             GroupRows.Clear();
 
@@ -535,7 +1155,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private void GenerateGroups_Click(object sender, RoutedEventArgs e)
+        internal void GenerateGroups_Click(object sender, RoutedEventArgs e)
         {
             var doc = NavisApp.ActiveDocument;
             if (doc == null)
@@ -556,6 +1176,7 @@ namespace MicroEng.Navisworks.SmartSets
 
             _navisworksService.GenerateGroupedSearchSets(
                 doc,
+                CurrentRecipe,
                 folder,
                 CurrentRecipe.Name,
                 grouping.GroupByCategory,
@@ -569,7 +1190,7 @@ namespace MicroEng.Navisworks.SmartSets
             PreviewStatusText = "Generated grouped search sets.";
         }
 
-        private void AnalyzeSelection_Click(object sender, RoutedEventArgs e)
+        internal void AnalyzeSelection_Click(object sender, RoutedEventArgs e)
         {
             SelectionSuggestions.Clear();
 
@@ -594,7 +1215,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private void ApplySuggestion_Click(object sender, RoutedEventArgs e)
+        internal void ApplySuggestion_Click(object sender, RoutedEventArgs e)
         {
             if (SelectedSuggestion == null)
             {
@@ -611,7 +1232,7 @@ namespace MicroEng.Navisworks.SmartSets
             });
         }
 
-        private void RunPack_Click(object sender, RoutedEventArgs e)
+        internal void RunPack_Click(object sender, RoutedEventArgs e)
         {
             if (SelectedPack == null)
             {
@@ -641,7 +1262,7 @@ namespace MicroEng.Navisworks.SmartSets
             MicroEngActions.Log("SmartSets: pack executed: " + SelectedPack.Name);
         }
 
-        private void SaveRecipe_Click(object sender, RoutedEventArgs e)
+        internal void SaveRecipe_Click(object sender, RoutedEventArgs e)
         {
             var path = _recipeStore.GetDefaultPathForRecipe(CurrentRecipe.Name);
             _recipeStore.Save(CurrentRecipe, path);
@@ -649,7 +1270,7 @@ namespace MicroEng.Navisworks.SmartSets
             MicroEngActions.Log("SmartSets: recipe saved: " + path);
         }
 
-        private void SaveRecipeAs_Click(object sender, RoutedEventArgs e)
+        internal void SaveRecipeAs_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new Microsoft.Win32.SaveFileDialog
             {
@@ -667,7 +1288,7 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
-        private void LoadRecipe_Click(object sender, RoutedEventArgs e)
+        internal void LoadRecipe_Click(object sender, RoutedEventArgs e)
         {
             string path = SelectedRecipeFile?.Path;
 
@@ -725,12 +1346,14 @@ namespace MicroEng.Navisworks.SmartSets
             }
 
             RefreshRecipeFiles();
+            RefreshSavedSelectionSets();
             MicroEngActions.Log("SmartSets: recipe loaded: " + path);
         }
 
         private void RefreshProfiles_Click(object sender, RoutedEventArgs e)
         {
             RefreshScraperProfiles();
+            RefreshSavedSelectionSets();
         }
 
         private void OpenDataScraper_Click(object sender, RoutedEventArgs e)
@@ -828,6 +1451,36 @@ namespace MicroEng.Navisworks.SmartSets
             };
         }
 
+        private static SearchSetModeOption[] BuildSearchSetModeOptions()
+        {
+            return new[]
+            {
+                new SearchSetModeOption(SmartSetSearchSetMode.Single, "Single Search Set"),
+                new SearchSetModeOption(SmartSetSearchSetMode.SplitByValue, "Multiple Search Sets (split by value)"),
+                new SearchSetModeOption(SmartSetSearchSetMode.ExpandValuesSingleSet, "Single Search Set (expand values)")
+            };
+        }
+
+        private static SearchInModeOption[] BuildSearchInModeOptions()
+        {
+            return new[]
+            {
+                new SearchInModeOption(SmartSetSearchInMode.Standard, "Standard"),
+                new SearchInModeOption(SmartSetSearchInMode.Compact, "Compact"),
+                new SearchInModeOption(SmartSetSearchInMode.Properties, "Properties")
+            };
+        }
+
+        private static ScopeModeOption[] BuildScopeModeOptions()
+        {
+            return new[]
+            {
+                new ScopeModeOption(SmartSetScopeMode.AllModel, "All model"),
+                new ScopeModeOption(SmartSetScopeMode.CurrentSelection, "Current selection"),
+                new ScopeModeOption(SmartSetScopeMode.SavedSelectionSet, "Saved selection set")
+            };
+        }
+
         public event PropertyChangedEventHandler PropertyChanged;
 
         private void OnPropertyChanged([CallerMemberName] string name = null)
@@ -875,4 +1528,41 @@ namespace MicroEng.Navisworks.SmartSets
         public SmartSetOperator Value { get; }
         public string Label { get; }
     }
+
+    public sealed class SearchSetModeOption
+    {
+        public SearchSetModeOption(SmartSetSearchSetMode value, string label)
+        {
+            Value = value;
+            Label = label ?? value.ToString();
+        }
+
+        public SmartSetSearchSetMode Value { get; }
+        public string Label { get; }
+    }
+
+    public sealed class SearchInModeOption
+    {
+        public SearchInModeOption(SmartSetSearchInMode value, string label)
+        {
+            Value = value;
+            Label = label ?? value.ToString();
+        }
+
+        public SmartSetSearchInMode Value { get; }
+        public string Label { get; }
+    }
+
+    public sealed class ScopeModeOption
+    {
+        public ScopeModeOption(SmartSetScopeMode value, string label)
+        {
+            Value = value;
+            Label = label ?? value.ToString();
+        }
+
+        public SmartSetScopeMode Value { get; }
+        public string Label { get; }
+    }
+
 }

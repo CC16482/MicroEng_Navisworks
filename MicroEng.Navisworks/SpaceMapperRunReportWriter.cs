@@ -183,6 +183,16 @@ namespace MicroEng.Navisworks
             sb.AppendLine($"- Zones with bbox: {dataset?.Zones?.Count ?? 0}");
             sb.AppendLine($"- Resolved targets (raw): {resolved?.TargetModels?.Count ?? 0}");
             sb.AppendLine($"- Targets with bbox: {dataset?.TargetsForEngine?.Count ?? 0}");
+            if (stats.TargetsTotal > 0)
+            {
+                sb.AppendLine($"- Targets without bbox: {stats.TargetsWithoutBounds}");
+                if (stats.TargetsSampled > 0 || stats.TargetsSampleSkippedNoBounds > 0 || stats.TargetsSampleSkippedNoGeometry > 0)
+                {
+                    sb.AppendLine($"- Targets sampled (geometry): {stats.TargetsSampled}");
+                    sb.AppendLine($"- Targets sample skipped (no bounds): {stats.TargetsSampleSkippedNoBounds}");
+                    sb.AppendLine($"- Targets sample skipped (no geometry): {stats.TargetsSampleSkippedNoGeometry}");
+                }
+            }
             sb.AppendLine($"- Exclude zones from targets: {settings.ExcludeZonesFromTargets}");
             sb.AppendLine();
 
@@ -361,8 +371,16 @@ namespace MicroEng.Navisworks
             sb.AppendLine($"- Candidate pairs: {stats.CandidatePairs}");
             sb.AppendLine($"- Avg candidates/zone: {stats.AvgCandidatesPerZone:0.##}");
             sb.AppendLine($"- Max candidates/zone: {stats.MaxCandidatesPerZone}");
-            sb.AppendLine($"- Avg candidates/target: {stats.AvgCandidatesPerTarget:0.##}");
-            sb.AppendLine($"- Max candidates/target: {stats.MaxCandidatesPerTarget}");
+            if (stats.CandidateTargetStatsAvailable)
+            {
+                sb.AppendLine($"- Avg candidates/target: {stats.AvgCandidatesPerTarget:0.##}");
+                sb.AppendLine($"- Max candidates/target: {stats.MaxCandidatesPerTarget}");
+            }
+            else
+            {
+                sb.AppendLine("- Avg candidates/target: n/a (zone-major)");
+                sb.AppendLine("- Max candidates/target: n/a (zone-major)");
+            }
             sb.AppendLine($"- Used preflight index: {stats.UsedPreflightIndex}");
             sb.AppendLine($"- Timings (ms): resolve {stats.ResolveTime.TotalMilliseconds:0}, build {stats.BuildGeometryTime.TotalMilliseconds:0}, index {stats.BuildIndexTime.TotalMilliseconds:0}, candidates {stats.CandidateQueryTime.TotalMilliseconds:0}, narrow {stats.NarrowPhaseTime.TotalMilliseconds:0}, write {stats.WriteBackTime.TotalMilliseconds:0}, total {stats.Elapsed.TotalMilliseconds:0}");
             sb.AppendLine();

@@ -12,6 +12,7 @@ using NavisApp = Autodesk.Navisworks.Api.Application;
 using DrawingColor = System.Drawing.Color;
 using DrawingColorTranslator = System.Drawing.ColorTranslator;
 using ElementHost = System.Windows.Forms.Integration.ElementHost;
+using MicroEng.Navisworks.SmartSets;
 
 namespace MicroEng.Navisworks
 {
@@ -52,6 +53,7 @@ namespace MicroEng.Navisworks
         private static DataScraperWindow _dataScraperWindow;
         private static AppendIntegrateDialog _dataMapperWindow;
         private static MicroEngSettingsWindow _settingsWindow;
+        private static SmartSetGeneratorWindow _smartSetGeneratorWindow;
 
         internal static event Action ToolWindowStateChanged;
 
@@ -172,6 +174,7 @@ namespace MicroEng.Navisworks
 
         internal static bool IsDataScraperOpen => _dataScraperWindow?.IsVisible == true;
         internal static bool IsDataMapperOpen => _dataMapperWindow?.IsVisible == true;
+        internal static bool IsSmartSetGeneratorOpen => _smartSetGeneratorWindow?.IsVisible == true;
 
         private static bool TryActivateWindow(WpfWindow window)
         {
@@ -311,6 +314,42 @@ namespace MicroEng.Navisworks
             }
         }
 
+        internal static bool TryShowSmartSetGenerator(out SmartSetGeneratorWindow window)
+        {
+            window = _smartSetGeneratorWindow;
+            if (TryActivateWindow(window))
+            {
+                return true;
+            }
+
+            try
+            {
+                var createdWindow = new SmartSetGeneratorWindow();
+                _smartSetGeneratorWindow = createdWindow;
+                window = createdWindow;
+                createdWindow.Closed += (_, __) =>
+                {
+                    if (ReferenceEquals(_smartSetGeneratorWindow, createdWindow))
+                    {
+                        _smartSetGeneratorWindow = null;
+                    }
+                    RaiseToolWindowStateChanged();
+                };
+                ElementHost.EnableModelessKeyboardInterop(createdWindow);
+                createdWindow.Show();
+                TryActivateWindow(createdWindow);
+                RaiseToolWindowStateChanged();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"Smart Set Generator failed: {ex}");
+                MessageBox.Show($"Smart Set Generator failed: {ex.Message}", "MicroEng",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
         public static void Reconstruct()
         {
             var doc = NavisApp.ActiveDocument;
@@ -436,27 +475,7 @@ namespace MicroEng.Navisworks
 
         public static void SmartSetGenerator()
         {
-            const string dockPanePluginId = "MicroEng.SmartSetGenerator.DockPane.MENG";
-            Log("SmartSetGenerator: locating plugin record");
-            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
-            if (record == null)
-            {
-                MessageBox.Show($"Could not find Smart Set Generator dock pane plugin '{dockPanePluginId}'.",
-                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            if (!record.IsLoaded)
-            {
-                Log("SmartSetGenerator: loading plugin");
-                record.LoadPlugin();
-            }
-
-            if (record.LoadedPlugin is DockPanePlugin pane)
-            {
-                Log("SmartSetGenerator: setting pane visible");
-                pane.Visible = true;
-            }
+            TryShowSmartSetGenerator(out _);
         }
 
         public static void Sequence4D()

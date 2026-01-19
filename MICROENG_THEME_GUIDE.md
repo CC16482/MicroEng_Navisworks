@@ -1,4 +1,4 @@
-# MicroEng Design System & Theme Guide
+﻿# MicroEng Design System & Theme Guide
 
 A concise style guide for MicroEng apps. Logos for this project live in `Logos/`.
 
@@ -125,8 +125,8 @@ Type scale (px):
 - h3: 18 / 700 / -0.025em
 - Category header: 14 / 600 / uppercase / 0.05em
 - Body: 14 / 400
-- Small/Label: 12–13 / 500–600
-- Tiny/Badge: 10–11 / 500–600 / 0.05em
+- Small/Label: 12-13 / 500-600
+- Tiny/Badge: 10-11 / 500-600 / 0.05em
 
 ---
 
@@ -284,4 +284,4 @@ var(--transition-medium)  /* 0.24s */
 
 ---
 
-*MicroEng Theme Guide v1.1 – aligned to Navisworks plugin assets (Logos/).*
+*MicroEng Theme Guide v1.1 - aligned to Navisworks plugin assets (Logos/).*

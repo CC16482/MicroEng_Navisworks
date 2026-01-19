@@ -267,12 +267,6 @@ namespace MicroEng.Navisworks
         {
             try
             {
-                if (IsDockPaneVisible("MicroEng.SmartSetGenerator.DockPane.MENG"))
-                {
-                    UpdateToolButtonStates();
-                    return;
-                }
-
                 MicroEngActions.SmartSetGenerator();
                 UpdateToolButtonStates();
             }
@@ -373,7 +367,7 @@ namespace MicroEng.Navisworks
             var dataScraperOpen = MicroEngActions.IsDataScraperOpen;
             var dataMapperOpen = MicroEngActions.IsDataMapperOpen;
             var dataMatrixOpen = IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG");
-            var smartSetsOpen = IsDockPaneVisible("MicroEng.SmartSetGenerator.DockPane.MENG");
+            var smartSetsOpen = MicroEngActions.IsSmartSetGeneratorOpen;
             var spaceMapperOpen = IsDockPaneVisible("MicroEng.SpaceMapper.DockPane.MENG");
             var sequence4dOpen = IsDockPaneVisible("MicroEng.Sequence4D.DockPane.MENG");
 

@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CERInfo ClientSemVersion="6.3.11+20250224.1a9b0ab2.393" ClientVersion="6">
+	<ProcessInfo CerMode="1"/>
+	<UserInfo ComputerName="OBSIDIAN" SerialNum="000-00000000" UserCanBeContacted="yes">
+		<UserName value=""/>
+		<UserPhone value=""/>
+		<UserEmail value=""/>
+		<UserSubscription email="" macID="{A1B7AA24-B62B-4E88-A17D-E8990A3EF05B}" userId=""/>
+		<ErrorDescription AllowRT="1" CrashDate="01/20/2026" CrashID="0c56990c-25e6-4b96-926f-7a65ae216a94" id="28"/>
+		<Metrics CalendarUptime="0" RequiredSend="0" WaitDur="10000"/>
+	</UserInfo>
+	<upipackage>
+		<upivalue requestingapp="true" type="product" version="1.0">
+			<level id="NAVMAN" name="productline">
+				<level id="2025" name="release">
+					<level id="ENU64" name="master">
+						<level id="22.5.1433.58" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="PLC0000013" name="productline">
+				<level id="2020" name="release">
+					<level id="{DC5C74DA-C2B8-4D80-BAB0-FA8006D1E4C5}" name="master">
+						<level id="2018.11.1.0" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="" name="productline">
+				<level id="" name="release">
+					<level id="" name="master">
+						<level id="" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="" name="productline">
+				<level id="" name="release">
+					<level id="" name="master">
+						<level id="" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="" name="productline">
+				<level id="" name="release">
+					<level id="" name="master">
+						<level id="" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="" name="productline">
+				<level id="" name="release">
+					<level id="" name="master">
+						<level id="" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="exporters" name="productline">
+				<level id="2020" name="release">
+					<level id="ENU32" name="master">
+						<level id="17.7.1400.11" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="RVT" name="productline">
+				<level id="2025" name="release">
+					<level id="MUI64" name="master">
+						<level id="25.4.20.11" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1">
+			<level id="RECAP" name="productline">
+				<level id="2025" name="release">
+					<level id="{EA239CF5-0000-1033-0102-A32E3BC9F58A}" name="master">
+						<level id="25.1.2.377" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1">
+			<level id="RCPHOTO" name="productline">
+				<level id="2025" name="release">
+					<level id="{D2D6A327-0000-1033-0102-83EE4E8DB16E}" name="master">
+						<level id="25.0.2.333" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="exporters" name="productline">
+				<level id="2025" name="release">
+					<level id="ENU64" name="master">
+						<level id="22.3.1420.80" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="NAVMAN" name="productline">
+				<level id="2024" name="release">
+					<level id="ENU64" name="master">
+						<level id="21.3.1423.42" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="ARCHDESK" name="productline">
+				<level id="2025" name="release">
+					<level id="{28B89EEE-8104-0000-5102-CF3F3A09B77D}" name="master">
+						<level id="8.7.45.0" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="ACD" name="productline">
+				<level id="2025" name="release">
+					<level id="{28B89EEF-8101-0409-2102-CF3F3A09B77D}" name="master">
+						<level id="25.0.154.0.0" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="PLC0000022" name="productline">
+				<level id="2025" name="release">
+					<level id="MUI64" name="master">
+						<level id="25.4.20.11" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="CDX" name="productline">
+				<level id="Version16.15.0" name="release">
+					<level id="All64" name="master">
+						<level id="16.15.0.2610" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="RVT" name="productline">
+				<level id="2020" name="release">
+					<level id="MUI64" name="master">
+						<level id="20.2.20.31" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="PLC0000022" name="productline">
+				<level id="2020" name="release">
+					<level id="MUI64" name="master">
+						<level id="20.2.20.31" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="exporters" name="productline">
+				<level id="2020" name="release">
+					<level id="ENU64" name="master">
+						<level id="17.7.1400.11" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="AMECH_PP" name="productline">
+				<level id="2026" name="release">
+					<level id="{28B89EEF-9105-0000-0102-CF3F3A09B77D}" name="master">
+						<level id="30.0.73.0.0" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="AMECH_PP" name="productline">
+				<level id="2026" name="release">
+					<level id="{28B89EEF-9105-0409-1102-CF3F3A09B77D}" name="master">
+						<level id="30.0.52.0.0" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="ARCHDESK" name="productline">
+				<level id="2026" name="release">
+					<level id="{28B89EEE-9104-0000-5102-CF3F3A09B77D}" name="master">
+						<level id="8.8.53.0" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+<upivalue type="product" version="1.0">
+			<level id="AMECH_PP" name="productline">
+				<level id="2026" name="release">
+					<level id="{28B89EEF-9105-0409-2102-CF3F3A09B77D}" name="master">
+						<level id="30.0.73.0.0" name="build"/>
+					</level>
+				</level>
+			</level>
+		</upivalue>
+</upipackage>
+	<OSInfo BuildNumber="26200" BuildNumber_Legacy="9200" CSDVersion="" CSDVersion_Legacy="" KernelBuildNum="26100" KernelMajorVersion="10" KernelMinorVersion="0" KernelReleaseNum="7309" MajorVersion="10" MajorVersion_Legacy="6" MinorVersion="0" MinorVersion_Legacy="2" PlatformId="2" PlatformId_Legacy="2" ServicePackMajor="0" ServicePackMajor_Legacy="0" ServicePackMinor="0" ServicePackMinor_Legacy="0" SuiteFlags="0" SuiteFlags_Legacy="256"/>
+	<LocaleInfo>
+		<LocalUserDefault ICountry="61" IDefaultAnsiCodepage="1252" IDefaultCodepage="850" IDefaultCountry="61" IDefaultLanguage="0c09" ILanguage="0c09"/>
+		<LocalSystemDefault ICountry="1" IDefaultAnsiCodepage="1252" IDefaultCodepage="437" IDefaultCountry="1" IDefaultLanguage="0409" ILanguage="0409"/>
+	</LocaleInfo>
+	<CrashHistory Created="28"/>
+	<WininetInfo WininetBuildNum="26100" WininetMajorVersion="11" WininetMinorVersion="00" WininetReleaseNum="1"/>
+	<MC3Info sessionId="3c8530cd-d53f-476b-bff3-e78d469441fc" userId="E9E8211A9883A462F24F1B3F7B59F7296E4BB0040CBAA7AF3CC23D0A8AC07AC4_449EC9A622157ADFB1DF628DFBCBDA8BA3767B6D728E4F4AC09160DBBC016E06_099A298A7C7C910338FA36610B5EC8B5117932E414094641C0FBA69337F6AB88"/>
+	<ProductInformation build_version="22.5.1433.58" current_session_length="39" name="Navisworks Manage 2025" registry_localeID="1033" registry_version="22.0" session_clean_close_count="323" session_start_count="409" uptime="749725156250"/>
+	<AppCDATA><![CDATA[]]>
+	</AppCDATA>
+	<OpenGLInfo Renderer="NVIDIA GeForce RTX 5090/PCIe/SSE2" Vendor="NVIDIA Corporation" Version="4.6.0 NVIDIA 581.57"/>
+	<DeviceInfo DeviceIDv2="93028AA53AA4D689E0279D96D721371E714DAA14A29A08804300E8C134D83E4C&amp;449EC9A622157ADFB1DF628DFBCBDA8BA3767B6D728E4F4AC09160DBBC016E06&amp;099A298A7C7C910338FA36610B5EC8B5117932E414094641C0FBA69337F6AB88"/>
+	<GraphicsInfo InfoType="D3D9Config"><![CDATA[Driver: nvldumdx.dll
+DriverVersion: 32.0.15.8157
+Description: NVIDIA GeForce RTX 5090
+DeviceName: \\.\DISPLAY1
+VendorId: 4318
+DeviceId: 11141
+SubSysId: 1392579682
+Revision: 161
+WHQLLevel: 0
+DeviceType: 1
+AdapterOrdinal: 0
+Caps: 131072
+Caps2: 3758227456
+Caps3: 928
+Presentation: 2147483663
+Cursor: 1
+Dev: 1818352
+PrimitiveMisc: 3133170
+Raster: 124985745
+ZCmp: 255
+SrcBlend: 16383
+DestBlend: 16383
+AlphaCmp: 255
+Shade: 541192
+Texture: 126149
+TextureFilter: 50530048
+CubeTextureFilter: 50529024
+VolumeTextureFilter: 50529024
+TextureAddress: 63
+VolumeTextureAddress: 63
+Line: 31
+MaxTextureWidth: 16384
+MaxTextureHeight: 16384
+MaxVolumeExtent: 2048
+MaxTextureRepeat: 8192
+MaxTextureAspectRatio: 16384
+MaxAnisotropy: 16
+MaxVertexW: 1410065408
+GuardBandLeft: 4194967296
+GuardBandTop: 4194967296
+GuardBandRight: 100000000
+GuardBandBottom: 100000000
+ExtentsAdjust: 0
+Stencil: 511
+FVF: 1572872
+TextureOp: 67043327
+MaxTextureBlendStages: 8
+MaxSimultaneousTextures: 8
+VertexProcessing: 315
+MaxActiveLights: 8
+MaxUserClipPlanes: 8
+MaxVertexBlendMatrices: 4
+MaxVertexBlendMatrixIndex: 0
+MaxPointSize: 8192
+MaxPrimitiveCount: 16777215
+MaxVertexIndex: 16777215
+MaxStreams: 16
+MaxStreamStride: 255
+VertexShaderVersion: 4294836992
+MaxVertexShaderConst: 256
+PixelShaderVersion: 4294902528
+PixelShader1xMaxValue: 65504
+Dev2: 81
+MasterAdapterOrdinal: 0
+AdapterOrdinalInGroup: 0
+NumberOfAdaptersInGroup: 1
+DeclTypes: 783
+NumSimultaneousRTs: 4
+StretchRectFilter: 50332416
+VertexTextureFilter: 50530048
+MaxVShaderInstructionsExecuted: 65535
+MaxPShaderInstructionsExecuted: 65535
+MaxVertexShader30InstructionSlots: 4096
+MaxPixelShader30InstructionSlots: 4096]]></GraphicsInfo>
+	<GraphicsInfoRaw InfoType="D3D9Config">
+		<Driver><![CDATA[nvldumdx.dll]]></Driver>
+		<DriverVersion><![CDATA[32.0.15.8157]]></DriverVersion>
+		<Description><![CDATA[NVIDIA GeForce RTX 5090]]></Description>
+		<DeviceName><![CDATA[\\.\DISPLAY1]]></DeviceName>
+		<VendorId><![CDATA[4318]]></VendorId>
+		<DeviceId><![CDATA[11141]]></DeviceId>
+		<SubSysId><![CDATA[1392579682]]></SubSysId>
+		<Revision><![CDATA[161]]></Revision>
+		<WHQLLevel><![CDATA[0]]></WHQLLevel>
+		<DeviceType><![CDATA[1]]></DeviceType>
+		<AdapterOrdinal><![CDATA[0]]></AdapterOrdinal>
+		<Caps><![CDATA[131072]]></Caps>
+		<Caps2><![CDATA[3758227456]]></Caps2>
+		<Caps3><![CDATA[928]]></Caps3>
+		<Presentation><![CDATA[2147483663]]></Presentation>
+		<Cursor><![CDATA[1]]></Cursor>
+		<Dev><![CDATA[1818352]]></Dev>
+		<PrimitiveMisc><![CDATA[3133170]]></PrimitiveMisc>
+		<Raster><![CDATA[124985745]]></Raster>
+		<ZCmp><![CDATA[255]]></ZCmp>
+		<SrcBlend><![CDATA[16383]]></SrcBlend>
+		<DestBlend><![CDATA[16383]]></DestBlend>
+		<AlphaCmp><![CDATA[255]]></AlphaCmp>
+		<Shade><![CDATA[541192]]></Shade>
+		<Texture><![CDATA[126149]]></Texture>
+		<TextureFilter><![CDATA[50530048]]></TextureFilter>
+		<CubeTextureFilter><![CDATA[50529024]]></CubeTextureFilter>
+		<VolumeTextureFilter><![CDATA[50529024]]></VolumeTextureFilter>
+		<TextureAddress><![CDATA[63]]></TextureAddress>
+		<VolumeTextureAddress><![CDATA[63]]></VolumeTextureAddress>
+		<Line><![CDATA[31]]></Line>
+		<MaxTextureWidth><![CDATA[16384]]></MaxTextureWidth>
+		<MaxTextureHeight><![CDATA[16384]]></MaxTextureHeight>
+		<MaxVolumeExtent><![CDATA[2048]]></MaxVolumeExtent>
+		<MaxTextureRepeat><![CDATA[8192]]></MaxTextureRepeat>
+		<MaxTextureAspectRatio><![CDATA[16384]]></MaxTextureAspectRatio>
+		<MaxAnisotropy><![CDATA[16]]></MaxAnisotropy>
+		<MaxVertexW><![CDATA[1410065408]]></MaxVertexW>
+		<GuardBandLeft><![CDATA[4194967296]]></GuardBandLeft>
+		<GuardBandTop><![CDATA[4194967296]]></GuardBandTop>
+		<GuardBandRight><![CDATA[100000000]]></GuardBandRight>
+		<GuardBandBottom><![CDATA[100000000]]></GuardBandBottom>
+		<ExtentsAdjust><![CDATA[0]]></ExtentsAdjust>
+		<Stencil><![CDATA[511]]></Stencil>
+		<FVF><![CDATA[1572872]]></FVF>
+		<TextureOp><![CDATA[67043327]]></TextureOp>
+		<MaxTextureBlendStages><![CDATA[8]]></MaxTextureBlendStages>
+		<MaxSimultaneousTextures><![CDATA[8]]></MaxSimultaneousTextures>
+		<VertexProcessing><![CDATA[315]]></VertexProcessing>
+		<MaxActiveLights><![CDATA[8]]></MaxActiveLights>
+		<MaxUserClipPlanes><![CDATA[8]]></MaxUserClipPlanes>
+		<MaxVertexBlendMatrices><![CDATA[4]]></MaxVertexBlendMatrices>
+		<MaxVertexBlendMatrixIndex><![CDATA[0]]></MaxVertexBlendMatrixIndex>
+		<MaxPointSize><![CDATA[8192]]></MaxPointSize>
+		<MaxPrimitiveCount><![CDATA[16777215]]></MaxPrimitiveCount>
+		<MaxVertexIndex><![CDATA[16777215]]></MaxVertexIndex>
+		<MaxStreams><![CDATA[16]]></MaxStreams>
+		<MaxStreamStride><![CDATA[255]]></MaxStreamStride>
+		<VertexShaderVersion><![CDATA[4294836992]]></VertexShaderVersion>
+		<MaxVertexShaderConst><![CDATA[256]]></MaxVertexShaderConst>
+		<PixelShaderVersion><![CDATA[4294902528]]></PixelShaderVersion>
+		<PixelShader1xMaxValue><![CDATA[65504]]></PixelShader1xMaxValue>
+		<Dev2><![CDATA[81]]></Dev2>
+		<MasterAdapterOrdinal><![CDATA[0]]></MasterAdapterOrdinal>
+		<AdapterOrdinalInGroup><![CDATA[0]]></AdapterOrdinalInGroup>
+		<NumberOfAdaptersInGroup><![CDATA[1]]></NumberOfAdaptersInGroup>
+		<DeclTypes><![CDATA[783]]></DeclTypes>
+		<NumSimultaneousRTs><![CDATA[4]]></NumSimultaneousRTs>
+		<StretchRectFilter><![CDATA[50332416]]></StretchRectFilter>
+		<VertexTextureFilter><![CDATA[50530048]]></VertexTextureFilter>
+		<MaxVShaderInstructionsExecuted><![CDATA[65535]]></MaxVShaderInstructionsExecuted>
+		<MaxPShaderInstructionsExecuted><![CDATA[65535]]></MaxPShaderInstructionsExecuted>
+		<MaxVertexShader30InstructionSlots><![CDATA[4096]]></MaxVertexShader30InstructionSlots>
+		<MaxPixelShader30InstructionSlots><![CDATA[4096]]></MaxPixelShader30InstructionSlots>
+	</GraphicsInfoRaw>
+	<DxDiagInfo>
+		<SystemInformation>
+			<OperatingSystem><![CDATA[64-bit Windows 11 Pro 64-bit (6.2, Build 9200) (26100.ge_release.240331-1435)]]></OperatingSystem>
+			<Language><![CDATA[English (Regional Setting: English)]]></Language>
+			<SystemManufacturer><![CDATA[ASUS]]></SystemManufacturer>
+			<SystemModel><![CDATA[System Product Name]]></SystemModel>
+			<BIOS><![CDATA[2204]]></BIOS>
+			<Processor><![CDATA[AMD Ryzen 9 7950X3D 16-Core Processor           (32 CPUs), ~4.2GHz]]></Processor>
+			<SystemMemory><![CDATA[196608MB RAM]]></SystemMemory>
+			<PageFile><![CDATA[98012MB used, 109999MB available]]></PageFile>
+			<FullDirectXVersion><![CDATA[DirectX 12]]></FullDirectXVersion>
+			<DxDiagVersion><![CDATA[6.02.26100.7309]]></DxDiagVersion>
+		</SystemInformation>
+		<GraphicsDeviceInfo>
+			<DirectXVersion><![CDATA[12.0]]></DirectXVersion>
+			<DDIVersion><![CDATA[12]]></DDIVersion>
+			<DDIVersionNumber><![CDATA[c]]></DDIVersionNumber>
+			<DxDiagWHQLLevel><![CDATA[1]]></DxDiagWHQLLevel>
+			<DriverSignedValid><![CDATA[True]]></DriverSignedValid>
+			<DriverSigned><![CDATA[True]]></DriverSigned>
+			<Manufacturer><![CDATA[NVIDIA]]></Manufacturer>
+			<ChipType><![CDATA[NVIDIA GeForce RTX 5090]]></ChipType>
+			<DACType><![CDATA[Integrated RAMDAC]]></DACType>
+			<GraphicsHWMemory><![CDATA[129962 MB]]></GraphicsHWMemory>
+			<DisplayMode><![CDATA[3840 x 2160 (32 bit) (240Hz)]]></DisplayMode>
+			<VendorID><![CDATA[0x10DE]]></VendorID>
+			<DeviceID><![CDATA[0x2B85]]></DeviceID>
+			<SubSystemID><![CDATA[0x53011462]]></SubSystemID>
+			<RevisionID><![CDATA[0x00A1]]></RevisionID>
+			<GraphicsDriverFile><![CDATA[C:\WINDOWS\System32\DriverStore\FileRepository\nvmdsi.inf_amd64_3c06e86fd1dde89a\nvldumdx.dll,C:\WINDOWS\System32\DriverStore\FileRepository\nvmdsi.inf_amd64_3c06e86fd1dde89a\nvldumdx.dll,C:\WINDOWS\System32\DriverStore\FileRepository\nvmdsi.inf_amd64_3c06e86fd1dde89a\nvldumdx.dll,C:\WINDOWS\System32\DriverStore\FileRepository\nvmdsi.inf_amd64_3c06e86fd1dde89a\nvldumdx.dll]]></GraphicsDriverFile>
+			<DriverFileVersion><![CDATA[32.00.0015.8157]]></DriverFileVersion>
+			<DriverDate><![CDATA[9/10/2025 10:00:00 AM]]></DriverDate>
+			<WHQLLevel><![CDATA[1]]></WHQLLevel>
+		</GraphicsDeviceInfo>
+	</DxDiagInfo>
+	<VideoDriverInfo>
+		<ATIPackagingVersion><![CDATA[No value found]]></ATIPackagingVersion>
+	</VideoDriverInfo>
+	<LicenseInfo>
+		<ProductKey><![CDATA[507Q1]]></ProductKey>
+		<FeatureName><![CDATA[/FEATUREVER]]></FeatureName>
+		<LicenseBehavior><![CDATA[0]]></LicenseBehavior>
+		<LicenseUsage><![CDATA[0]]></LicenseUsage>
+		<LicenseExpiration><![CDATA[0/CALUPTIME]]></LicenseExpiration>
+	</LicenseInfo>
+</CERInfo>

@@ -18,6 +18,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
         public SpatialHashGrid Grid { get; set; }
         public SpatialHashGrid ZoneGrid { get; set; }
         public string[] TargetKeys { get; set; }
+        public int[] TargetIndices { get; set; }
         public Aabb[] TargetBounds { get; set; }
         public Aabb[] ZoneBoundsInflated { get; set; }
         public int[] ZoneIndexMap { get; set; }
@@ -128,6 +129,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 && _cache.Grid != null
                 && _cache.TargetBounds != null
                 && _cache.TargetKeys != null
+                && _cache.TargetIndices != null
                 && _cache.PointIndex == usePointIndex
                 && _cache.TraversalUsed == SpaceMapperFastTraversalMode.ZoneMajor;
 
@@ -138,6 +140,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 && _cache.ZoneIndexMap != null
                 && _cache.TargetBounds != null
                 && _cache.TargetKeys != null
+                && _cache.TargetIndices != null
                 && _cache.PointIndex == usePointIndex
                 && _cache.TraversalUsed == SpaceMapperFastTraversalMode.TargetMajor;
 
@@ -147,6 +150,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
 
             Aabb[] targetBounds;
             string[] targetKeys;
+            int[] targetIndices;
             Aabb worldBounds;
             double cellSize;
 
@@ -154,29 +158,16 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
             {
                 targetBounds = _cache.TargetBounds;
                 targetKeys = _cache.TargetKeys;
+                targetIndices = _cache.TargetIndices;
                 worldBounds = _cache.WorldBounds;
                 cellSize = _cache.CellSizeUsed;
             }
             else
             {
-                targetBounds = new Aabb[targets.Count];
-                targetKeys = new string[targets.Count];
-                for (int i = 0; i < targets.Count; i++)
-                {
-                    token.ThrowIfCancellationRequested();
-                    var bbox = targets[i].ModelItem?.BoundingBox();
-                    if (bbox == null)
-                    {
-                        targetBounds[i] = new Aabb(0, 0, 0, 0, 0, 0);
-                    }
-                    else
-                    {
-                        targetBounds[i] = usePointIndexForBounds
-                            ? ToMidpointAabb(bbox, settings.TargetMidpointMode)
-                            : ToAabb(bbox);
-                    }
-                    targetKeys[i] = targets[i].ItemKey;
-                }
+                var prepared = CpuIntersectionEngine.BuildTargetBounds(targets, targetBoundsMode, settings.TargetMidpointMode);
+                targetBounds = prepared.Bounds;
+                targetKeys = prepared.Keys;
+                targetIndices = prepared.TargetIndices;
 
                 worldBounds = ComputeWorldBounds(validZoneBoundsArray, targetBounds);
                 cellSize = SpatialGridSizing.ComputeCellSize(worldBounds, request.ProcessingSettings?.IndexGranularity ?? 0);
@@ -303,6 +294,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                         ZoneGrid = zoneGrid,
                         TargetBounds = targetBounds,
                         TargetKeys = targetKeys,
+                        TargetIndices = targetIndices,
                         ZoneBoundsInflated = traversal == SpaceMapperFastTraversalMode.TargetMajor ? validZoneBoundsArray : null,
                         ZoneIndexMap = traversal == SpaceMapperFastTraversalMode.TargetMajor ? zoneIndexMap?.ToArray() : null,
                         WorldBounds = worldBounds,
@@ -619,6 +611,7 @@ namespace MicroEng.Navisworks.SpaceMapper.Estimation
                 ZoneGrid = zoneGrid,
                 TargetBounds = targetBoundsArray,
                 TargetKeys = targetKeys ?? Array.Empty<string>(),
+                TargetIndices = Enumerable.Range(0, targetBoundsArray.Length).ToArray(),
                 ZoneBoundsInflated = traversal == SpaceMapperFastTraversalMode.TargetMajor ? zoneBoundsArray : null,
                 ZoneIndexMap = traversal == SpaceMapperFastTraversalMode.TargetMajor ? Enumerable.Range(0, zoneBoundsArray.Length).ToArray() : null,
                 WorldBounds = worldBounds,

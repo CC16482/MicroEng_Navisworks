@@ -32,6 +32,8 @@ namespace MicroEng.Navisworks
         public List<ZoneTargetIntersection> Intersections { get; set; } = new();
         public string Message { get; set; }
         public string ReportPath { get; set; }
+        public List<ModelItem> TargetsWithoutBounds { get; set; } = new();
+        public List<ModelItem> TargetsUnmatched { get; set; } = new();
     }
 
     internal sealed class SpaceMapperWritebackResult
@@ -236,6 +238,9 @@ namespace MicroEng.Navisworks
 
                 var engine = SpaceMapperEngineFactory.Create(request.ProcessingSettings.ProcessingMode);
                 var diagnostics = new SpaceMapperEngineDiagnostics();
+                diagnostics.TargetsTotal = dataset.TargetModels.Count;
+                diagnostics.TargetsWithBounds = dataset.TargetsForEngine.Count;
+                diagnostics.TargetsWithoutBounds = Math.Max(0, diagnostics.TargetsTotal - diagnostics.TargetsWithBounds);
                 IList<ZoneTargetIntersection> baselineIntersections = null;
                 if (request.ProcessingSettings.EnableZoneOffsets
                     && request.ProcessingSettings.EnableOffsetAreaPass)
@@ -296,6 +301,7 @@ namespace MicroEng.Navisworks
                     }
                 }
                 result.Intersections = intersections.ToList();
+                PopulateRunDiagnostics(result, dataset, cacheToUse);
 
                 stats.ZonesProcessed = dataset.Zones.Count;
                 stats.TargetsProcessed = cacheToUse?.TargetKeys?.Length ?? dataset.TargetsForEngine.Count;
@@ -310,6 +316,13 @@ namespace MicroEng.Navisworks
                 stats.MaxCandidatesPerZone = diagnostics.MaxCandidatesPerZone;
                 stats.AvgCandidatesPerTarget = diagnostics.AvgCandidatesPerTarget;
                 stats.MaxCandidatesPerTarget = diagnostics.MaxCandidatesPerTarget;
+                stats.CandidateTargetStatsAvailable = diagnostics.CandidateTargetStatsAvailable;
+                stats.TargetsTotal = diagnostics.TargetsTotal;
+                stats.TargetsWithBounds = diagnostics.TargetsWithBounds;
+                stats.TargetsWithoutBounds = diagnostics.TargetsWithoutBounds;
+                stats.TargetsSampled = diagnostics.TargetsSampled;
+                stats.TargetsSampleSkippedNoBounds = diagnostics.TargetsSampleSkippedNoBounds;
+                stats.TargetsSampleSkippedNoGeometry = diagnostics.TargetsSampleSkippedNoGeometry;
                 stats.MeshPointTests = diagnostics.MeshPointTests;
                 stats.BoundsPointTests = diagnostics.BoundsPointTests;
                 stats.MeshFallbackPointTests = diagnostics.MeshFallbackPointTests;
@@ -1542,11 +1555,13 @@ namespace MicroEng.Navisworks
 
             var hasTargetGrid = cache.Grid != null
                 && cache.TargetBounds != null
-                && cache.TargetKeys != null;
+                && cache.TargetKeys != null
+                && cache.TargetIndices != null;
 
             var hasZoneGrid = cache.ZoneGrid != null
                 && cache.TargetBounds != null
                 && cache.TargetKeys != null
+                && cache.TargetIndices != null
                 && cache.ZoneBoundsInflated != null
                 && cache.ZoneIndexMap != null;
 
@@ -1561,21 +1576,106 @@ namespace MicroEng.Navisworks
                 return null;
             }
 
-            if (cache.TargetKeys.Length != targets.Count)
+            var targetKeysWithBounds = targets
+                .Where(t => t?.BoundingBox != null)
+                .Select(t => t.ItemKey)
+                .ToList();
+
+            if (cache.TargetKeys.Length != targetKeysWithBounds.Count)
             {
                 return null;
             }
 
             var keySet = new HashSet<string>(cache.TargetKeys, StringComparer.OrdinalIgnoreCase);
-            foreach (var target in targets)
+            foreach (var key in targetKeysWithBounds)
             {
-                if (!keySet.Contains(target.ItemKey))
+                if (!keySet.Contains(key))
                 {
                     return null;
                 }
             }
 
             return cache;
+        }
+
+        private static void PopulateRunDiagnostics(
+            SpaceMapperRunResult result,
+            SpaceMapperComputeDataset dataset,
+            SpaceMapperPreflightCache cacheToUse)
+        {
+            if (result == null || dataset == null)
+            {
+                return;
+            }
+
+            var targetLookup = new Dictionary<string, ModelItem>(StringComparer.OrdinalIgnoreCase);
+            var missingBounds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var target in dataset.TargetModels)
+            {
+                if (target?.ModelItem == null || string.IsNullOrWhiteSpace(target.ItemKey))
+                {
+                    continue;
+                }
+
+                if (!targetLookup.ContainsKey(target.ItemKey))
+                {
+                    targetLookup[target.ItemKey] = target.ModelItem;
+                }
+
+                if (!HasTargetBounds(target))
+                {
+                    missingBounds.Add(target.ItemKey);
+                }
+            }
+
+            foreach (var key in missingBounds)
+            {
+                if (targetLookup.TryGetValue(key, out var item))
+                {
+                    result.TargetsWithoutBounds.Add(item);
+                }
+            }
+
+            var matchedKeys = new HashSet<string>(
+                result.Intersections
+                    .Where(i => i != null && !string.IsNullOrWhiteSpace(i.TargetItemKey))
+                    .Select(i => i.TargetItemKey),
+                StringComparer.OrdinalIgnoreCase);
+
+            var processedKeys = cacheToUse?.TargetKeys
+                ?? dataset.TargetsForEngine
+                    .Where(t => t != null && !string.IsNullOrWhiteSpace(t.ItemKey))
+                    .Select(t => t.ItemKey)
+                    .ToArray();
+
+            foreach (var key in processedKeys)
+            {
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                if (matchedKeys.Contains(key))
+                {
+                    continue;
+                }
+
+                if (targetLookup.TryGetValue(key, out var item))
+                {
+                    result.TargetsUnmatched.Add(item);
+                }
+            }
+        }
+
+        private static bool HasTargetBounds(TargetGeometry target)
+        {
+            if (target?.BoundingBox != null)
+            {
+                return true;
+            }
+
+            return target?.ModelItem?.BoundingBox() != null;
         }
 
         private static Dictionary<string, List<SpaceMapperTargetRule>> BuildRuleMembership(Dictionary<string, List<SpaceMapperTargetRule>> targetsByRule)

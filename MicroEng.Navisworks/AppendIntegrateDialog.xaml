@@ -94,6 +94,7 @@
              Margin="0,0,0,8"
              HorizontalAlignment="Stretch"
              HorizontalContentAlignment="Stretch"
+             VerticalAlignment="Stretch"
              VerticalContentAlignment="Stretch">
     <TabControl Background="Transparent"
                 Foreground="{DynamicResource TextFillColorPrimaryBrush}"

@@ -25,6 +25,27 @@ namespace MicroEng.Navisworks.SmartSets
         FolderOnly
     }
 
+    public enum SmartSetSearchSetMode
+    {
+        Single,
+        SplitByValue,
+        ExpandValuesSingleSet
+    }
+
+    public enum SmartSetSearchInMode
+    {
+        Standard,
+        Compact,
+        Properties
+    }
+
+    public enum SmartSetScopeMode
+    {
+        AllModel,
+        CurrentSelection,
+        SavedSelectionSet
+    }
+
     [DataContract]
     public sealed class SmartSetRule : INotifyPropertyChanged
     {
@@ -76,8 +97,20 @@ namespace MicroEng.Navisworks.SmartSets
             get => _operator;
             set
             {
+                if (_operator == value)
+                {
+                    return;
+                }
+
                 _operator = value;
+                if (!IsValueEnabled && !string.IsNullOrWhiteSpace(_value))
+                {
+                    _value = "";
+                    OnPropertyChanged(nameof(Value));
+                }
+
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(IsValueEnabled));
             }
         }
 
@@ -106,7 +139,13 @@ namespace MicroEng.Navisworks.SmartSets
         [IgnoreDataMember]
         public ObservableCollection<string> SampleValues { get; } = new ObservableCollection<string>();
 
+        [IgnoreDataMember]
+        public ObservableCollection<string> PropertyOptions { get; } = new ObservableCollection<string>();
+
         public string Key => $"{Category}::{Property}";
+
+        [IgnoreDataMember]
+        public bool IsValueEnabled => Operator != SmartSetOperator.Defined && Operator != SmartSetOperator.Undefined;
 
         public event PropertyChangedEventHandler PropertyChanged;
 
@@ -244,6 +283,12 @@ namespace MicroEng.Navisworks.SmartSets
         private string _dataScraperProfile = "";
         private SmartSetOutputType _outputType = SmartSetOutputType.SearchSet;
         private string _folderPath = "MicroEng/Smart Sets";
+        private SmartSetSearchSetMode _searchSetMode = SmartSetSearchSetMode.Single;
+        private bool _generateMultipleSearchSets;
+        private SmartSetSearchInMode _searchInMode = SmartSetSearchInMode.Standard;
+        private SmartSetScopeMode _scopeMode = SmartSetScopeMode.AllModel;
+        private string _scopeSelectionSetName = "";
+        private string _scopeSummary = "Entire model";
 
         [DataMember(Order = 1)]
         public int Version { get; set; } = 1;
@@ -304,22 +349,110 @@ namespace MicroEng.Navisworks.SmartSets
         }
 
         [DataMember(Order = 7)]
-        public ObservableCollection<SmartSetRule> Rules { get; set; } = new ObservableCollection<SmartSetRule>();
+        public SmartSetSearchSetMode SearchSetMode
+        {
+            get => _searchSetMode;
+            set
+            {
+                _searchSetMode = value;
+                _generateMultipleSearchSets = value == SmartSetSearchSetMode.SplitByValue;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(GenerateMultipleSearchSets));
+            }
+        }
 
         [DataMember(Order = 8)]
-        public SmartSetGroupingSpec Grouping { get; set; } = new SmartSetGroupingSpec();
+        public bool GenerateMultipleSearchSets
+        {
+            get => _generateMultipleSearchSets;
+            set
+            {
+                _generateMultipleSearchSets = value;
+                OnPropertyChanged();
+            }
+        }
 
         [DataMember(Order = 9)]
-        public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+        public ObservableCollection<SmartSetRule> Rules { get; set; } = new ObservableCollection<SmartSetRule>();
 
         [DataMember(Order = 10)]
+        public SmartSetGroupingSpec Grouping { get; set; } = new SmartSetGroupingSpec();
+
+        [DataMember(Order = 11)]
+        public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+        [DataMember(Order = 12)]
         public DateTime UpdatedUtc { get; set; } = DateTime.UtcNow;
+
+        [DataMember(Order = 13)]
+        public SmartSetSearchInMode SearchInMode
+        {
+            get => _searchInMode;
+            set
+            {
+                _searchInMode = value;
+                OnPropertyChanged();
+            }
+        }
+
+        [DataMember(Order = 14)]
+        public SmartSetScopeMode ScopeMode
+        {
+            get => _scopeMode;
+            set
+            {
+                _scopeMode = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 15)]
+        public string ScopeSelectionSetName
+        {
+            get => _scopeSelectionSetName;
+            set
+            {
+                _scopeSelectionSetName = value ?? "";
+                OnPropertyChanged();
+            }
+        }
+
+        [DataMember(Order = 16)]
+        public string ScopeSummary
+        {
+            get => _scopeSummary;
+            set
+            {
+                _scopeSummary = value ?? "";
+                OnPropertyChanged();
+            }
+        }
+
+        [IgnoreDataMember]
+        public bool IsScopeConstrained => ScopeMode != SmartSetScopeMode.AllModel;
 
         public event PropertyChangedEventHandler PropertyChanged;
 
         private void OnPropertyChanged([CallerMemberName] string name = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+
+        [OnDeserialized]
+        private void OnDeserialized(StreamingContext context)
+        {
+            if (_searchSetMode == SmartSetSearchSetMode.Single && _generateMultipleSearchSets)
+            {
+                _searchSetMode = SmartSetSearchSetMode.SplitByValue;
+            }
+
+            if (string.IsNullOrWhiteSpace(_scopeSummary))
+            {
+                _scopeSummary = _scopeMode == SmartSetScopeMode.AllModel ? "Entire model" : "Scope active";
+            }
+
+            _scopeSelectionSetName ??= "";
         }
     }
 
@@ -371,5 +504,6 @@ namespace MicroEng.Navisworks.SmartSets
         public List<string> SampleItemPaths { get; set; } = new List<string>();
         public bool UsedCache { get; set; } = true;
         public string Notes { get; set; } = "";
+        public string SessionLabel { get; set; } = "";
     }
 }

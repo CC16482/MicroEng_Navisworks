@@ -1,0 +1,619 @@
+This is good signal from Codex — and most of these are real “silent failure / trust killer” issues. Below is an updated review response you can give Codex, plus the decisions you should lock in so behavior matches Navisworks expectations and avoids the “objects outside zones” confusion you mentioned.
+
+I’ll go point‑by‑point, with:
+
+* **What’s happening / why it matters**
+* **What we should decide as the correct behavior**
+* **What Codex should do next (at a requirements level, no code)**
+
+---
+
+## 1) Space Mapper: target-geometry sampling gets disabled if any target lacks bbox
+
+**Severity: Medium (really High for correctness + trust)**
+
+### What’s happening
+
+Codex is describing a classic “array alignment” bug:
+
+* `BuildTargetBounds` filters out targets that don’t have usable bounds (bbox)
+* But `BuildTargetGeometrySamples` allocates sample arrays using the *original target count*
+* If lengths mismatch, `targetSamplePoints` becomes null (or invalid) and sampling is disabled for the whole run.
+* Result: containment % and behavior logic silently falls back / becomes wrong for CPU + GPU.
+
+Even if only a handful of targets lack bounds, you can lose the “Tier B” accuracy features for everyone.
+
+### Correct behavior decision
+
+Targets are **not guaranteed** to have bounding boxes (Navisworks models can contain weird items / empty fragments / non-geometry container nodes). So the engine must handle this gracefully:
+
+* A target lacking bounds should not kill sampling for all.
+* Sampling should apply only to “valid targets” and other targets should either:
+
+  * be marked as **Unprocessable** (and treated as unmatched), OR
+  * be evaluated with a fallback (e.g., midpoint using transform / fragment origin), but explicitly logged as fallback.
+
+### What Codex should do next
+
+* Make sampling and bounds pipelines operate on the **same target index set**:
+
+  * Either sample only filtered targets; or
+  * Return a stable **index map** from original target list → filtered list and store it in diagnostics.
+* Add explicit stats:
+
+  * `TargetsTotal`, `TargetsWithBounds`, `TargetsWithoutBounds`
+  * `TargetsSampled`, `TargetsSampleSkippedBecauseNoBounds`
+* Update run report to show this clearly.
+
+This directly reduces “why did this run suddenly become less accurate?” confusion.
+
+---
+
+## 2) Smart Sets: Fast Preview cache is stale across sessions and not thread-safe
+
+**Severity: Medium**
+
+### What’s happening
+
+The current cache key is only `Category::Property`. That means:
+
+* Switch Data Scraper profile ⇒ preview may reuse the old index
+* Re-run scrape (new model state) ⇒ preview still uses old index
+* Multiple previews concurrently ⇒ dictionary writes race → potential crash or corrupt preview counts
+
+### Correct behavior decision
+
+Fast preview must be:
+
+* **Session-scoped** (or at least profile-scoped + run timestamp/scans count)
+* **Thread-safe**
+* Explicitly “approximate” but not randomly wrong due to stale cache
+
+### What Codex should do next
+
+* Add a stable session key to the cache:
+
+  * best: `ScrapeSessionId` (GUID) or `ProfileName + RunTimestampTicks + ItemsScanned`
+* Clear cache whenever selected profile/session changes
+* Use locking or `ConcurrentDictionary`
+* In the UI, show:
+
+  * “Fast Preview source session: <profile> <timestamp>”
+
+That makes it auditable and Overwatch-ready later.
+
+---
+
+## 3) Smart Sets: NotEquals semantics are wrong for multi-valued properties
+
+**Severity: Medium**
+
+### What’s happening
+
+Fast preview uses:
+
+* `Any(v != needle)`
+
+That will match almost everything when properties have multiple values, because if one value differs, it passes.
+
+Example: values = ["Valve","Damper"]
+Rule: NotEquals Valve
+Current logic returns TRUE (because "Damper" != "Valve")
+But user expectation (Navisworks-like) is: it should FAIL because one of the values equals Valve.
+
+### Correct behavior decision
+
+You should align to the most intuitive Find Items behavior:
+
+**Not Equals X** should mean:
+
+* “no values equal X”
+  Equivalent: `!values.Any(v == needle)` or `values.All(v != needle)`
+
+This makes fast preview behave much closer to live search.
+
+### What Codex should do next
+
+* Change NotEquals to “none equals”
+* Add a note in Fast Preview help text:
+
+  * “Multi-valued properties are evaluated as: any-match for Equals/Contains, none-match for Not Equals.”
+
+That’s consistent and explainable.
+
+---
+
+## 4) Selection inference: “Undefined” vs “Empty string” mismatch
+
+**Severity: Low (but causes “it matches nothing” confusion)**
+
+### What’s happening
+
+Inference suggests “Undefined” when the most common value is blank. But:
+
+* Undefined typically means “property is missing”
+* Blank means “property exists but value is empty”
+
+So the suggestion can produce a set that matches nothing, depending on how the model stores blanks.
+
+### Correct behavior decision
+
+You need consistent semantics across Smart Sets:
+
+Pick one of these two models and enforce it globally:
+
+**Option A (Recommended):**
+
+* Undefined = missing OR blank
+  This matches most user mental models.
+
+**Option B (Strict):**
+
+* Undefined = missing only
+  Then you must add a separate condition:
+* “Empty” or “Equals ''”
+* or “Defined + Empty”
+
+Given your user base and Find Items mental model, **Option A is usually better**.
+
+### What Codex should do next
+
+* Either redefine “Undefined” to include blanks in preview + generator, OR
+* Add a new explicit operator:
+
+  * “Empty” / “Not Empty”
+    and update inference to use it.
+
+---
+
+## 5) Zone-major traversal metrics reporting “0 candidates/target”
+
+**Severity: Low (but damages trust in reports)**
+
+### What’s happening
+
+When you run zone-major loops, per-target candidate metrics aren’t computed, so report shows:
+
+* Avg candidates/target: 0
+  even though candidate pairs are non-zero.
+
+This looks like a bug even if the engine is correct.
+
+### Correct behavior decision
+
+Reports should never show misleading 0s.
+
+### What Codex should do next
+
+* In zone-major mode:
+
+  * either compute per-target candidate counts properly, OR
+  * report “n/a (zone-major traversal)” and show:
+
+    * candidate pairs total
+    * candidates/zone average
+    * max candidates for a zone
+* Make reporting conditional on traversal mode.
+
+---
+
+## 6) Encoding corruption in docs
+
+**Severity: Low**
+Good housekeeping. Fixing this is worthwhile because it reduces diff noise and prevents weird rendering in VS Code / GitHub.
+
+---
+
+# Your two “Questions/assumptions” answers (what you should tell Codex)
+
+### Are targets guaranteed to always have bounding boxes?
+
+**No.**
+Even if 99% do, a few won’t — and the current bug can silently downgrade the whole run. So fix #1 is required.
+
+### Should NotEquals match “no value equals X” (Navisworks-like)?
+
+**Yes.**
+Fast preview must track Navisworks expectation; otherwise preview will systematically overcount and erode trust.
+
+---
+
+# The updated guidance you should send to Codex (copy/paste)
+
+Here’s a clean response you can paste into Codex:
+
+> Good findings. Confirming assumptions: targets are NOT guaranteed to have bounding boxes, and Smart Sets NotEquals must behave Navisworks-like (“no value equals X”).
+>
+> Required changes (priority):
+>
+> 1. Fix target bounds + geometry sample alignment: sampling must apply only to filtered targets or use an index map so bounds and samples stay aligned. Do not disable sampling for entire run because one target lacks bbox. Add explicit diagnostics counts (TargetsTotal/WithBounds/WithoutBounds/Sampled/Skipped).
+> 2. Fast preview cache must be session-scoped and thread-safe. Key cache by session id/profile+timestamp, clear on profile/session change, and protect dictionary writes (lock/ConcurrentDictionary). Show session used in UI/preview note.
+> 3. NotEquals semantics: change to “none equals needle” (values.All(v != needle)). Current Any(v != needle) is wrong for multi-valued properties and inflates preview counts.
+>
+> Secondary:
+>
+> * Inference: don’t suggest Undefined when most common value is blank unless Undefined semantics include blank. Either redefine Undefined as missing-or-blank (recommended) or add Empty/NotEmpty operators and update inference.
+> * Reports: candidate/target metrics should not show 0 in zone-major mode; compute correct stats or show n/a with zone-based metrics.
+> * Clean doc encoding artifacts (ƒ) in repo docs.
+
+---
+
+## One more “real-world” note tying back to your comment (“objects sometimes outside zones”)
+
+The bbox/sampling alignment bug (#1) is exactly the kind of bug that can cause:
+
+* objects outside zones being tagged (false positives), OR
+* objects inside zones not tagged (false negatives),
+  depending on which fallback path activates.
+
+So fixing #1 isn’t optional—it’s directly connected to your observed field behavior and user trust.
+
+If you want, I can also suggest how to surface this in UI in a non-annoying way (e.g., a warning chip “Some targets have no geometry bounds; 27 were skipped / fell back”).
+
+
+
+
+
+
+
+
+
+
+Here are UI patterns that surface the “some targets had no bounds / fell back / skipped” reality **clearly but quietly**, without turning Step 3 into a wall of warnings. I’m framing these so you can hand them to Codex as requirements, not code.
+
+---
+
+## Design goals
+
+1. **Don’t interrupt the workflow** unless the issue is severe.
+2. Make it **discoverable** when results might be incomplete or less accurate.
+3. Provide enough detail for debugging/QA **without making the UI noisy**.
+4. Keep it consistent with your existing WPF‑UI “cards + info icons + clean layout” approach.
+
+---
+
+## Where to show it
+
+### Best place: Step 3 “Processing” page, near Run / after Preflight / during results summary
+
+This is where users decide accuracy/performance and where they expect diagnostics.
+
+Avoid Step 1/Step 2 because it’s too early and you don’t want to distract from setup.
+
+---
+
+## Recommended UI pattern: a compact “Run Health” strip
+
+### A) A small “health strip” row above the Run button
+
+A single line, left-aligned, very low visual weight:
+
+* **Icon**: info/warning triangle (subtle)
+* **Text**: “Run health: 27 targets lacked bounds; used fallback”
+* **Action**: “Details” link/button (opens a flyout or dialog)
+
+Rules:
+
+* This strip only appears when there is something to report.
+* If everything is clean, it disappears completely (no wasted space).
+
+#### Severity mapping
+
+* **Info**: small number of fallbacks (<0.1% of targets)
+* **Warning**: moderate (0.1%–2%)
+* **Error**: high (>2% or a condition that invalidates results)
+
+Users can still run; they are just informed.
+
+---
+
+### B) One “warning chip” inside the Results Summary card
+
+You already show summaries/stats. Add a chip style indicator:
+
+* Chip: `Fallback: 27`
+* Hover: “Targets missing bounds. Used midpoint/transform fallback; containment % may be approximate.”
+* Click: opens the “Diagnostics” dialog.
+
+This keeps it out of the way but visible.
+
+---
+
+## What exactly to show (so it’s meaningful)
+
+The most important thing is to communicate **coverage** and **what it affected**.
+
+### Minimal (always)
+
+* `Targets total`
+* `Targets with bounds`
+* `Targets without bounds`
+* `Targets evaluated with fallback`
+* `Targets skipped entirely` (if any)
+
+### Important “what changed”
+
+* Whether **mesh‑accurate Tier B sampling** was reduced
+* Whether **containment %** was computed using:
+
+  * target geometry samples
+  * sample grid points
+  * bounds overlap
+  * not computed due to missing bounds (and how many)
+
+This connects directly to the trust issue you’re solving.
+
+---
+
+## Interaction model: non-annoying details
+
+### Option 1 (Best): Flyout panel anchored to the chip/strip
+
+When clicking “Details”:
+
+Show a small flyout with:
+
+**Coverage**
+
+* Missing bounds: 27
+* Used fallback: 27
+* Skipped: 0
+
+**Impact**
+
+* Tier B sampling: partial (only for targets with bounds)
+* Containment %: computed using “sample grid” (or whatever active)
+
+**Actions**
+
+* “Create Selection Set: Targets without bounds”
+* “Create Selection Set: Targets using fallback”
+* “Export diagnostics JSON” (optional)
+
+This is perfect for QA without clutter.
+
+### Option 2: Diagnostics dialog (tabbed)
+
+If you already have a run progress window / report viewer, you can do:
+
+* Tab 1: Summary
+* Tab 2: Coverage
+* Tab 3: Lists (target IDs)
+
+But this is heavier than a flyout.
+
+---
+
+## Optional: “Create sets” actions are a huge trust-builder
+
+Because you’re in Navisworks, the best debugging is immediate selection sets.
+
+Add buttons (only appear when applicable):
+
+* **Create Selection Set** → “No Bounds Targets”
+* **Create Selection Set** → “Fallback Targets”
+* **Create Selection Set** → “Unmatched Targets”
+
+This lets the user validate in seconds and reinforces that “not all objects are guaranteed to be in zones.”
+
+---
+
+## When to show warnings vs stay silent
+
+To keep it non-annoying, define thresholds.
+
+Example thresholds:
+
+* If `TargetsWithoutBounds == 0`: show nothing
+* If `TargetsWithoutBounds <= 10` AND `< 0.05%` of targets: show **Info** chip only (no strip)
+* If `TargetsWithoutBounds > 10` OR `>= 0.05%`: show **Warning** strip + chip
+* If `TargetsWithoutBounds >= 2%` OR sampling disabled for many targets: show **Warning** strip + an explicit message “accuracy reduced for X targets”
+* If “Tier B sampling disabled for entire run” (should not happen after fix): show **Error** with a recommendation (and optionally block run if you decide)
+
+---
+
+## Micro copy (phrasing) suggestions
+
+Keep it short and non-alarmist:
+
+* “Some targets lack bounds; fallback used.”
+* “27 targets missing bounds (fallback).”
+* “Containment % computed using approximate method for 27 targets.”
+* “Create Selection Set for review”
+
+Avoid:
+
+* “Error”
+* “Failed”
+  unless it truly invalidates results.
+
+---
+
+## What to tell Codex (copy/paste requirement)
+
+> Add a “Run Health” indicator in Step 3 Processing (Space Mapper) that surfaces when targets lack bounds / fallbacks occur, without cluttering UI.
+>
+> Requirements:
+>
+> * Show nothing when counts are zero.
+> * When non-zero, show a compact warning chip (and optionally a one-line strip above Run) like: “27 targets missing bounds; fallback used”.
+> * Provide a “Details” action that opens a small flyout/dialog listing coverage stats: TargetsTotal/WithBounds/WithoutBounds/FallbackUsed/Skipped.
+> * In Details, include quick actions: “Create Selection Set: Targets without bounds”, “Create Selection Set: Fallback targets”, “Create Selection Set: Unmatched targets” (only when counts > 0).
+> * Use severity thresholds (info/warn/error) based on percent of total; do not nag for tiny counts.
+> * Ensure the wording explains impact: “Containment %/Tier B sampling may be approximate for these targets.”
+
+---
+
+If you want, I can also recommend the **best placement** in your current Step 3 layout (e.g., inside “Assignment & Writeback” card vs above Run) based on your latest screenshot style: in practice the best is **above the Run button** (where the user can’t miss it) plus the chip in Results Summary for post-run review.
+
+
+
+
+
+
+Given how your Step 3 “Processing” page is structured (cards: **Containment Accuracy → Zone Offsets → Assignment & Writeback**, with the **Run** action being the user’s final commitment), the best placement is a **two‑stage approach**:
+
+1. **Pre-run visibility (small, non-annoying):** one line immediately above the **Run Space Mapper** button
+2. **Post-run visibility (auditable):** a chip + expandable “Run Health” section in the **Results Summary** area (or wherever you show the run stats on Step 3 after completion)
+
+That combination catches the user at the moment it matters (before they run), and still gives them a place to inspect/act afterwards.
+
+---
+
+## Best placement: Step 3 Processing page
+
+### A) Primary placement: directly above the Run button (pre-run + during run)
+
+**Why this is best**
+
+* It’s the last decision point before processing.
+* It won’t clutter the accuracy/offset/writeback cards.
+* Users who don’t care won’t see anything unless there’s an issue.
+* It’s consistent with how “Find Items” and other tools show status near the action.
+
+**What it should look like**
+A compact “status strip” row inside the bottom action area:
+
+* Left: status icon (info/warn)
+* Middle: short sentence
+* Right: “Details” link + optionally “Create Sets” quick actions (hidden behind Details if you want it cleaner)
+
+**Behavior**
+
+* Hidden when everything is fine.
+* Shows “Info” when the count is tiny.
+* Shows “Warning” when it’s meaningful (> threshold).
+
+**Text examples**
+
+* Info: “Run health: 3 targets missing bounds (fallback).”
+* Warning: “Run health: 27 targets missing bounds; Tier B sampling limited for these items.”
+* During run: “Run health: monitoring… (will report after completion)”
+
+**Important nuance**
+At *pre-run*, you may only know “missing bounds” if you already did a preflight that checked target bounds.
+If you don’t know yet, keep it neutral pre-run and make the strong messaging post-run.
+
+---
+
+### B) Secondary placement: Results Summary area (post-run, persistent)
+
+Once the run finishes (or as it progresses), show:
+
+* A small **chip row** under the main results stats:
+
+  * `Missing bounds: 27`
+  * `Fallback used: 27`
+  * `Unmatched targets: 118`
+* An **expand/collapse** “Run Health” section (optional) with:
+
+  * explanation text
+  * per-category counts
+  * action buttons
+
+**Why this is best**
+
+* It becomes part of your “run report” story.
+* It supports QA + Overwatch later.
+* Users can revisit it without re-running.
+
+---
+
+## Where exactly on the page (layout-specific recommendation)
+
+Assuming your Step 3 has:
+
+* The three cards in the main body
+* A footer row with Run / Back / Next
+
+### Put it here:
+
+**Footer area, just above Run**, spanning the width of the page content.
+
+This avoids having it compete visually with the cards and keeps it close to the action.
+
+A typical layout:
+
+```
+[ Containment Accuracy card ]
+[ Zone Offsets card ]
+[ Assignment & Writeback card ]
+
+-------------------------------------------
+Run health strip (appears only if needed)
+[Back]        [Preview?]      [RUN SPACE MAPPER]
+```
+
+Then after run:
+
+* results stats appear (either in Step 3 or Step 4)
+* include the chips + expandable section there.
+
+---
+
+## What should be in “Details” (without being overwhelming)
+
+In the “Details” flyout/dialog:
+
+### Coverage (numbers)
+
+* Targets total
+* Targets with bounds
+* Targets without bounds
+* Targets processed using fallback
+* Targets skipped (if any)
+* Unmatched targets (no zone)
+
+### Impact summary
+
+One or two plain-language bullets:
+
+* “Containment % was computed using approximate method for 27 targets due to missing bounds.”
+* “Mesh Accurate Tier B sampling applied only to targets with bounds.”
+
+### One-click actions (this is the killer feature)
+
+* Create Selection Set: **Targets without bounds**
+* Create Selection Set: **Fallback targets**
+* Create Selection Set: **Unmatched targets**
+
+This immediately turns diagnostics into something actionable.
+
+---
+
+## Thresholds so it stays “non-annoying”
+
+Recommended thresholds for showing it in the footer strip:
+
+* If `MissingBounds == 0` and `Unmatched == 0`: show nothing
+* If `MissingBounds > 0` but `< 0.05%` of targets and `< 10`: show small info chip only (post-run), not the strip
+* If `MissingBounds >= 10` OR `>= 0.05%`: show the strip + details
+* If `MissingBounds >= 2%` or sampling degraded globally: show strip as warning with stronger impact wording
+
+This prevents the UI becoming noisy on normal models.
+
+---
+
+## One more placement detail: do not bury it in “Assignment & Writeback”
+
+It’s tempting to put it in that card because it’s “run output related,” but that card already has many toggles and options. If you put health warnings there, it will:
+
+* get lost among configuration controls
+* confuse users (“is this a setting?”)
+* be harder to spot at the moment they press Run
+
+So: **footer strip + results chips** is the cleanest.
+
+---
+
+## What to tell Codex (copy/paste)
+
+> Best placement: Step 3 Processing page footer, directly above the Run button.
+>
+> * Show a compact “Run health” strip only when there are non-zero issues (missing bounds / fallback / skipped / unmatched).
+> * Keep it one-line with an icon + short text and a “Details” link.
+> * After completion, also show persistent chips in the Results Summary (e.g., “Missing bounds: 27”, “Fallback: 27”, “Unmatched: 118”).
+> * Details opens a small flyout/dialog with coverage counts + impact summary + actions to create selection sets for those categories.
+> * Use thresholds so it doesn’t nag for tiny counts.
+
+If you send a screenshot of your Step 3 footer area (where your Run button currently sits), I can specify exact positioning (“left of Run”, “full-width strip”, “inside the action bar card”, etc.) in terms Codex can implement with minimal iteration.

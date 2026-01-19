@@ -1,0 +1,102 @@
+<UserControl x:Class="MicroEng.Navisworks.SmartSets.SmartSetGeneratorPacksPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:local="clr-namespace:MicroEng.Navisworks"
+      xmlns:system="clr-namespace:System;assembly=System"
+      mc:Ignorable="d"
+      d:DesignHeight="600"
+      d:DesignWidth="900"
+      Background="Transparent"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      FontSize="12">
+
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:Card Grid.Row="0"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <StackPanel>
+        <ui:TextBlock Text="Packs" FontSize="16" FontWeight="SemiBold" />
+        <ui:TextBlock Text="Run prebuilt rule sets for common QA checks."
+                      Margin="0,4,0,0"
+                      FontSize="12"
+                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+      </StackPanel>
+    </ui:Card>
+
+    <ui:Card Grid.Row="1"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
+      <ui:DataGrid AutoGenerateColumns="False"
+                   CanUserAddRows="False"
+                   CanUserDeleteRows="False"
+                   ItemsSource="{Binding Packs}"
+                   SelectedItem="{Binding SelectedPack}"
+                   HeadersVisibility="Column"
+                   GridLinesVisibility="All"
+                   HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                   VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                   FontSize="12"
+                   RowHeight="28"
+                   ColumnHeaderHeight="30"
+                   EnableRowVirtualization="True"
+                   EnableColumnVirtualization="True"
+                   VirtualizingPanel.IsVirtualizing="True"
+                   VirtualizingPanel.VirtualizationMode="Recycling">
+        <ui:DataGrid.Columns>
+          <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="180" />
+          <DataGridTextColumn Header="Description" Binding="{Binding Description}" Width="*" />
+          <DataGridTextColumn Header="Rules" Binding="{Binding Rules.Count}" Width="70" />
+        </ui:DataGrid.Columns>
+      </ui:DataGrid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="2"
+             Padding="10"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel>
+          <ui:TextBlock Text="{Binding SelectedPack.Name}" FontSize="13" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding SelectedPack.Description}" TextWrapping="Wrap" Opacity="0.85" />
+        </StackPanel>
+
+        <ui:Button Grid.Column="1"
+                   Content="Run Pack"
+                   Appearance="Primary"
+                   Padding="12,6"
+                   Margin="12,0,0,0"
+                   IsEnabled="{Binding CanRunPack}"
+                   Click="RunPack_Click" />
+      </Grid>
+    </ui:Card>
+  </Grid>
+</UserControl>

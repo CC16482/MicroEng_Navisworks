@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MicroEng.Navisworks")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f107333f4571cf1a7286cfc630b43ef1420b75a0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+85f3a0d62fc245019bd54f261ca4f48a95e6a037")]
 [assembly: System.Reflection.AssemblyProductAttribute("MicroEng.Navisworks")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MicroEng.Navisworks")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

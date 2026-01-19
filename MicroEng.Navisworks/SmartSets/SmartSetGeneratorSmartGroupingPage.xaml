@@ -1,0 +1,137 @@
+<UserControl x:Class="MicroEng.Navisworks.SmartSets.SmartSetGeneratorSmartGroupingPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:local="clr-namespace:MicroEng.Navisworks"
+      xmlns:system="clr-namespace:System;assembly=System"
+      mc:Ignorable="d"
+      d:DesignHeight="600"
+      d:DesignWidth="900"
+      Background="Transparent"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      FontSize="12">
+
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <ui:Card Grid.Row="0"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <StackPanel>
+        <ui:TextBlock Text="Smart Grouping" FontSize="16" FontWeight="SemiBold" />
+        <ui:TextBlock Text="Group items by property values to generate structured search sets."
+                      Margin="0,4,0,0"
+                      FontSize="12"
+                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+      </StackPanel>
+    </ui:Card>
+
+    <ui:Card Grid.Row="1"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
+          <TextBlock Text="Group By:" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <TextBox Width="160"
+                   Text="{Binding CurrentRecipe.Grouping.GroupByCategory, UpdateSourceTrigger=PropertyChanged}" />
+          <TextBlock Text="Property:" VerticalAlignment="Center" Margin="8,0,6,0" />
+          <TextBox Width="200"
+                   Text="{Binding CurrentRecipe.Grouping.GroupByProperty, UpdateSourceTrigger=PropertyChanged}" />
+          <ui:Button Content="Pick" Margin="6,0,0,0" Click="PickGroupBy_Click" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+          <CheckBox Content="Then By"
+                    IsChecked="{Binding CurrentRecipe.Grouping.UseThenBy}"
+                    VerticalAlignment="Center"
+                    Margin="0,0,6,0"
+                    Style="{DynamicResource SmartSetNeutralCheckBoxStyle}" />
+          <TextBox Width="160"
+                   Text="{Binding CurrentRecipe.Grouping.ThenByCategory, UpdateSourceTrigger=PropertyChanged}"
+                   IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+          <TextBlock Text="Property:" VerticalAlignment="Center" Margin="8,0,6,0" />
+          <TextBox Width="200"
+                   Text="{Binding CurrentRecipe.Grouping.ThenByProperty, UpdateSourceTrigger=PropertyChanged}"
+                   IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+          <ui:Button Content="Pick"
+                     Margin="6,0,0,0"
+                     IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}"
+                     Click="PickThenBy_Click" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+          <TextBlock Text="Min Count:" VerticalAlignment="Center" Margin="0,0,6,0" />
+          <TextBox Width="60"
+                   Text="{Binding CurrentRecipe.Grouping.MinCount, UpdateSourceTrigger=PropertyChanged}" />
+          <TextBlock Text="Max Groups:" VerticalAlignment="Center" Margin="12,0,6,0" />
+          <TextBox Width="60"
+                   Text="{Binding CurrentRecipe.Grouping.MaxGroups, UpdateSourceTrigger=PropertyChanged}" />
+          <CheckBox Content="Include Blanks"
+                    IsChecked="{Binding CurrentRecipe.Grouping.IncludeBlanks}"
+                    Margin="12,0,0,0"
+                    VerticalAlignment="Center"
+                    Style="{DynamicResource SmartSetNeutralCheckBoxStyle}" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
+          <ui:Button Content="Preview Groups" Click="PreviewGroups_Click" />
+          <ui:Button Content="Generate Groups" Margin="6,0,0,0" Click="GenerateGroups_Click" />
+        </StackPanel>
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="2"
+             Padding="10"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
+      <ui:DataGrid AutoGenerateColumns="False"
+                   CanUserAddRows="False"
+                   CanUserDeleteRows="False"
+                   ItemsSource="{Binding GroupRows}"
+                   HeadersVisibility="Column"
+                   GridLinesVisibility="All"
+                   HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                   VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                   FontSize="12"
+                   RowHeight="28"
+                   ColumnHeaderHeight="30"
+                   EnableRowVirtualization="True"
+                   EnableColumnVirtualization="True"
+                   VirtualizingPanel.IsVirtualizing="True"
+                   VirtualizingPanel.VirtualizationMode="Recycling">
+        <ui:DataGrid.Columns>
+          <DataGridTextColumn Header="Group" Binding="{Binding DisplayKey}" Width="*" />
+          <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="90" />
+        </ui:DataGrid.Columns>
+      </ui:DataGrid>
+    </ui:Card>
+  </Grid>
+</UserControl>

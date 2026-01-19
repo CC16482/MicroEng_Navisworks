@@ -451,6 +451,13 @@ namespace MicroEng.Navisworks
         public int MaxCandidatesPerZone { get; set; }
         public double AvgCandidatesPerTarget { get; set; }
         public int MaxCandidatesPerTarget { get; set; }
+        public bool CandidateTargetStatsAvailable { get; set; }
+        public int TargetsTotal { get; set; }
+        public int TargetsWithBounds { get; set; }
+        public int TargetsWithoutBounds { get; set; }
+        public int TargetsSampled { get; set; }
+        public int TargetsSampleSkippedNoBounds { get; set; }
+        public int TargetsSampleSkippedNoGeometry { get; set; }
         public TimeSpan BuildIndexTime { get; set; }
         public TimeSpan CandidateQueryTime { get; set; }
         public TimeSpan NarrowPhaseTime { get; set; }
@@ -565,6 +572,13 @@ namespace MicroEng.Navisworks
         public int MaxCandidatesPerZone { get; set; }
         public double AvgCandidatesPerTarget { get; set; }
         public int MaxCandidatesPerTarget { get; set; }
+        public bool CandidateTargetStatsAvailable { get; set; }
+        public int TargetsTotal { get; set; }
+        public int TargetsWithBounds { get; set; }
+        public int TargetsWithoutBounds { get; set; }
+        public int TargetsSampled { get; set; }
+        public int TargetsSampleSkippedNoBounds { get; set; }
+        public int TargetsSampleSkippedNoGeometry { get; set; }
         public long WritesPerformed { get; set; }
         public int WritebackTargetsWritten { get; set; }
         public int WritebackCategoriesWritten { get; set; }

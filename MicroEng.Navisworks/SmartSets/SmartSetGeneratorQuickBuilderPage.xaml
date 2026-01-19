@@ -1,0 +1,349 @@
+<UserControl x:Class="MicroEng.Navisworks.SmartSets.SmartSetGeneratorQuickBuilderPage"
+             x:Name="Root"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:local="clr-namespace:MicroEng.Navisworks"
+      xmlns:smartsets="clr-namespace:MicroEng.Navisworks.SmartSets"
+      xmlns:system="clr-namespace:System;assembly=System"
+      mc:Ignorable="d"
+      d:DesignHeight="600"
+      d:DesignWidth="900"
+      Background="Transparent"
+      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+      FontSize="12">
+
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+      <Style x:Key="RuleValueTextBoxStyle" TargetType="TextBox">
+        <Setter Property="Padding" Value="4,1" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+      </Style>
+      <Style x:Key="RuleComboBoxStyle" TargetType="ComboBox">
+        <Setter Property="Padding" Value="4,1" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="IsEditable" Value="True" />
+        <Setter Property="IsTextSearchEnabled" Value="True" />
+      </Style>
+      <Style x:Key="RuleConditionComboBoxStyle"
+             TargetType="ComboBox"
+             BasedOn="{StaticResource RuleComboBoxStyle}">
+        <Setter Property="IsEditable" Value="False" />
+        <Setter Property="IsTextSearchEnabled" Value="False" />
+      </Style>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </UserControl.Resources>
+
+  <Grid Margin="12">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <ui:Card Grid.Row="0"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+          <ui:TextBlock Text="Quick Builder" FontSize="16" FontWeight="SemiBold" />
+          <ui:TextBlock Text="Define rules to build search and selection sets."
+                        Margin="0,4,0,0"
+                        FontSize="12"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,8,0,0">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="220" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Recipe Name:" Margin="0,0,6,0" VerticalAlignment="Center" />
+          <TextBox Grid.Row="0" Grid.Column="1"
+                   Text="{Binding CurrentRecipe.Name, UpdateSourceTrigger=PropertyChanged}" />
+          <TextBlock Grid.Row="0" Grid.Column="2" Text="Output Type:" Margin="12,0,6,0" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="0" Grid.Column="3"
+                    ItemsSource="{Binding OutputTypes}"
+                    SelectedItem="{Binding CurrentRecipe.OutputType}" />
+
+          <TextBlock Grid.Row="1" Grid.Column="0" Text="Folder Path:" Margin="0,6,6,0" VerticalAlignment="Center" />
+          <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,0"
+                   Text="{Binding CurrentRecipe.FolderPath, UpdateSourceTrigger=PropertyChanged}" />
+
+          <TextBlock Grid.Row="2" Grid.Column="0" Text="Description:" Margin="0,6,6,0" VerticalAlignment="Center" />
+          <TextBox Grid.Row="2" Grid.Column="1" Margin="0,6,0,0"
+                   Text="{Binding CurrentRecipe.Description, UpdateSourceTrigger=PropertyChanged}" />
+          <TextBlock Grid.Row="2" Grid.Column="2" Text="Recipe File:" Margin="12,6,6,0" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="2" Grid.Column="3" Margin="0,6,0,0"
+                    ItemsSource="{Binding RecipeFiles}"
+                    DisplayMemberPath="DisplayName"
+                    SelectedItem="{Binding SelectedRecipeFile}" />
+
+          <TextBlock Grid.Row="3" Grid.Column="0" Text="Search Set Mode:" Margin="0,6,6,0" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,0"
+                    ItemsSource="{Binding SearchSetModeOptions}"
+                    DisplayMemberPath="Label"
+                    SelectedValuePath="Value"
+                    SelectedValue="{Binding CurrentRecipe.SearchSetMode}" />
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,8,0,0">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="220" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock Grid.Row="0" Grid.Column="0" Text="Search in:" Margin="0,0,6,0" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="0" Grid.Column="1"
+                    ItemsSource="{Binding SearchInModeOptions}"
+                    DisplayMemberPath="Label"
+                    SelectedValuePath="Value"
+                    SelectedValue="{Binding CurrentRecipe.SearchInMode}" />
+
+          <TextBlock Grid.Row="0" Grid.Column="2" Text="Scope:" Margin="12,0,6,0" VerticalAlignment="Center" />
+          <ComboBox Grid.Row="0" Grid.Column="3"
+                    ItemsSource="{Binding ScopeModeOptions}"
+                    DisplayMemberPath="Label"
+                    SelectedValuePath="Value"
+                    SelectedValue="{Binding CurrentRecipe.ScopeMode}" />
+
+          <Grid Grid.Row="1" Grid.ColumnSpan="4">
+            <Grid.Style>
+              <Style TargetType="Grid">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding CurrentRecipe.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.SavedSelectionSet}">
+                    <Setter Property="Visibility" Value="Visible" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Grid.Style>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="220" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="220" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0" Text="Saved set:" Margin="0,6,6,0" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,0"
+                      ItemsSource="{Binding SavedSelectionSets}"
+                      SelectedItem="{Binding CurrentRecipe.ScopeSelectionSetName}" />
+          </Grid>
+
+          <StackPanel Grid.Row="2"
+                      Grid.ColumnSpan="4"
+                      Orientation="Horizontal"
+                      HorizontalAlignment="Right"
+                      Margin="0,6,0,0">
+            <ui:Button Content="Use current selection" Click="UseCurrentSelectionScope_Click" />
+            <ui:Button Content="Clear scope" Margin="6,0,0,0" Click="ClearScope_Click" />
+          </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="3"
+                    Margin="0,8,0,0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+          <ui:Button Content="Save" Click="SaveRecipe_Click" />
+          <ui:Button Content="Save As" Margin="6,0,0,0" Click="SaveRecipeAs_Click" />
+          <ui:Button Content="Load" Margin="6,0,0,0" Click="LoadRecipe_Click" />
+        </StackPanel>
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="1"
+             Padding="10"
+             Margin="0,0,0,8"
+             VerticalAlignment="Stretch"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ui:TextBlock Grid.Row="0"
+                      Text="Rules"
+                      FontSize="13"
+                      FontWeight="SemiBold"
+                      Margin="0,0,0,6" />
+
+        <ui:DataGrid Grid.Row="1"
+                     AutoGenerateColumns="False"
+                     CanUserAddRows="False"
+                     CanUserDeleteRows="False"
+                     IsReadOnly="False"
+                     ItemsSource="{Binding CurrentRecipe.Rules}"
+                     SelectedItem="{Binding SelectedRule}"
+                     HeadersVisibility="Column"
+                     GridLinesVisibility="All"
+                     HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                     VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                     FontSize="12"
+                     RowHeight="28"
+                     ColumnHeaderHeight="30"
+                     EnableRowVirtualization="True"
+                     EnableColumnVirtualization="True"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling"
+                     PreviewMouseLeftButtonDown="RulesGrid_PreviewMouseLeftButtonDown"
+                     PreparingCellForEdit="RulesGrid_PreparingCellForEdit">
+          <ui:DataGrid.Columns>
+            <DataGridTemplateColumn Header="On" Width="40">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <CheckBox IsChecked="{Binding Enabled}"
+                            Style="{DynamicResource SmartSetNeutralCheckBoxStyle}"
+                            Padding="0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTextColumn Header="Group" Binding="{Binding GroupId}" Width="60" />
+            <DataGridComboBoxColumn Header="Category"
+                                    Width="170"
+                                    ItemsSource="{Binding DataContext.CategoryOptions, ElementName=Root}"
+                                    SelectedItemBinding="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
+                                    ElementStyle="{StaticResource RuleComboBoxStyle}"
+                                    EditingElementStyle="{StaticResource RuleComboBoxStyle}" />
+            <DataGridComboBoxColumn Header="Property"
+                                    Width="190"
+                                    ItemsSource="{Binding PropertyOptions}"
+                                    SelectedItemBinding="{Binding Property, UpdateSourceTrigger=PropertyChanged}"
+                                    ElementStyle="{StaticResource RuleComboBoxStyle}"
+                                    EditingElementStyle="{StaticResource RuleComboBoxStyle}" />
+            <DataGridComboBoxColumn Header="Condition"
+                                    Width="120"
+                                    ItemsSource="{Binding DataContext.ConditionOptions, ElementName=Root}"
+                                    SelectedValuePath="Value"
+                                    DisplayMemberPath="Label"
+                                    SelectedValueBinding="{Binding Operator, UpdateSourceTrigger=PropertyChanged}"
+                                    ElementStyle="{StaticResource RuleConditionComboBoxStyle}"
+                                    EditingElementStyle="{StaticResource RuleConditionComboBoxStyle}" />
+            <DataGridTemplateColumn Header="Value" Width="*">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}"
+                           IsEnabled="{Binding IsValueEnabled}"
+                           Style="{StaticResource RuleValueTextBoxStyle}" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+          </ui:DataGrid.Columns>
+        </ui:DataGrid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,8,0,0">
+          <ui:Button Content="Add Rule" Click="AddRule_Click" />
+          <ui:Button Content="Remove Rule" Margin="6,0,0,0" Click="RemoveRule_Click" />
+          <ui:Button Content="Duplicate Rule" Margin="6,0,0,0" Click="DuplicateRule_Click" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,8,0,0">
+          <TextBlock Text="Sample Values" Opacity="0.85" />
+          <ListBox ItemsSource="{Binding SelectedRule.SampleValues}"
+                   MaxHeight="80"
+                   BorderThickness="1"
+                   BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" />
+        </StackPanel>
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="2"
+             Padding="10"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+
+          <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+            <CheckBox Content="Fast preview (cached)"
+                      IsChecked="{Binding UseFastPreview}"
+                      IsEnabled="{Binding CanUseFastPreview}"
+                      ToolTip="Fast preview is disabled when scope is constrained."
+                      Style="{DynamicResource SmartSetNeutralCheckBoxStyle}" />
+            <ui:Button Content="Preview" Margin="8,0,0,0" Click="Preview_Click" />
+            <ui:Button Content="Select Results" Margin="6,0,0,0"
+                       IsEnabled="{Binding CanSelectPreviewResults}"
+                       Click="SelectResults_Click" />
+            <ui:Button Content="Generate" Appearance="Primary" Margin="6,0,0,0" Click="Generate_Click" />
+          </StackPanel>
+
+          <Border Grid.Column="1"
+                  HorizontalAlignment="Right"
+                  Padding="6,2"
+                  Margin="8,0,0,0"
+                  Background="{DynamicResource ControlFillColorDefaultBrush}"
+                  BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Visibility="{Binding CurrentRecipe.IsScopeConstrained, Converter={StaticResource BoolToVisibilityConverter}}">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <TextBlock Text="{Binding CurrentRecipe.ScopeSummary, StringFormat=Scope: {0} (live preview)}"
+                         Margin="0,0,6,0" />
+              <ui:Button Content="Clear" Padding="6,0" Click="ClearScope_Click" />
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <TextBlock Grid.Row="1" Margin="0,8,0,0" Text="{Binding PreviewStatusText}" />
+
+        <TextBox Grid.Row="2"
+                 Margin="0,6,0,0"
+                 Text="{Binding PreviewDetailsText}"
+                 IsReadOnly="True"
+                 TextWrapping="Wrap"
+                 MinHeight="60"
+                 VerticalScrollBarVisibility="Auto"
+                 HorizontalScrollBarVisibility="Disabled" />
+      </Grid>
+    </ui:Card>
+  </Grid>
+</UserControl>

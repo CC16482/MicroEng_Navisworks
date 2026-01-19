@@ -51,36 +51,16 @@ namespace MicroEng.Navisworks.SmartSets
 
     [Plugin("MicroEng.SmartSetGenerator.Command", "MENG",
         DisplayName = "Smart Set Generator",
-        ToolTip = "Show/hide the Smart Set Generator panel.")]
+        ToolTip = "Show the Smart Set Generator window.")]
     [AddInPlugin(AddInLocation.AddIn)]
     public class SmartSetGeneratorCommand : AddInPlugin
     {
         public override int Execute(params string[] parameters)
         {
             MicroEngActions.Init();
-
-            const string paneId = "MicroEng.SmartSetGenerator.DockPane.MENG";
             try
             {
-                var record = NavisApp.Plugins.FindPlugin(paneId);
-                if (record == null)
-                {
-                    MessageBox.Show($"Could not find Smart Set Generator dock pane plugin '{paneId}'.", "Smart Set Generator",
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return 0;
-                }
-
-                if (!record.IsLoaded)
-                {
-                    MicroEngActions.Log("SmartSetGeneratorCommand: loading plugin");
-                    record.LoadPlugin();
-                }
-
-                if (record.LoadedPlugin is DockPanePlugin pane)
-                {
-                    MicroEngActions.Log("SmartSetGeneratorCommand: toggling visibility");
-                    pane.Visible = !pane.Visible;
-                }
+                MicroEngActions.TryShowSmartSetGenerator(out _);
             }
             catch (System.Exception ex)
             {

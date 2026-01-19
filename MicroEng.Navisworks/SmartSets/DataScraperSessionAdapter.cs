@@ -14,7 +14,13 @@ namespace MicroEng.Navisworks.SmartSets
             _session = session ?? throw new ArgumentNullException(nameof(session));
         }
 
+        public Guid SessionId => _session.Id;
+
+        public DateTime Timestamp => _session.Timestamp;
+
         public string ProfileName => _session.ProfileName ?? "";
+
+        public int ItemsScanned => _session.ItemsScanned;
 
         public IEnumerable<ScrapedPropertyDescriptor> Properties
         {

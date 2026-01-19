@@ -7,7 +7,10 @@ namespace MicroEng.Navisworks.SmartSets
 {
     public interface IDataScrapeSessionView
     {
+        Guid SessionId { get; }
+        DateTime Timestamp { get; }
         string ProfileName { get; }
+        int ItemsScanned { get; }
         IEnumerable<ScrapedPropertyDescriptor> Properties { get; }
         IEnumerable<ScrapedRawEntryView> RawEntries { get; }
     }
@@ -22,8 +25,16 @@ namespace MicroEng.Navisworks.SmartSets
 
     public sealed class SmartSetFastPreviewService
     {
+        private readonly object _cacheLock = new object();
         private readonly Dictionary<string, Dictionary<string, List<string>>> _propertyIndexCache =
             new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
+        private string _cacheSessionKey = "";
+        private string _cacheSessionLabel = "";
+
+        public static bool IsCompatibleWithFastPreview(SmartSetRecipe recipe)
+        {
+            return recipe == null || !recipe.IsScopeConstrained;
+        }
 
         public FastPreviewResult Evaluate(
             IDataScrapeSessionView session,
@@ -39,6 +50,9 @@ namespace MicroEng.Navisworks.SmartSets
                 result.Notes = "No Data Scraper session available. Run Data Scraper first.";
                 return result;
             }
+
+            EnsureCacheSession(session);
+            result.SessionLabel = _cacheSessionLabel;
 
             var enabledRules = rules?.Where(r => r != null && r.Enabled).ToList() ?? new List<SmartSetRule>();
             if (enabledRules.Count == 0)
@@ -108,10 +122,23 @@ namespace MicroEng.Navisworks.SmartSets
         {
             var key = $"{rule.Category}::{rule.Property}";
 
-            if (!_propertyIndexCache.TryGetValue(key, out var itemToValues))
+            Dictionary<string, List<string>> itemToValues;
+            lock (_cacheLock)
             {
-                itemToValues = BuildIndexForProperty(session, rule.Category, rule.Property, ct);
-                _propertyIndexCache[key] = itemToValues;
+                _propertyIndexCache.TryGetValue(key, out itemToValues);
+            }
+
+            if (itemToValues == null)
+            {
+                var built = BuildIndexForProperty(session, rule.Category, rule.Property, ct);
+                lock (_cacheLock)
+                {
+                    if (!_propertyIndexCache.TryGetValue(key, out itemToValues))
+                    {
+                        _propertyIndexCache[key] = built;
+                        itemToValues = built;
+                    }
+                }
             }
 
             var effectiveOperator = GetEffectiveOperator(rule);
@@ -119,9 +146,12 @@ namespace MicroEng.Navisworks.SmartSets
 
             if (effectiveOperator == SmartSetOperator.Defined)
             {
-                foreach (var item in itemToValues.Keys)
+                foreach (var kvp in itemToValues)
                 {
-                    hits.Add(item);
+                    if (HasDefinedValue(kvp.Value))
+                    {
+                        hits.Add(kvp.Key);
+                    }
                 }
 
                 return hits;
@@ -131,7 +161,7 @@ namespace MicroEng.Navisworks.SmartSets
             {
                 foreach (var item in allItems)
                 {
-                    if (!itemToValues.ContainsKey(item))
+                    if (!itemToValues.TryGetValue(item, out var values) || !HasDefinedValue(values))
                     {
                         hits.Add(item);
                     }
@@ -200,20 +230,22 @@ namespace MicroEng.Navisworks.SmartSets
         {
             values = values ?? new List<string>();
             var needle = rule.Value ?? "";
+            var definedValues = values.Where(v => !IsBlank(v)).ToList();
 
             switch (effectiveOperator)
             {
                 case SmartSetOperator.Equals:
-                    return values.Any(v => string.Equals(v ?? "", needle, StringComparison.OrdinalIgnoreCase));
+                    return definedValues.Any(v => string.Equals(v ?? "", needle, StringComparison.OrdinalIgnoreCase));
 
                 case SmartSetOperator.NotEquals:
-                    return values.Any(v => !string.Equals(v ?? "", needle, StringComparison.OrdinalIgnoreCase));
+                    return definedValues.Count > 0
+                        && definedValues.All(v => !string.Equals(v ?? "", needle, StringComparison.OrdinalIgnoreCase));
 
                 case SmartSetOperator.Contains:
-                    return values.Any(v => (v ?? "").IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0);
+                    return definedValues.Any(v => (v ?? "").IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0);
 
                 case SmartSetOperator.Wildcard:
-                    return values.Any(v => WildcardMatch(v ?? "", needle));
+                    return definedValues.Any(v => WildcardMatch(v ?? "", needle));
             }
 
             return false;
@@ -257,6 +289,16 @@ namespace MicroEng.Navisworks.SmartSets
             return all;
         }
 
+        private static bool HasDefinedValue(List<string> values)
+        {
+            return values != null && values.Count > 0;
+        }
+
+        private static bool IsBlank(string value)
+        {
+            return string.IsNullOrWhiteSpace(value);
+        }
+
         private static bool WildcardMatch(string input, string pattern)
         {
             if (string.IsNullOrEmpty(pattern))
@@ -272,6 +314,59 @@ namespace MicroEng.Navisworks.SmartSets
                 input ?? "",
                 regexPattern,
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        private void EnsureCacheSession(IDataScrapeSessionView session)
+        {
+            var sessionKey = BuildSessionKey(session);
+            if (string.Equals(_cacheSessionKey, sessionKey, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lock (_cacheLock)
+            {
+                if (string.Equals(_cacheSessionKey, sessionKey, StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                _propertyIndexCache.Clear();
+                _cacheSessionKey = sessionKey;
+                _cacheSessionLabel = BuildSessionLabel(session);
+            }
+        }
+
+        private static string BuildSessionKey(IDataScrapeSessionView session)
+        {
+            if (session == null)
+            {
+                return string.Empty;
+            }
+
+            if (session.SessionId != Guid.Empty)
+            {
+                return session.SessionId.ToString("N");
+            }
+
+            return $"{session.ProfileName}|{session.Timestamp:O}|{session.ItemsScanned}";
+        }
+
+        private static string BuildSessionLabel(IDataScrapeSessionView session)
+        {
+            if (session == null)
+            {
+                return string.Empty;
+            }
+
+            var profile = string.IsNullOrWhiteSpace(session.ProfileName) ? "Unknown" : session.ProfileName;
+            if (session.Timestamp == default)
+            {
+                return profile;
+            }
+
+            var stamp = session.Timestamp.ToString("yyyy-MM-dd HH:mm");
+            return $"{profile} @ {stamp}";
         }
     }
 }

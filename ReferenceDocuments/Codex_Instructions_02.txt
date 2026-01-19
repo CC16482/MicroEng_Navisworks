@@ -1,0 +1,960 @@
+Got it — you want an immediate response. I've updated the task accordingly.
+
+
+Understood. Based on the current Smart Sets implementation, there are two separate things to address:
+
+1. **Quick Builder “Condition” must behave like Find Items (a real dropdown, single‑click to open), and Value must disable for Defined/Undefined.**
+2. **Add “Scope” that mirrors Find Items → “Search in” (Standard / Compact / Properties + a tree that constrains the SearchSet scope).**
+
+Below are **Codex instructions (no code)** written so it can implement this cleanly, while keeping WPF/WPF‑UI consistent and matching Data Scraper/Data Mapper sizing and grid styling.
+
+I’m referencing the existing control structure and event wiring in `SmartSetGeneratorControl.xaml.cs` (navigation, rule collection, existing grid click handler, ConditionOptions, etc.). 
+(Other Smart Sets page wrappers are present and already follow the “page delegates to owner control” pattern; Codex should keep that pattern.)   
+
+---
+
+## A) Codex change request: Make Quick Builder truly mimic Find Items filtering UX
+
+### Goal
+
+In the Quick Builder rules grid:
+
+* **Category** = dropdown
+* **Property** = dropdown
+* **Condition** = dropdown **that opens like Find Items (single click)**
+* **Value** = editable textbox **only when Condition requires a value**
+
+  * When Condition is **Defined** or **Undefined**, Value is disabled/greyed and cleared (optional)
+  * When Condition is **Defined/Undefined**, don’t allow typing into Value
+
+### What’s likely wrong today (why you “still see no dropdown”)
+
+Your rules grid currently has logic to auto-begin edit on click **only for `DataGridComboBoxColumn`** (see `RulesGrid_PreviewMouseLeftButtonDown` in the main control). If the Condition column is implemented as a template combo inside a `DataGridTemplateColumn`, the DataGrid may still treat it as a normal cell and your “single click edit” path won’t fire—so it looks like a text cell and doesn’t behave like Find Items.
+
+### Codex instructions (implementation approach)
+
+**1) Convert Category/Property/Condition columns to real `DataGridComboBoxColumn`s (not template columns).**
+This makes the interaction model match Find Items and matches your existing click-to-edit logic path.
+
+**2) Add a DataGrid event hook that forces the dropdown open on edit.**
+Use `PreparingCellForEdit` (or similar) to set `IsDropDownOpen = true` when the column is Category/Property/Condition.
+
+**3) Make Value a template textbox column so you can bind `IsEnabled` to the operator.**
+Add a computed property on the rule model (recommended) like `IsValueEnabled` that returns false for Defined/Undefined, and raise PropertyChanged when Operator changes.
+
+**4) Ensure styling matches Data Scraper / Data Mapper grid readability.**
+In the Quick Builder page resources:
+
+* set grid font size consistent with Data Scraper (12 is typical)
+* set RowHeight and HeaderHeight to match Data Scraper’s grid density
+* remove excess padding/margins inside cells
+* ensure the combobox arrow is visible (don’t rely on hover-only visuals)
+
+**5) Optional but recommended: if the operator becomes Defined/Undefined, auto-clear Value.**
+This prevents recipes from containing stale “Value” strings that aren’t used.
+
+### Acceptance criteria
+
+* Clicking the Condition cell once opens the dropdown immediately.
+* Defined/Undefined disables Value and prevents typing.
+* Grid density looks like Data Scraper/Data Mapper (not oversized).
+
+---
+
+## B) Codex change request: Add Find Items “Search in” Scope to Quick Builder
+
+### Goal
+
+Add a “Scope” section that mirrors Find Items:
+
+* A dropdown like **Search in:**
+
+  * **Standard**
+  * **Compact**
+  * **Properties**
+* A **tree view** matching the selected mode that allows choosing where the search applies.
+* The chosen scope must be applied to:
+
+  * Live preview
+  * Generated Search Sets / Selection Sets
+
+This is specifically to control `Search.Selection` (scope restriction) for the created SearchSets.
+
+### Important reality check (so Codex implements the right thing)
+
+Find Items “Search in” is primarily a **UI selection-tree constraint**. In the Navisworks API, the equivalent is:
+
+* when scope is “entire model”: `search.Selection.SelectAll()`
+* when scope is restricted: `search.Selection` should contain only the selected roots/items.
+
+Right now your SearchSets always use `search.Selection.SelectAll()` (see the search construction inside your Navisworks service). So the Scope feature must feed into that exact place.
+
+### Codex instructions (staged implementation, recommended)
+
+#### Stage 1 (fast + reliable): Functional Scope without fully cloning Navisworks’ internal tree engine
+
+This gets you 80% value quickly and correctly.
+
+**UI**
+Add a “Scope” card above the Rules grid:
+
+* “Search in:” dropdown: Standard / Compact / Properties
+* A “Use current Navisworks selection” button
+* A label explaining: “Scope uses the current selection / tree selection to constrain results”
+* A tree placeholder (Stage 2 will implement full tree)
+
+**Behavior**
+
+* Default scope = Entire model (equivalent to Find Items root)
+* If user clicks “Use current selection”, store the selected items as the scope root set for the recipe (in-memory is fine initially)
+* When building `Search`:
+
+  * If scope is default: SelectAll
+  * If scope is captured selection: copy those items into search.Selection
+
+**Preview**
+
+* **Force Live Preview when Scope is not default**
+  Fast preview from the Data Scraper cache cannot reliably respect a model-item scope unless you build a mapping layer (not worth it initially). So:
+
+  * If scope != default and “Fast preview” is on, automatically switch to live preview or show a warning “Fast preview ignores scope; switched to live preview.”
+
+This avoids misleading counts.
+
+#### Stage 2 (full Find Items clone): True “Search in” tree inside Smart Set Generator
+
+This is what you asked for (Standard/Compact/Properties + tree), but it’s heavier.
+
+**UI**
+Implement a TreeView with:
+
+* checkboxes for multi-select (since WPF TreeView doesn’t do multi-select like Navisworks)
+* lazy loading (expand node triggers children query)
+* a “Select root” option (equivalent to entire model)
+* a “Clear” button
+
+**Tree data**
+
+* Standard mode: build tree from the model “standard view” hierarchy (often can be approximated by recursively enumerating model item children)
+* Compact mode: build tree from compact hierarchy (often closer to file/model structure)
+* Properties mode: this is the hardest—only implement if you can build it without freezing (likely based on property categories and values)
+
+**Persistence**
+Add new fields to the recipe model so scope survives saving/loading:
+
+* SearchInMode (Standard/Compact/Properties)
+* ScopeKind (All vs SelectedNodes)
+* Scope node identifiers (only if you can reliably re-resolve them)
+
+If you cannot reliably re-resolve IDs across sessions, store scope as:
+
+* either “use current selection” only (not persisted), or
+* reference a named Saved Selection Set as the scope (persistable and robust)
+
+### Where Codex must apply scope in code
+
+Codex must modify the central place where Search objects are created for:
+
+* Preview search
+* Generate single set
+* Generate split sets
+* Generate expanded sets
+* Group generation
+
+You already centralize most of that behavior in your Smart Sets control + Navisworks service; Codex should ensure **scope is applied in exactly one place** (a helper like `ApplyScopeToSearch(doc, recipe, search)`), and everything calls that helper.
+
+---
+
+## C) Codex prompt you can paste (UI sizing + grid readability)
+
+You asked for a “no code” prompt to fix the Smart Set Generator being oversized and mismatched vs Data Scraper/Data Mapper.
+
+Paste this to Codex:
+
+> **Task: Smart Set Generator UI should match Data Scraper/Data Mapper sizing + grid readability**
+>
+> 1. Review Data Scraper / Data Mapper window sizing, font sizing, margins, and DataGrid styling. Smart Set Generator currently appears oversized (font + row heights + padding).
+> 2. Update SmartSetGeneratorWindow.xaml and SmartSetGeneratorQuickBuilderPage.xaml to match the same density:
+>
+>    * Use the same base font size resources used by Data Scraper (ensure WPF-UI content font sizing is not inflated).
+>    * Reduce default window size to match Data Scraper/Data Mapper “tool window” feel (not tall/oversized). Add sensible MinWidth/MinHeight.
+>    * DataGrid: match row height, header height, and cell padding so a single rule row looks like Find Items / Data Scraper grid density.
+> 3. Ensure ComboBox dropdown arrows are visible and usable; the Condition dropdown must open on single click like Find Items.
+> 4. Value textbox must disable when Condition is Defined/Undefined (greyed, cannot type).
+> 5. Keep everything WPF/WPF-UI (no WinForms).
+>
+> **Acceptance criteria:**
+>
+> * UI density similar to Data Scraper/Data Mapper.
+> * Rules grid is clearly readable without wasted vertical space.
+> * Condition dropdown works on single click.
+> * Value disables for Defined/Undefined.
+
+---
+
+## D) Small but important design recommendation for Scope (so it’s not annoying)
+
+When Scope is active (not default), show a small inline “chip”/banner near the Preview button:
+
+* “Scope: constrained (live preview enforced)”
+* And a “Clear scope” link-style button
+
+This prevents confusion when counts differ from fast preview / full model searches.
+
+---
+
+If you want, I can also rewrite the Scope stage plan into a single “Codex work order” (sequenced checklist with file-by-file edits) so it can execute it in one pass without wandering.
+
+
+Below is a single, sequenced **Codex work order** that implements **Scope (Find Items “Search in”)** for Smart Set Generator Quick Builder **without wandering**, with clear file-by-file edits. It’s structured so Codex can complete **Stage 1 (fully functional, production‑safe)** in one pass, and then optionally proceed to **Stage 2 (tree UI)**.
+
+---
+
+# Codex Work Order: Smart Set Generator “Scope” (Find Items “Search in”) Implementation
+
+## Definition of Done
+
+Quick Builder gains a **Scope** section that mirrors Find Items intent:
+
+* User can choose **Search in mode**: `Standard / Compact / Properties` (UI now, behavior staged).
+* User can constrain scope to:
+
+  * **All model** (default), or
+  * **Current Navisworks selection** (Stage 1), and optionally
+  * **Saved Selection Set** (Stage 1.5, persistence-friendly)
+* When scope is constrained:
+
+  * Generation uses that scope for all created sets
+  * Preview is not misleading:
+
+    * **Fast preview (cached)** is disabled or forced to **Live preview** (because cached preview cannot reliably respect model-item scope)
+  * UI shows a small, non-annoying “Scope active” chip with a Clear action.
+
+---
+
+## Stage 1 — Functional Scope (no tree required yet, correct behavior end-to-end)
+
+### 1) Add Scope fields to recipe/settings model
+
+**File:** `SmartSetModels.cs`
+
+**Edits:**
+
+1. Add enum(s):
+
+   * `SmartSetSearchInMode { Standard, Compact, Properties }`
+   * `SmartSetScopeMode { AllModel, CurrentSelection, SavedSelectionSet }`
+2. Add fields to the Quick Builder recipe model (where rules live):
+
+   * `SearchInMode` (default `Standard`)
+   * `ScopeMode` (default `AllModel`)
+   * `ScopeSelectionSetName` (string, optional; used when `SavedSelectionSet`)
+   * `ScopeSummary` (string, optional, UI display like “Current selection (14 items)” — not persisted if you don’t want)
+3. Add a computed convenience property:
+
+   * `bool IsScopeConstrained => ScopeMode != AllModel`
+
+**Guardrails:**
+
+* Make defaults match current behavior (AllModel + Standard) so existing recipes behave identically.
+* Keep JSON serialization stable (public get/set).
+
+---
+
+### 2) Persist scope in recipes (backward compatible)
+
+**File:** `SmartSetRecipeStore.cs`
+
+**Edits:**
+
+1. Ensure serialize/deserialize includes the new fields.
+2. Backward compatibility:
+
+   * If older JSON has no scope fields, defaults apply automatically.
+3. If you have schema/versioning logic, bump version and set defaults in migration.
+
+**Acceptance:**
+
+* Load old recipes without errors.
+* Saving a recipe preserves scope settings.
+
+---
+
+### 3) Apply scope to Navisworks Search creation in ONE place
+
+**File:** `SmartSetGeneratorNavisworksService.cs`
+
+**Edits:**
+
+1. Introduce a single helper method (so all generation paths share it), e.g. conceptually:
+
+   * `ApplyScopeToSearch(Search search, SmartSetRecipe recipe, Document doc)`
+2. Implement scope modes:
+
+   * **AllModel:** `search.Selection.SelectAll()` (or your existing equivalent)
+   * **CurrentSelection:** clear `search.Selection` and add items from `doc.CurrentSelection.SelectedItems`
+   * **SavedSelectionSet:** find the Selection Set by name and use its contents to populate `search.Selection`
+3. Update *every* set creation path to call `ApplyScopeToSearch` before running the search:
+
+   * single set generation
+   * split sets generation
+   * grouped sets generation
+   * pack generation (if it uses Search)
+
+**Guardrails (very important):**
+
+* **Do not assign** to read-only properties (you already hit this with `SelectionSet.Search`). Use the safe pattern:
+
+  * clear + AddRange / CopyFrom depending on what the API exposes in your project.
+* If a selection-set name cannot be found:
+
+  * fall back to AllModel
+  * return a user-facing warning string so UI can show “Scope selection set not found; using All model.”
+
+---
+
+### 4) Update Quick Builder UI to include Scope controls (simple + familiar)
+
+**File:** `SmartSetGeneratorQuickBuilderPage.xaml`
+
+**Add a “Scope” row above Rules grid** (keep it compact like Find Items):
+
+**UI elements:**
+
+1. Label: `Scope` / `Search in:`
+2. ComboBox: SearchInMode (Standard / Compact / Properties)
+3. ComboBox OR radio-like selector: ScopeMode
+
+   * “All model”
+   * “Current selection”
+   * “Saved selection set”
+4. If “Saved selection set” chosen: a small ComboBox to pick a saved selection set name (populate from document on load/refresh).
+5. Two buttons:
+
+   * `Use current selection` (sets ScopeMode to CurrentSelection and captures count)
+   * `Clear scope` (sets ScopeMode to AllModel)
+6. A small “chip” (Border with text) that appears only when constrained:
+
+   * “Scope active: Current selection (14 items)” with a small “× Clear” button
+
+**Styling requirements:**
+
+* Match Data Scraper/Data Mapper density:
+
+  * same font size
+  * similar DataGrid row height
+  * no excessive padding
+
+---
+
+### 5) Wire scope UI behavior in code-behind
+
+**File:** `SmartSetGeneratorQuickBuilderPage.xaml.cs`
+
+**Edits:**
+
+1. On page load:
+
+   * Set dropdown items for `SearchInMode` and `ScopeMode`
+   * Populate “Saved selection set” list if you support it in Stage 1.5
+2. Implement `Use current selection` button:
+
+   * If selection count == 0: show “No current selection” status (don’t silently enable)
+   * Else set recipe `ScopeMode = CurrentSelection` and set `ScopeSummary`
+3. Implement `Clear scope`:
+
+   * Set `ScopeMode = AllModel`
+   * Clear scope summary/name
+4. Ensure that when `ScopeMode` changes, you trigger a refresh of preview state (debounced if needed).
+
+---
+
+### 6) Prevent misleading cached preview when scope is constrained
+
+**File:** `SmartSetFastPreviewService.cs`
+
+**Edits:**
+
+1. Add a single method:
+
+   * `bool IsCompatibleWithFastPreview(recipe)`
+     Return false when `recipe.IsScopeConstrained == true`.
+2. In the fast preview entry point:
+
+   * If not compatible, return a special result status:
+
+     * `NotSupportedWithScope` (or a boolean + message)
+   * Do NOT guess; do NOT return inflated counts.
+
+---
+
+### 7) Enforce Live Preview automatically + show non-annoying warning
+
+**File:** `SmartSetGeneratorControl.xaml.cs` (or QuickBuilderPage owner, wherever preview mode toggles are handled)
+
+**Edits:**
+
+1. When `recipe.IsScopeConstrained` becomes true:
+
+   * If “Fast preview (cached)” is enabled:
+
+     * auto-disable it and enable Live Preview
+     * show a subtle status line: “Scope active → using Live preview”
+2. Ensure generate always works regardless of preview mode:
+
+   * Generate uses Navisworks search and will respect scope.
+
+**UI placement recommendation (best placement):**
+
+* Put the warning chip **right beside** the Preview controls (Fast preview toggle / Preview button area), not at the top of the window.
+* This makes it visible exactly when the user cares, without cluttering the rules grid.
+
+---
+
+### 8) QA checklist (Codex should run through this mentally)
+
+* Default recipe => AllModel => behavior unchanged
+* Set ScopeMode = CurrentSelection:
+
+  * Generate set only includes items within current selection subtree
+  * Fast preview is disabled / forced to live preview
+  * UI chip shows scope summary
+* Set ScopeMode = SavedSelectionSet:
+
+  * Missing selection set => warning + fallback to AllModel
+  * Found selection set => search constrained correctly
+* Recipe save/load preserves scope settings
+
+---
+
+## Stage 1.5 — Persistable “Saved Selection Set” Scope (recommended)
+
+If you want scope to be durable across sessions, this is the right approach.
+
+### 9) Add selection set enumeration helper
+
+**File:** `SmartSetGeneratorNavisworksService.cs` (or a small helper class)
+
+**Edits:**
+
+* Implement: `List<string> GetSavedSelectionSetNames(Document doc)`
+* Implement: `ModelItemCollection GetSelectionSetItemsByName(Document doc, string name)`
+
+**Wire into UI:**
+**File:** `SmartSetGeneratorQuickBuilderPage.xaml.cs`
+
+* Fill the saved selection sets ComboBox.
+* Refresh list on document change / refresh button.
+
+---
+
+## Stage 2 — “Search in” Tree like Find Items (optional, heavier)
+
+This stage provides the tree UI you requested. It’s realistic, but do it **after** Stage 1 works, because Stage 2 needs careful performance/lazy-loading.
+
+### 10) Add a Scope Tree panel (lazy-loaded)
+
+**File:** `SmartSetGeneratorQuickBuilderPage.xaml`
+
+**Edits:**
+
+* Add an Expander: “Scope tree (optional)”
+* Inside: a TreeView with checkboxes (multi-select)
+* Include “Select root / Clear” actions
+
+### 11) Implement lazy-loading nodes without freezing Navisworks
+
+**New file:** `SmartSetScopeTreeBuilder.cs` (recommended)
+
+**Edits:**
+
+* Node model: `DisplayName`, `HasChildren`, `Children`, `ModelItemRef`
+* Populate roots from document top-level items
+* On expand: load children on-demand
+* Use Dispatcher to avoid UI freeze
+
+### 12) Scope selection source priority
+
+When user picks something in the tree:
+
+* Set `ScopeMode = CurrentSelectionEquivalent` (internal)
+* Store selected ModelItems in a transient field (not persisted)
+* For persistence, encourage user to “Save selection set” and use Stage 1.5.
+
+### 13) SearchInMode behavior
+
+Implement progressively:
+
+* Standard: Selection Tree style roots
+* Compact: (if you can map it) otherwise keep disabled with tooltip
+* Properties: keep disabled initially (it’s expensive and not essential for SearchSet generation)
+
+---
+
+# Final “Copy/Paste to Codex” work order header (use this exactly)
+
+> Implement **Scope** for Smart Set Generator Quick Builder to mirror Navisworks Find Items “Search in”.
+> Do **Stage 1 + Stage 1.5** in one pass (functional scope + saved selection set support).
+> Keep everything WPF/WPF‑UI and match Data Scraper/Data Mapper density.
+>
+> **Must-haves:**
+>
+> * Add SearchInMode and ScopeMode fields to recipe model and persist in SmartSetRecipeStore.
+> * Add Scope UI above rules grid: Search in dropdown, Scope mode dropdown, “Use current selection”, “Clear scope”, and a small “Scope active” chip.
+> * Apply scope to Navisworks Search in exactly one shared helper in SmartSetGeneratorNavisworksService used by every generation path.
+> * When scope is constrained, cached Fast Preview must be disabled or forced to Live Preview (and show a subtle status message).
+> * Saved Selection Set scope must be supported by name (enumerate available sets, apply to search selection).
+>
+> **Do not implement full tree yet** unless everything above is complete and tested.
+
+---
+
+If you want, I can also give you a short “expected UI layout” (exact row order and spacing numbers) so Codex doesn’t overbuild the Scope section or make the window taller again.
+
+
+Below is a single, sequenced “Codex work order” for **Smart Set Generator → Quick Builder → Scope (“Search in”)** that (a) replicates Find Items’ “Search in” + tree UX in a **separate picker window** (so the main Smart Set Generator UI doesn’t balloon), (b) wires scope into **SearchSet generation** correctly, and (c) fixes the current **Condition dropdown** + **Value enable/disable** behavior to match Find Items.
+
+I’m writing this so Codex can execute it in one pass, file-by-file, without inventing new architecture.
+
+---
+
+## Codex Work Order: Smart Set Generator — Find Items Scope + Rule Grid Fixes
+
+### Outcome goals
+
+1. **Condition** is a real dropdown (like Category/Property), populated, and changes on click.
+2. **Value** is the only editable text field; it is **disabled/cleared** when Condition is **Defined/Undefined**.
+3. Quick Builder has a **Scope** row that shows the current scope summary and a **Change…** button.
+4. Clicking **Change…** opens a **Scope Picker window** that looks like Find Items:
+
+   * “Search in:” dropdown: **Standard / Compact / Properties**
+   * A tree/list below it
+5. Selected Scope is applied when generating **SearchSet**:
+
+   * Entire Model: `search.Selection.SelectAll()`
+   * Model branch: set `search.Selection.CopyFrom(...)` to the selected ModelItem(s)
+   * Property-based scope (Compact/Properties): implemented as an **implicit scope condition** AND-ed into the Search conditions
+6. Scope is persisted with the recipe (Save/Load works).
+
+---
+
+# 0) Fix the Condition dropdown binding bug (this is why it “still no drop down”)
+
+### File: `SmartSetGeneratorQuickBuilderPage.xaml`
+
+**Problem I can see right now:**
+
+* Category/Property dropdowns bind their `ItemsSource` via `AncestorType={x:Type local:SmartSetGeneratorQuickBuilderPage}`
+* Condition dropdown currently binds via `AncestorType=UserControl` (but this UI is a `Page`), so `ItemsSource` can resolve to null and appear “not a dropdown”.
+
+**Edit: change the Condition ComboBox ItemsSource binding AncestorType to the page type, consistent with Category/Property.**
+
+Find this (in the Condition column CellTemplate):
+
+```xml
+ItemsSource="{Binding DataContext.ConditionOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
+```
+
+Replace with:
+
+```xml
+ItemsSource="{Binding DataContext.ConditionOptions, RelativeSource={RelativeSource AncestorType={x:Type local:SmartSetGeneratorQuickBuilderPage}}}"
+```
+
+That’s the minimum fix to make the Condition dropdown actually populate.
+
+---
+
+# 1) Make Value disabled/cleared for Defined/Undefined
+
+### File: `SmartSetModels.cs`
+
+## 1.1 Add an `IsValueEnabled` computed property on `SmartSetRule`
+
+Inside `SmartSetRule` add:
+
+```csharp
+public bool IsValueEnabled =>
+    Condition != SmartSetCondition.Defined &&
+    Condition != SmartSetCondition.Undefined;
+```
+
+## 1.2 Ensure `Condition` setter notifies `IsValueEnabled` and clears `Value`
+
+Update the `Condition` setter to:
+
+* Raise `PropertyChanged` for `IsValueEnabled`
+* If switching into Defined/Undefined, force-clear `Value` so it can’t be accidentally used later
+
+Example patch (adapt around your existing setter):
+
+```csharp
+public SmartSetCondition Condition
+{
+    get => _condition;
+    set
+    {
+        if (_condition == value) return;
+        _condition = value;
+
+        // Find Items behavior: Defined/Undefined implies no value
+        if (!IsValueEnabled)
+            Value = "";
+
+        Notify(nameof(Condition));
+        Notify(nameof(ConditionDisplay));
+        Notify(nameof(IsValueEnabled));
+    }
+}
+```
+
+(If your Notify method is named differently, keep consistent.)
+
+---
+
+### File: `SmartSetGeneratorQuickBuilderPage.xaml`
+
+Bind the Value TextBox to `IsValueEnabled`.
+
+Find the Value column TextBox and set:
+
+```xml
+IsEnabled="{Binding IsValueEnabled}"
+```
+
+Optional (recommended): reduce visual confusion when disabled:
+
+```xml
+Opacity="{Binding IsValueEnabled, Converter={StaticResource BoolToOpacityConverter}}"
+```
+
+If you don’t already have a converter, skip the opacity.
+
+---
+
+# 2) Match Data Scraper DataGrid sizing so the grid is readable
+
+### File: `SmartSetGeneratorQuickBuilderPage.xaml`
+
+Your Data Scraper grid uses:
+
+* `FontSize="12"`
+* `RowHeight="28"`
+* `ColumnHeaderHeight="30"`
+
+Adjust the Quick Builder rules DataGrid to match:
+
+```xml
+FontSize="12"
+RowHeight="28"
+ColumnHeaderHeight="30"
+```
+
+This will materially improve readability and make it visually consistent with the Data Scraper DataGrid.
+
+---
+
+# 3) Add Scope models to recipes (persisted)
+
+### File: `SmartSetModels.cs`
+
+## 3.1 Add enums
+
+Add:
+
+```csharp
+public enum SmartSetSearchInMode
+{
+    Standard,
+    Compact,
+    Properties
+}
+
+public enum SmartSetScopeKind
+{
+    EntireModel,
+    ModelBranch,      // Standard selection tree branch (ModelItem)
+    PropertyFilter    // Compact/Properties scope expressed as (Category, Property, Value)
+}
+```
+
+## 3.2 Add a persisted scope spec
+
+Add this DataContract class:
+
+```csharp
+[DataContract]
+public sealed class SmartSetScopeSpec : NotifyBase
+{
+    [DataMember(Order = 1)] public SmartSetSearchInMode SearchIn { get; set; } = SmartSetSearchInMode.Standard;
+    [DataMember(Order = 2)] public SmartSetScopeKind Kind { get; set; } = SmartSetScopeKind.EntireModel;
+
+    // Standard scope (Model tree): store a display-name path so we can re-resolve later
+    [DataMember(Order = 3)] public List<string> ModelPath { get; set; } = new List<string>();
+
+    // PropertyFilter scope (Compact/Properties):
+    [DataMember(Order = 4)] public string Category { get; set; } = "";
+    [DataMember(Order = 5)] public string Property { get; set; } = "";
+    [DataMember(Order = 6)] public string Value { get; set; } = "";
+
+    public static SmartSetScopeSpec EntireModel() => new SmartSetScopeSpec
+    {
+        SearchIn = SmartSetSearchInMode.Standard,
+        Kind = SmartSetScopeKind.EntireModel
+    };
+
+    public string Summary
+    {
+        get
+        {
+            switch (Kind)
+            {
+                case SmartSetScopeKind.EntireModel:
+                    return "Entire model";
+                case SmartSetScopeKind.ModelBranch:
+                    return ModelPath != null && ModelPath.Count > 0
+                        ? string.Join(" > ", ModelPath)
+                        : "Model branch";
+                case SmartSetScopeKind.PropertyFilter:
+                    return $"{Category} / {Property} = {Value}";
+                default:
+                    return "Entire model";
+            }
+        }
+    }
+}
+```
+
+(Use your project’s base class name; I see `NotifyBase` patterns in your code.)
+
+## 3.3 Add Scope to `SmartSetRecipe`
+
+In `SmartSetRecipe` add:
+
+```csharp
+[DataMember(Order = 50)]
+public SmartSetScopeSpec Scope { get; set; } = SmartSetScopeSpec.EntireModel();
+```
+
+Also ensure your `OnDeserialized` or recipe initialization guarantees `Scope != null` after load.
+
+---
+
+# 4) Add a Scope row in Quick Builder (no giant UI; open picker window)
+
+### File: `SmartSetGeneratorQuickBuilderPage.xaml`
+
+In the “Quick Builder” header card (near Recipe Name / Output Type / Folder Path), add a new row:
+
+* Label: **Scope**
+* Read-only TextBox showing `CurrentRecipe.Scope.Summary`
+* Button: **Change…**
+* Optional button: **Clear** (sets to Entire model)
+
+Example layout (add as a new Grid row under Search Set Mode, keep it compact):
+
+```xml
+<TextBlock Grid.Row="4" Grid.Column="0" Text="Scope" VerticalAlignment="Center" />
+<Grid Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2">
+  <Grid.ColumnDefinitions>
+    <ColumnDefinition Width="*" />
+    <ColumnDefinition Width="Auto" />
+    <ColumnDefinition Width="Auto" />
+  </Grid.ColumnDefinitions>
+
+  <TextBox Grid.Column="0"
+           IsReadOnly="True"
+           Text="{Binding CurrentRecipe.Scope.Summary}"
+           Margin="0,0,8,0"/>
+
+  <Button Grid.Column="1" Content="Change..."
+          Click="OnChangeScopeClick"
+          Margin="0,0,8,0"/>
+
+  <Button Grid.Column="2" Content="Clear"
+          Click="OnClearScopeClick"/>
+</Grid>
+```
+
+Adjust the row definitions of that header grid to include Row=4.
+
+---
+
+### File: `SmartSetGeneratorQuickBuilderPage.xaml.cs`
+
+Add handlers:
+
+* `OnChangeScopeClick`: open the scope picker window; if OK, apply returned scope to `CurrentRecipe.Scope`.
+* `OnClearScopeClick`: `CurrentRecipe.Scope = SmartSetScopeSpec.EntireModel();`
+
+This page already finds the owner control via `FindOwner()`; reuse that style.
+
+---
+
+# 5) Create the Scope Picker window (WPF, looks like Find Items)
+
+### New files:
+
+* `SmartSetScopePickerWindow.xaml`
+* `SmartSetScopePickerWindow.xaml.cs`
+* (optional) `SmartSetScopeNode.cs` (tree node VM)
+
+## 5.1 Window XAML
+
+Structure:
+
+* Top row: `TextBlock "Search in:"` + ComboBox (Standard/Compact/Properties)
+* Main row: TreeView (or ListView for property-based modes)
+* Bottom row: OK / Cancel
+
+Keep it **~500–650px tall**, resizable, and don’t over-style (let WPF-UI theme apply).
+
+## 5.2 Behavior by mode
+
+* **Standard**
+
+  * Tree nodes represent **ModelItem hierarchy** (lazy load on expand)
+  * Selecting a node sets `Scope.Kind = ModelBranch` and captures `ModelPath` (DisplayName chain)
+* **Compact**
+
+  * Implement as **PropertyFilter** for a single canonical property (recommended default):
+
+    * `Category="Element"`, `Property="Category"`
+    * Values are populated from Data Scraper cache (sample values or distinct list)
+  * Selecting a value sets `Scope.Kind = PropertyFilter`
+* **Properties**
+
+  * Show Category → Property → Values (values from sample list first; optionally “Load more…” later)
+  * Selecting a value sets `Scope.Kind = PropertyFilter`
+
+This matches the Find Items mental model without requiring you to clone Navisworks’ internal selection tree control.
+
+**Important:** This approach keeps search sets *dynamic* because the scope becomes either:
+
+* a selection branch (Standard), or
+* a search condition (Compact/Properties)
+
+---
+
+# 6) Apply Scope to generated SearchSets
+
+### File: `SmartSetGeneratorNavisworksService.cs`
+
+## 6.1 Extend search builder signature
+
+Update:
+
+```csharp
+private static Search BuildSearchFromRules(...)
+```
+
+to accept `SmartSetScopeSpec scope`.
+
+## 6.2 Apply selection scope
+
+Inside build:
+
+* Always start with:
+
+```csharp
+search.Selection.SelectAll();
+```
+
+* If `scope.Kind == ModelBranch`:
+
+  * Resolve the model item from `scope.ModelPath` (DisplayName chain)
+  * If found:
+
+    * `search.Selection.Clear();`
+    * `search.Selection.CopyFrom(new ModelItemCollection { resolvedItem });`
+  * If not found:
+
+    * keep SelectAll and (optional) log a warning
+
+## 6.3 Apply property filter scope (Compact/Properties)
+
+If `scope.Kind == PropertyFilter`, create an extra condition:
+
+```csharp
+var scopeCond = SearchCondition
+    .HasPropertyByDisplayName(scope.Category, scope.Property)
+    .EqualValue(new VariantData(scope.Value));
+```
+
+AND it with the user condition group.
+
+Implementation note:
+
+* Your current search builder already builds a group with AND/OR.
+* The cleanest approach is:
+
+  * Build userGroup first
+  * If scopeCond exists, wrap into a new AND group:
+
+    * AND(scopeCond, userGroup)
+
+---
+
+# 7) Wire scope into Generate + Save/Load + Preview
+
+### File: `SmartSetGeneratorControl.xaml.cs`
+
+Where you call `_navisworksService.CreateSelectionSetFromRecipe(recipe)`:
+
+* Ensure the recipe passed includes `recipe.Scope`
+* Ensure the navisworks service uses it
+
+Also ensure when you create a new recipe, you initialize:
+
+```csharp
+CurrentRecipe.Scope = SmartSetScopeSpec.EntireModel();
+```
+
+### File: `SmartSetRecipeStore.cs`
+
+If you’re using DataContractSerializer and the recipe is `[DataContract]`, the new `Scope` should persist automatically.
+Still add a defensive load fix:
+
+* If `recipe.Scope == null`, set it to `EntireModel()` after deserialization.
+
+### File: `SmartSetFastPreviewService.cs` (optional but recommended)
+
+If you can apply scope cheaply:
+
+* For `PropertyFilter` scope: pre-filter items by evaluating that property constraint first (same evaluation method as other rules).
+* For `ModelBranch` scope: only best-effort filter if `ItemPath` begins with the root path segment (since `ItemPath` formatting may vary). If you can’t guarantee correctness, don’t apply it—just label preview “scope not applied”.
+
+---
+
+# 8) UI feedback (non-annoying)
+
+### Placement recommendation (Smart Sets)
+
+* Put a **small, single-line status text** under the Scope row:
+
+  * Example: “Scope: Entire model” (already shown)
+  * If scope can’t be resolved: “Scope could not be resolved in this model; using Entire model.”
+
+Avoid modal MessageBoxes for this—keep it inline.
+
+---
+
+## One extra: Space Mapper warning “chip” placement (from your earlier request)
+
+For the “Some targets have no geometry bounds; N were skipped/fell back” message:
+
+**Best placement: Step 3 → Containment Accuracy card, directly under the “Engine / Zone Bounds / Target Bounds” controls**, above “Zone Offsets”.
+
+That’s where the user is already thinking about accuracy/fallbacks, and it avoids cluttering Assignment/Writeback. Make it conditional (only visible when count > 0) so it never nags.
+
+---
+
+## What I need Codex to NOT do
+
+* Do **not** embed the scope tree directly into the main Quick Builder page at full height (it will blow up the window again).
+* Do **not** attempt to clone Navisworks’ internal Find Items UI control via WinForms/COM.
+* Do **not** rebuild MVVM for the entire module—keep it consistent with your current code-behind approach.
+
+---
+
+If you want, I can rewrite the above into a **single Codex prompt block** (imperative, “change X to Y” style) that you can paste directly, but the checklist above is already structured for one-pass execution.

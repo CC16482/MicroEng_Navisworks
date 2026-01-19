@@ -64,6 +64,93 @@
                    IsReadOnly="True"
                    AcceptsReturn="True"
                    VerticalScrollBarVisibility="Auto" />
+          <WrapPanel x:Name="RunHealthChipPanelControl"
+                     Margin="0,6,0,0"
+                     Visibility="Collapsed">
+            <Border x:Name="RunHealthMissingBoundsChipControl"
+                    Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="6,2"
+                    Margin="0,0,6,0"
+                    Visibility="Collapsed">
+              <TextBlock x:Name="RunHealthMissingBoundsTextControl"
+                         Text="Missing bounds: 0"
+                         FontSize="11" />
+            </Border>
+            <Border x:Name="RunHealthUnmatchedChipControl"
+                    Background="{DynamicResource ControlFillColorTertiaryBrush}"
+                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="6,2"
+                    Margin="0,0,6,0"
+                    Visibility="Collapsed">
+              <TextBlock x:Name="RunHealthUnmatchedTextControl"
+                         Text="Unmatched targets: 0"
+                         FontSize="11" />
+            </Border>
+            <ui:Button x:Name="RunHealthDetailsButtonControl"
+                       Content="Details"
+                       Appearance="Secondary"
+                       Padding="8,2"
+                       Visibility="Collapsed" />
+          </WrapPanel>
+          <ui:Flyout x:Name="RunHealthDetailsFlyoutControl" Placement="Bottom">
+            <StackPanel Width="340">
+              <ui:TextBlock Text="Run Health"
+                            FontSize="12"
+                            FontWeight="SemiBold" />
+              <Grid Margin="0,6,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Grid.Column="0" Margin="0,0,6,2" Text="Targets total:" />
+                <TextBlock x:Name="RunHealthTargetsTotalTextControl" Grid.Row="0" Grid.Column="1" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,0,6,2" Text="Targets with bounds:" />
+                <TextBlock x:Name="RunHealthTargetsWithBoundsTextControl" Grid.Row="1" Grid.Column="1" />
+                <TextBlock Grid.Row="2" Grid.Column="0" Margin="0,0,6,2" Text="Targets without bounds:" />
+                <TextBlock x:Name="RunHealthTargetsWithoutBoundsTextControl" Grid.Row="2" Grid.Column="1" />
+                <TextBlock Grid.Row="3" Grid.Column="0" Margin="0,0,6,2" Text="Targets sampled:" />
+                <TextBlock x:Name="RunHealthTargetsSampledTextControl" Grid.Row="3" Grid.Column="1" />
+                <TextBlock Grid.Row="4" Grid.Column="0" Margin="0,0,6,2" Text="Sample skipped (no bounds):" />
+                <TextBlock x:Name="RunHealthTargetsSampleNoBoundsTextControl" Grid.Row="4" Grid.Column="1" />
+                <TextBlock Grid.Row="5" Grid.Column="0" Margin="0,0,6,2" Text="Sample skipped (no geometry):" />
+                <TextBlock x:Name="RunHealthTargetsSampleNoGeometryTextControl" Grid.Row="5" Grid.Column="1" />
+                <TextBlock Grid.Row="6" Grid.Column="0" Margin="0,0,6,0" Text="Unmatched targets:" />
+                <TextBlock x:Name="RunHealthTargetsUnmatchedTextControl" Grid.Row="6" Grid.Column="1" />
+              </Grid>
+              <TextBlock x:Name="RunHealthImpactTextControl"
+                         Margin="0,6,0,0"
+                         FontSize="11"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                         TextWrapping="Wrap" />
+              <StackPanel Margin="0,8,0,0">
+                <ui:Button x:Name="RunHealthCreateMissingBoundsButtonControl"
+                           Content="Create Selection Set: Missing Bounds"
+                           Appearance="Secondary"
+                           Padding="8,3"
+                           Margin="0,0,0,4"
+                           Visibility="Collapsed" />
+                <ui:Button x:Name="RunHealthCreateUnmatchedButtonControl"
+                           Content="Create Selection Set: Unmatched Targets"
+                           Appearance="Secondary"
+                           Padding="8,3"
+                           Visibility="Collapsed" />
+              </StackPanel>
+            </StackPanel>
+          </ui:Flyout>
         </StackPanel>
 
         <ui:Button x:Name="ExportStatsButtonControl"
@@ -78,6 +165,7 @@
              Padding="0"
              HorizontalAlignment="Stretch"
              HorizontalContentAlignment="Stretch"
+             VerticalAlignment="Stretch"
              VerticalContentAlignment="Stretch">
       <ui:DataGrid x:Name="ResultsGridControl"
                    AutoGenerateColumns="False"

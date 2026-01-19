@@ -13,6 +13,7 @@ using Autodesk.Navisworks.Api;
 using Wpf.Ui.Abstractions;
 using WpfNavigationView = Wpf.Ui.Controls.NavigationView;
 using WpfNavigatingCancelEventArgs = Wpf.Ui.Controls.NavigatingCancelEventArgs;
+using WpfFlyout = Wpf.Ui.Controls.Flyout;
 using NavisApp = Autodesk.Navisworks.Api.Application;
 using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
 using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
@@ -46,6 +47,8 @@ namespace MicroEng.Navisworks
         private bool _updatingSetLists;
         private bool? _lastMeshAccurate;
         private const string NotApplicableText = "N/A";
+        private List<ModelItem> _lastTargetsWithoutBounds = new();
+        private List<ModelItem> _lastTargetsUnmatched = new();
 
         public SpaceMapperControl()
         {
@@ -161,6 +164,30 @@ namespace MicroEng.Navisworks
             _mappingPage.ZonePropertyPickerButton.Click += (s, e) => ToggleZonePropertyPicker();
             _mappingPage.ZonePropertyTreeView.SelectedItemChanged += OnZonePropertyTreeSelectionChanged;
             _resultsPage.ExportStatsButton.Click += (s, e) => ExportStats();
+            if (RunHealthDetailsButtonControl != null)
+            {
+                RunHealthDetailsButtonControl.Click += (s, e) => ToggleRunHealthFlyout(RunHealthDetailsFlyoutControl);
+            }
+            if (_resultsPage.RunHealthDetailsButton != null)
+            {
+                _resultsPage.RunHealthDetailsButton.Click += (s, e) => ToggleRunHealthFlyout(_resultsPage.RunHealthDetailsFlyout);
+            }
+            if (RunHealthCreateMissingBoundsButtonControl != null)
+            {
+                RunHealthCreateMissingBoundsButtonControl.Click += (s, e) => CreateDiagnosticsSelectionSet("Targets without bounds", _lastTargetsWithoutBounds);
+            }
+            if (_resultsPage.RunHealthCreateMissingBoundsButton != null)
+            {
+                _resultsPage.RunHealthCreateMissingBoundsButton.Click += (s, e) => CreateDiagnosticsSelectionSet("Targets without bounds", _lastTargetsWithoutBounds);
+            }
+            if (RunHealthCreateUnmatchedButtonControl != null)
+            {
+                RunHealthCreateUnmatchedButtonControl.Click += (s, e) => CreateDiagnosticsSelectionSet("Unmatched targets", _lastTargetsUnmatched);
+            }
+            if (_resultsPage.RunHealthCreateUnmatchedButton != null)
+            {
+                _resultsPage.RunHealthCreateUnmatchedButton.Click += (s, e) => CreateDiagnosticsSelectionSet("Unmatched targets", _lastTargetsUnmatched);
+            }
 
             _processingPage.ZoneBoundsSlider.ValueChanged += (s, e) => OnBoundsModesChanged();
             _processingPage.TargetBoundsSlider.ValueChanged += (s, e) => OnBoundsModesChanged();
@@ -2792,6 +2819,347 @@ namespace MicroEng.Navisworks
                 sb.AppendLine($"Report: {result.ReportPath}");
             }
             _resultsPage.ResultsSummaryBox.Text = sb.ToString();
+            UpdateRunHealthUi(result);
+        }
+
+        private void UpdateRunHealthUi(SpaceMapperRunResult result)
+        {
+            var stats = result?.Stats;
+            _lastTargetsWithoutBounds = result?.TargetsWithoutBounds?.Where(i => i != null).Distinct().ToList()
+                ?? new List<ModelItem>();
+            _lastTargetsUnmatched = result?.TargetsUnmatched?.Where(i => i != null).Distinct().ToList()
+                ?? new List<ModelItem>();
+
+            var missingBounds = _lastTargetsWithoutBounds.Count;
+            var unmatched = _lastTargetsUnmatched.Count;
+            var totalTargets = stats?.TargetsTotal ?? 0;
+            var missingRatio = totalTargets > 0 ? (double)missingBounds / totalTargets : 0d;
+            var unmatchedRatio = totalTargets > 0 ? (double)unmatched / totalTargets : 0d;
+            var showStrip = (missingBounds > 0 && (missingBounds >= 10 || missingRatio >= 0.0005))
+                || (unmatched > 0 && (unmatched >= 10 || unmatchedRatio >= 0.0005));
+            var hasIssues = missingBounds > 0 || unmatched > 0;
+
+            if (RunHealthStripControl != null)
+            {
+                RunHealthStripControl.Visibility = showStrip ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (RunHealthDetailsButtonControl != null)
+            {
+                RunHealthDetailsButtonControl.Visibility = showStrip ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (RunHealthTextControl != null)
+            {
+                RunHealthTextControl.Text = BuildRunHealthSummaryText(missingBounds, unmatched, missingRatio);
+            }
+            var warnIcon = missingRatio >= 0.001 || missingBounds >= 10;
+            if (RunHealthIconInfoControl != null)
+            {
+                RunHealthIconInfoControl.Visibility = warnIcon ? Visibility.Collapsed : Visibility.Visible;
+            }
+            if (RunHealthIconWarningControl != null)
+            {
+                RunHealthIconWarningControl.Visibility = warnIcon ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            if (_resultsPage?.RunHealthChipPanel != null)
+            {
+                _resultsPage.RunHealthChipPanel.Visibility = hasIssues ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (_resultsPage?.RunHealthMissingBoundsChip != null)
+            {
+                _resultsPage.RunHealthMissingBoundsChip.Visibility = missingBounds > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (_resultsPage?.RunHealthMissingBoundsText != null)
+            {
+                _resultsPage.RunHealthMissingBoundsText.Text = $"Missing bounds: {missingBounds:N0}";
+            }
+            if (_resultsPage?.RunHealthUnmatchedChip != null)
+            {
+                _resultsPage.RunHealthUnmatchedChip.Visibility = unmatched > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (_resultsPage?.RunHealthUnmatchedText != null)
+            {
+                _resultsPage.RunHealthUnmatchedText.Text = $"Unmatched targets: {unmatched:N0}";
+            }
+            if (_resultsPage?.RunHealthDetailsButton != null)
+            {
+                _resultsPage.RunHealthDetailsButton.Visibility = hasIssues ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            var impactText = BuildRunHealthImpactText(stats, missingBounds, unmatched);
+            UpdateRunHealthFlyout(
+                RunHealthTargetsTotalTextControl,
+                RunHealthTargetsWithBoundsTextControl,
+                RunHealthTargetsWithoutBoundsTextControl,
+                RunHealthTargetsSampledTextControl,
+                RunHealthTargetsSampleNoBoundsTextControl,
+                RunHealthTargetsSampleNoGeometryTextControl,
+                RunHealthTargetsUnmatchedTextControl,
+                RunHealthImpactTextControl,
+                RunHealthCreateMissingBoundsButtonControl,
+                RunHealthCreateUnmatchedButtonControl,
+                stats,
+                missingBounds,
+                unmatched,
+                impactText);
+
+            UpdateRunHealthFlyout(
+                _resultsPage?.RunHealthTargetsTotalText,
+                _resultsPage?.RunHealthTargetsWithBoundsText,
+                _resultsPage?.RunHealthTargetsWithoutBoundsText,
+                _resultsPage?.RunHealthTargetsSampledText,
+                _resultsPage?.RunHealthTargetsSampleNoBoundsText,
+                _resultsPage?.RunHealthTargetsSampleNoGeometryText,
+                _resultsPage?.RunHealthTargetsUnmatchedText,
+                _resultsPage?.RunHealthImpactText,
+                _resultsPage?.RunHealthCreateMissingBoundsButton,
+                _resultsPage?.RunHealthCreateUnmatchedButton,
+                stats,
+                missingBounds,
+                unmatched,
+                impactText);
+        }
+
+        private static string BuildRunHealthSummaryText(int missingBounds, int unmatched, double missingRatio)
+        {
+            var parts = new List<string>();
+            if (missingBounds > 0)
+            {
+                parts.Add($"{missingBounds:N0} targets missing bounds (skipped)");
+            }
+            if (unmatched > 0)
+            {
+                parts.Add($"{unmatched:N0} unmatched targets");
+            }
+
+            if (parts.Count == 0)
+            {
+                return "Run health: ready";
+            }
+
+            var message = "Run health: " + string.Join("; ", parts);
+            if (missingRatio >= 0.02)
+            {
+                message += ". Accuracy reduced for those targets.";
+            }
+
+            return message;
+        }
+
+        private static string BuildRunHealthImpactText(SpaceMapperRunStats stats, int missingBounds, int unmatched)
+        {
+            var impact = new List<string>();
+            if (missingBounds > 0)
+            {
+                impact.Add("Targets without bounds were skipped from containment checks.");
+                if (stats != null)
+                {
+                    if (stats.TargetsSampleSkippedNoBounds > 0 || stats.TargetsSampleSkippedNoGeometry > 0)
+                    {
+                        impact.Add(
+                            $"Sampling applied to {stats.TargetsSampled:N0} targets; skipped for {stats.TargetsSampleSkippedNoBounds:N0} missing bounds and {stats.TargetsSampleSkippedNoGeometry:N0} missing geometry.");
+                    }
+                }
+            }
+            if (unmatched > 0)
+            {
+                impact.Add("Unmatched targets had no zone match.");
+            }
+
+            return string.Join(" ", impact);
+        }
+
+        private static void UpdateRunHealthFlyout(
+            TextBlock targetsTotalText,
+            TextBlock targetsWithBoundsText,
+            TextBlock targetsWithoutBoundsText,
+            TextBlock targetsSampledText,
+            TextBlock targetsSampleNoBoundsText,
+            TextBlock targetsSampleNoGeometryText,
+            TextBlock targetsUnmatchedText,
+            TextBlock impactText,
+            Wpf.Ui.Controls.Button createMissingBoundsButton,
+            Wpf.Ui.Controls.Button createUnmatchedButton,
+            SpaceMapperRunStats stats,
+            int missingBounds,
+            int unmatched,
+            string impact)
+        {
+            if (targetsTotalText != null)
+            {
+                targetsTotalText.Text = FormatCount(stats?.TargetsTotal);
+            }
+            if (targetsWithBoundsText != null)
+            {
+                targetsWithBoundsText.Text = FormatCount(stats?.TargetsWithBounds);
+            }
+            if (targetsWithoutBoundsText != null)
+            {
+                targetsWithoutBoundsText.Text = FormatCount(stats?.TargetsWithoutBounds ?? missingBounds);
+            }
+            if (targetsSampledText != null)
+            {
+                targetsSampledText.Text = FormatCount(stats?.TargetsSampled);
+            }
+            if (targetsSampleNoBoundsText != null)
+            {
+                targetsSampleNoBoundsText.Text = FormatCount(stats?.TargetsSampleSkippedNoBounds);
+            }
+            if (targetsSampleNoGeometryText != null)
+            {
+                targetsSampleNoGeometryText.Text = FormatCount(stats?.TargetsSampleSkippedNoGeometry);
+            }
+            if (targetsUnmatchedText != null)
+            {
+                targetsUnmatchedText.Text = FormatCount(unmatched);
+            }
+            if (impactText != null)
+            {
+                impactText.Text = string.IsNullOrWhiteSpace(impact) ? string.Empty : impact;
+                impactText.Visibility = string.IsNullOrWhiteSpace(impact) ? Visibility.Collapsed : Visibility.Visible;
+            }
+            if (createMissingBoundsButton != null)
+            {
+                createMissingBoundsButton.Visibility = missingBounds > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+            if (createUnmatchedButton != null)
+            {
+                createUnmatchedButton.Visibility = unmatched > 0 ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+
+        private static string FormatCount(int? value)
+        {
+            return value.HasValue ? value.Value.ToString("N0") : NotApplicableText;
+        }
+
+        private static void ToggleRunHealthFlyout(WpfFlyout flyout)
+        {
+            if (flyout == null)
+            {
+                return;
+            }
+
+            if (flyout.IsOpen)
+            {
+                flyout.Hide();
+            }
+            else
+            {
+                flyout.Show();
+            }
+        }
+
+        private void CreateDiagnosticsSelectionSet(string label, IReadOnlyCollection<ModelItem> items)
+        {
+            if (items == null || items.Count == 0)
+            {
+                MessageBox.Show("No items available for selection set creation.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null)
+            {
+                MessageBox.Show("No active document found.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var collection = new ModelItemCollection();
+            foreach (var item in items)
+            {
+                if (item != null)
+                {
+                    collection.Add(item);
+                }
+            }
+
+            if (collection.Count == 0)
+            {
+                MessageBox.Show("No valid items available for selection set creation.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var folder = EnsureSelectionSetFolder(doc, "Space Mapper Diagnostics");
+            var set = new SelectionSet(collection)
+            {
+                DisplayName = MakeUniqueName(folder, label)
+            };
+            doc.SelectionSets.AddCopy(folder, set);
+            MessageBox.Show($"Selection set created: {set.DisplayName}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private static Autodesk.Navisworks.Api.GroupItem EnsureSelectionSetFolder(Document doc, string folderPath)
+        {
+            var parts = (folderPath ?? string.Empty)
+                .Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+
+            Autodesk.Navisworks.Api.GroupItem current = doc.SelectionSets.RootItem;
+            foreach (var part in parts)
+            {
+                var existing = current.Children
+                    .OfType<Autodesk.Navisworks.Api.GroupItem>()
+                    .FirstOrDefault(x => string.Equals(x.DisplayName, part, StringComparison.OrdinalIgnoreCase));
+
+                if (existing != null)
+                {
+                    current = existing;
+                    continue;
+                }
+
+                var folder = new FolderItem { DisplayName = part };
+                doc.SelectionSets.AddCopy(current, folder);
+                current = current.Children
+                    .OfType<Autodesk.Navisworks.Api.GroupItem>()
+                    .FirstOrDefault(x => string.Equals(x.DisplayName, part, StringComparison.OrdinalIgnoreCase))
+                          ?? current;
+            }
+
+            return current;
+        }
+
+        private static string MakeUniqueName(Autodesk.Navisworks.Api.GroupItem folder, string desired)
+        {
+            desired = SanitizeName(desired);
+            if (string.IsNullOrWhiteSpace(desired))
+            {
+                desired = "Set";
+            }
+
+            var names = new HashSet<string>(
+                folder.Children.Select(x => x.DisplayName),
+                StringComparer.OrdinalIgnoreCase);
+
+            if (!names.Contains(desired))
+            {
+                return desired;
+            }
+
+            for (var i = 2; i < 9999; i++)
+            {
+                var candidate = $"{desired} ({i})";
+                if (!names.Contains(candidate))
+                {
+                    return candidate;
+                }
+            }
+
+            return desired + " (9999)";
+        }
+
+        private static string SanitizeName(string value)
+        {
+            if (value == null)
+            {
+                return "Set";
+            }
+
+            foreach (var c in Path.GetInvalidFileNameChars())
+            {
+                value = value.Replace(c, '_');
+            }
+
+            return value.Trim();
         }
 
         private void SaveTemplate()

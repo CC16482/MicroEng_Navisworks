@@ -36,22 +36,22 @@
 
 ## Repository Layout (trimmed)
 ```
-MicroEng_Navisworks
-├─ MicroEng.Navisworks/              # Main plugin project
-│  ├─ MicroEng.Navisworks.csproj     # net48, UseWPF, Navisworks refs
-│  ├─ MicroEngPlugins.cs             # Plugin registrations, shared actions
-│  ├─ MicroEngPanelControl.xaml(.cs) # Docked launcher + log
-│  ├─ SmartSets/                     # Smart Set Generator (dock pane + services)
-│  ├─ DataMatrixControl.xaml(.cs)    # WPF Data Matrix dock pane
-│  ├─ SpaceMapperControl.xaml(.cs)   # WPF Space Mapper dock pane
-│  ├─ AppendIntegrate*.cs            # Data Mapper (Append & Integrate) engine/templates
-│  ├─ DataScraper*.cs                # Data Scraper window & services
-│  ├─ SpaceMapper*.cs                # Space Mapper services/models/engines
-│  └─ Logos\ (linked from repo root)
-├─ Logos/                            # PNG assets for ribbon/panels
-├─ ReferenceDocuments/               # Specs (Data Matrix, Space Mapper, etc.)
-├─ ReferenceProjects/                # Sample/utility projects (not built)
-└─ MICROENG_THEME_GUIDE.md
+MicroEng_Navisworks/
+- MicroEng.Navisworks/              # Main plugin project
+  - MicroEng.Navisworks.csproj     # net48, UseWPF, Navisworks refs
+  - MicroEngPlugins.cs             # Plugin registrations, shared actions
+  - MicroEngPanelControl.xaml(.cs) # Docked launcher + log
+  - SmartSets/                     # Smart Set Generator (dock pane + services)
+  - DataMatrixControl.xaml(.cs)    # WPF Data Matrix dock pane
+  - SpaceMapperControl.xaml(.cs)   # WPF Space Mapper dock pane
+  - AppendIntegrate*.cs            # Data Mapper (Append & Integrate) engine/templates
+  - DataScraper*.cs                # Data Scraper window & services
+  - SpaceMapper*.cs                # Space Mapper services/models/engines
+  - Logos/ (linked from repo root)
+- Logos/                            # PNG assets for ribbon/panels
+- ReferenceDocuments/               # Specs (Data Matrix, Space Mapper, etc.)
+- ReferenceProjects/                # Sample/utility projects (not built)
+- MICROENG_THEME_GUIDE.md
 ```
 
 ## Prerequisites
@@ -108,3 +108,8 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 - Primary entry points live in `MicroEngPlugins.cs`.
 - UI work: `MicroEngPanelControl.xaml`, `DataMatrixControl.xaml`, `SpaceMapperControl.xaml`, `SmartSets/SmartSetGeneratorControl.xaml`.
 - Do not rename plugin IDs/classes (`MicroEng.AppendData`, `MicroEng.DockPane`, `MicroEng.DataMatrix.DockPane`, `MicroEng.SpaceMapper.DockPane`, etc.).
+
+## Codex Handoff (Smart Set Generator)
+- Stage 1/1.5 scope + rules grid fixes from `ReferenceDocuments/Codex_Instructions_02.txt` are implemented: scope UI (Search in + Scope mode + saved selection set + use current selection + clear), scope applied in search creation, fast preview disabled when scope constrained, rules grid combo columns with single-click open, and Value disabled for Defined/Undefined.
+- Search in modes are currently UI-only; there is no scope picker window or tree (Stage 2 not implemented).
+- Last build error fixed by replacing `search.Selection.AddRange(...)` with `search.Selection.CopyFrom(...)` in `SmartSets/SmartSetGeneratorNavisworksService.cs`. Build not rerun after this change.

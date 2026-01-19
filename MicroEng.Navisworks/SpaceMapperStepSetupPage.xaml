@@ -29,7 +29,6 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
     </Grid.RowDefinitions>
 
@@ -150,7 +149,9 @@
              Padding="10"
              Margin="0,8,0,0"
              HorizontalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch">
+             HorizontalContentAlignment="Stretch"
+             VerticalAlignment="Stretch"
+             VerticalContentAlignment="Stretch">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />

@@ -13,6 +13,7 @@ using DrawingColor = System.Drawing.Color;
 using DrawingColorTranslator = System.Drawing.ColorTranslator;
 using ElementHost = System.Windows.Forms.Integration.ElementHost;
 using MicroEng.Navisworks.SmartSets;
+using MicroEng.Navisworks.QuickColour;
 
 namespace MicroEng.Navisworks
 {
@@ -54,6 +55,7 @@ namespace MicroEng.Navisworks
         private static AppendIntegrateDialog _dataMapperWindow;
         private static MicroEngSettingsWindow _settingsWindow;
         private static SmartSetGeneratorWindow _smartSetGeneratorWindow;
+        private static QuickColourWindow _quickColourWindow;
 
         internal static event Action ToolWindowStateChanged;
 
@@ -175,6 +177,7 @@ namespace MicroEng.Navisworks
         internal static bool IsDataScraperOpen => _dataScraperWindow?.IsVisible == true;
         internal static bool IsDataMapperOpen => _dataMapperWindow?.IsVisible == true;
         internal static bool IsSmartSetGeneratorOpen => _smartSetGeneratorWindow?.IsVisible == true;
+        internal static bool IsQuickColourOpen => _quickColourWindow?.IsVisible == true;
 
         private static bool TryActivateWindow(WpfWindow window)
         {
@@ -350,6 +353,42 @@ namespace MicroEng.Navisworks
             }
         }
 
+        internal static bool TryShowQuickColour(out QuickColourWindow window)
+        {
+            window = _quickColourWindow;
+            if (TryActivateWindow(window))
+            {
+                return true;
+            }
+
+            try
+            {
+                var createdWindow = new QuickColourWindow();
+                _quickColourWindow = createdWindow;
+                window = createdWindow;
+                createdWindow.Closed += (_, __) =>
+                {
+                    if (ReferenceEquals(_quickColourWindow, createdWindow))
+                    {
+                        _quickColourWindow = null;
+                    }
+                    RaiseToolWindowStateChanged();
+                };
+                ElementHost.EnableModelessKeyboardInterop(createdWindow);
+                createdWindow.Show();
+                TryActivateWindow(createdWindow);
+                RaiseToolWindowStateChanged();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"Quick Colour failed: {ex}");
+                MessageBox.Show($"Quick Colour failed: {ex.Message}", "MicroEng",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
         public static void Reconstruct()
         {
             var doc = NavisApp.ActiveDocument;
@@ -476,6 +515,11 @@ namespace MicroEng.Navisworks
         public static void SmartSetGenerator()
         {
             TryShowSmartSetGenerator(out _);
+        }
+
+        public static void QuickColour()
+        {
+            TryShowQuickColour(out _);
         }
 
         public static void Sequence4D()

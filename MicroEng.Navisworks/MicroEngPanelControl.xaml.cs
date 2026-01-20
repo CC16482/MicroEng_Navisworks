@@ -279,6 +279,22 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private void QuickColour_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                MicroEngActions.QuickColour();
+                UpdateToolButtonStates();
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"[Quick Colour] failed to open: {ex}");
+                LogToPanel($"[Quick Colour] failed to open: {ex.Message}");
+                System.Windows.MessageBox.Show($"Quick Colour failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void Sequence4D_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -368,6 +384,7 @@ namespace MicroEng.Navisworks
             var dataMapperOpen = MicroEngActions.IsDataMapperOpen;
             var dataMatrixOpen = IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG");
             var smartSetsOpen = MicroEngActions.IsSmartSetGeneratorOpen;
+            var quickColourOpen = MicroEngActions.IsQuickColourOpen;
             var spaceMapperOpen = IsDockPaneVisible("MicroEng.SpaceMapper.DockPane.MENG");
             var sequence4dOpen = IsDockPaneVisible("MicroEng.Sequence4D.DockPane.MENG");
 
@@ -375,6 +392,7 @@ namespace MicroEng.Navisworks
             SetCardActive(DataMapperButton, dataMapperOpen);
             SetCardActive(DataMatrixButton, dataMatrixOpen);
             SetCardActive(SmartSetsButton, smartSetsOpen);
+            SetCardActive(QuickColourButton, quickColourOpen);
             SetCardActive(SpaceMapperButton, spaceMapperOpen);
             SetCardActive(Sequence4DButton, sequence4dOpen);
         }

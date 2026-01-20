@@ -1,0 +1,2665 @@
+Below is a concrete design for a **Hierarchy Builder** mode inside Quick Colour that supports **Category → Type** (or any two properties), where:
+
+* Each **Category** gets a **base colour** (e.g., green for “Doors”),
+* Each **Type** inside that Category gets a **shade** derived from that base colour,
+* You can still generate **Search Sets / Snapshot sets** and apply **Temporary / Permanent** colours.
+
+I’m giving you (1) the recommended UX, (2) the algorithm, (3) the code you can drop in, and (4) a Codex prompt that will implement it cleanly in your project.
+
+---
+
+## 1) UX recommendation
+
+### Add a third tab in Quick Colour: **Hierarchy Builder**
+
+This keeps the original 2-tab simplicity (Appearance Profile / Quick Colour), and makes hierarchy colouring an explicit “advanced” tool rather than cluttering the main workflow.
+
+**Controls (top of the tab):**
+
+* Data Scraper profile selector (same as other tabs)
+* **Level 1 property** (Pick…)
+
+  * default suggestion: `Element / Category` (if available)
+* **Level 2 property** (Pick…)
+
+  * default suggestion: `Element / Type` or `Element / Type Name` (whichever exists)
+* Options row:
+
+  * Palette style: Deep / Pastel / (future: Colourblind / Greyscale)
+  * Shade spread slider (10–90%) with ticks
+  * Sort Types by: Count / Name
+  * Include blanks toggle
+  * Max categories / Max types per category (keep runs controllable)
+
+**Main grid:**
+
+* DataGrid of **Categories**
+
+  * On
+  * Base colour swatch
+  * Base hex (editable)
+  * Category value
+  * Item count
+  * Type count
+* Row details (nested DataGrid) showing **Types under the selected Category**
+
+  * On
+  * Shade swatch
+  * Shade hex (editable; optional)
+  * Type value
+  * Item count
+
+**Actions (bottom):**
+
+* “Auto Assign Base Colours”
+* “Regenerate Type Shades”
+* “Apply Temporary (Hierarchy)”
+* “Generate Permanent Profile (Hierarchy)”
+* Create Search Sets / Create Snapshots + Folder path + Profile name (same concept as other tab)
+
+**Key usability feature**
+
+* If the user edits a Category base hex to green, **all its types immediately become shades of green** (based on shade spread).
+
+---
+
+## 2) Core algorithm (how it works with Data Scraper)
+
+Data Scraper RawEntries gives you rows:
+`ItemPath + CategoryName + PropertyName + Value`
+
+For hierarchy you need to “join” two properties per item:
+
+* Level 1: (Cat1, Prop1) => L1 value
+* Level 2: (Cat2, Prop2) => L2 value
+
+Efficient approach:
+
+* Single scan over RawEntries (but only matching those two properties)
+* Build `Dictionary<ItemPath, (L1, L2)>`
+* Then group:
+
+  * `GroupBy(L1)` → inside each group `GroupBy(L2)` → counts
+
+Then colour assignment:
+
+* Base colour per L1:
+
+  * auto (palette) OR manual user edit
+* Shades per L2:
+
+  * keep hue, vary lightness around base lightness by `ShadeSpread%`
+
+Application:
+
+* For each enabled (L1,L2), build a Navisworks Search:
+
+  * Condition 1: L1 property equals L1 value
+  * Condition 2: L2 property equals L2 value
+  * AND them (adding both to `search.SearchConditions` typically results in AND)
+* Find results, apply colour overrides
+* Optionally create Search Sets and/or Snapshots in a folder structure:
+
+  * Folder/ProfileName/L1 value/each L2 set
+
+---
+
+## 3) Code: Hierarchy Builder implementation
+
+This is written to bolt onto the Quick Colour tool code I previously provided.
+
+### 3.1 New file: `QuickColourHierarchyModels.cs`
+
+```csharp
+using System.Collections.ObjectModel;
+using System.Windows.Media;
+
+namespace MicroEng.Navisworks.QuickColour
+{
+    public sealed class QuickColourHierarchyTypeRow : NotifyBase
+    {
+        private bool _enabled = true;
+        private string _value = "";
+        private int _count;
+        private Color _color = Colors.LightGray;
+        private string _colorHex = "#D3D3D3";
+
+        public bool Enabled { get => _enabled; set => SetField(ref _enabled, value); }
+        public string Value { get => _value; set => SetField(ref _value, value ?? ""); }
+        public int Count { get => _count; set => SetField(ref _count, value); }
+
+        public Color Color
+        {
+            get => _color;
+            set
+            {
+                if (SetField(ref _color, value))
+                {
+                    _colorHex = QuickColourPalette.ToHex(value);
+                    OnPropertyChanged(nameof(ColorHex));
+                    OnPropertyChanged(nameof(SwatchBrush));
+                }
+            }
+        }
+
+        public string ColorHex
+        {
+            get => _colorHex;
+            set
+            {
+                if (QuickColourPalette.TryParseHex(value, out var parsed))
+                {
+                    _color = parsed;
+                    _colorHex = QuickColourPalette.ToHex(parsed);
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(Color));
+                    OnPropertyChanged(nameof(SwatchBrush));
+                }
+                else
+                {
+                    _colorHex = QuickColourPalette.ToHex(_color);
+                    OnPropertyChanged();
+                }
+            }
+        }
+
+        public System.Windows.Media.Brush SwatchBrush => new SolidColorBrush(Color);
+    }
+
+    public sealed class QuickColourHierarchyGroup : NotifyBase
+    {
+        private bool _enabled = true;
+        private string _value = "";
+        private int _count;
+        private Color _baseColor = Colors.LightGreen;
+        private string _baseHex = "#90EE90";
+
+        public bool Enabled { get => _enabled; set => SetField(ref _enabled, value); }
+        public string Value { get => _value; set => SetField(ref _value, value ?? ""); }
+        public int Count { get => _count; set => SetField(ref _count, value); }
+
+        public Color BaseColor
+        {
+            get => _baseColor;
+            set
+            {
+                if (SetField(ref _baseColor, value))
+                {
+                    _baseHex = QuickColourPalette.ToHex(value);
+                    OnPropertyChanged(nameof(BaseHex));
+                    OnPropertyChanged(nameof(BaseSwatchBrush));
+                }
+            }
+        }
+
+        public string BaseHex
+        {
+            get => _baseHex;
+            set
+            {
+                if (QuickColourPalette.TryParseHex(value, out var parsed))
+                {
+                    _baseColor = parsed;
+                    _baseHex = QuickColourPalette.ToHex(parsed);
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(BaseColor));
+                    OnPropertyChanged(nameof(BaseSwatchBrush));
+                }
+                else
+                {
+                    _baseHex = QuickColourPalette.ToHex(_baseColor);
+                    OnPropertyChanged();
+                }
+            }
+        }
+
+        public ObservableCollection<QuickColourHierarchyTypeRow> Types { get; } =
+            new ObservableCollection<QuickColourHierarchyTypeRow>();
+
+        public int TypeCount => Types?.Count ?? 0;
+
+        public System.Windows.Media.Brush BaseSwatchBrush => new SolidColorBrush(BaseColor);
+    }
+}
+```
+
+---
+
+### 3.2 Update: `QuickColourPalette.cs` — add shade generation
+
+Add these methods (near the bottom of the file):
+
+```csharp
+public static List<Color> GenerateShades(Color baseColor, int count, QuickColourPaletteStyle style, double spread01)
+{
+    // spread01 is 0..1; typical usable range 0.2..0.7
+    if (count <= 0) return new List<Color>();
+
+    // Convert to HSL, vary Lightness.
+    RgbToHsl(baseColor, out var h, out var s, out var l);
+
+    // Pastel: cap saturation lower.
+    if (style == QuickColourPaletteStyle.Pastel)
+    {
+        s = System.Math.Min(s, 0.35);
+        l = System.Math.Max(l, 0.70);
+    }
+    else
+    {
+        s = System.Math.Max(s, 0.60);
+    }
+
+    var minL = Clamp01(l - spread01 * 0.5);
+    var maxL = Clamp01(l + spread01 * 0.5);
+
+    // Keep within sensible bounds (avoid too dark/light)
+    minL = System.Math.Max(minL, 0.18);
+    maxL = System.Math.Min(maxL, 0.92);
+
+    var shades = new List<Color>(count);
+
+    if (count == 1)
+    {
+        shades.Add(HslToRgb(h, s, l));
+        return shades;
+    }
+
+    for (int i = 0; i < count; i++)
+    {
+        double t = (double)i / (count - 1);
+        double li = minL + (maxL - minL) * t;
+        shades.Add(HslToRgb(h, s, li));
+    }
+
+    return shades;
+}
+
+private static void RgbToHsl(Color c, out double h, out double s, out double l)
+{
+    double r = c.R / 255.0;
+    double g = c.G / 255.0;
+    double b = c.B / 255.0;
+
+    double max = System.Math.Max(r, System.Math.Max(g, b));
+    double min = System.Math.Min(r, System.Math.Min(g, b));
+    l = (max + min) * 0.5;
+
+    if (System.Math.Abs(max - min) < 1e-9)
+    {
+        h = 0;
+        s = 0;
+        return;
+    }
+
+    double d = max - min;
+    s = l > 0.5 ? d / (2.0 - max - min) : d / (max + min);
+
+    if (System.Math.Abs(max - r) < 1e-9)
+        h = (g - b) / d + (g < b ? 6 : 0);
+    else if (System.Math.Abs(max - g) < 1e-9)
+        h = (b - r) / d + 2;
+    else
+        h = (r - g) / d + 4;
+
+    h /= 6.0;
+}
+
+private static Color HslToRgb(double h, double s, double l)
+{
+    double r, g, b;
+
+    if (s == 0)
+    {
+        r = g = b = l;
+    }
+    else
+    {
+        double q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        double p = 2 * l - q;
+        r = HueToRgb(p, q, h + 1.0 / 3.0);
+        g = HueToRgb(p, q, h);
+        b = HueToRgb(p, q, h - 1.0 / 3.0);
+    }
+
+    return Color.FromRgb(
+        (byte)System.Math.Round(r * 255),
+        (byte)System.Math.Round(g * 255),
+        (byte)System.Math.Round(b * 255));
+}
+
+private static double HueToRgb(double p, double q, double t)
+{
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1.0 / 6.0) return p + (q - p) * 6 * t;
+    if (t < 1.0 / 2.0) return q;
+    if (t < 2.0 / 3.0) return p + (q - p) * (2.0 / 3.0 - t) * 6;
+    return p;
+}
+```
+
+This is what gives you “shades of green” from a green base colour.
+
+---
+
+### 3.3 Update: `QuickColourNavisworksService.cs` — add hierarchy apply
+
+Add this method:
+
+```csharp
+public int ApplyByHierarchy(
+    Document doc,
+    string l1Category, string l1Property,
+    string l2Category, string l2Property,
+    IEnumerable<QuickColourHierarchyGroup> groups,
+    QuickColourScope scope,
+    bool permanent,
+    bool createSearchSets,
+    bool createSnapshots,
+    string folderPath,
+    string profileName,
+    Action<string> log)
+{
+    if (doc == null) throw new ArgumentNullException(nameof(doc));
+
+    var enabledGroups = (groups ?? Enumerable.Empty<QuickColourHierarchyGroup>())
+        .Where(g => g != null && g.Enabled)
+        .ToList();
+
+    if (enabledGroups.Count == 0)
+    {
+        log?.Invoke("QuickColour(Hierarchy): no enabled groups.");
+        return 0;
+    }
+
+    HashSet<Guid> scopeIds = null;
+    if (scope == QuickColourScope.CurrentSelection)
+    {
+        var sel = doc.CurrentSelection?.SelectedItems;
+        if (sel != null && sel.Count > 0)
+            scopeIds = new HashSet<Guid>(sel.Select(i => i?.InstanceGuid ?? Guid.Empty));
+    }
+
+    GroupItem rootFolder = null;
+    if ((createSearchSets || createSnapshots) && !string.IsNullOrWhiteSpace(folderPath))
+    {
+        var full = CombinePath(folderPath, profileName);
+        rootFolder = EnsureFolder(doc, full);
+    }
+
+    int totalColored = 0;
+
+    foreach (var group in enabledGroups)
+    {
+        var enabledTypes = group.Types.Where(t => t != null && t.Enabled).ToList();
+        if (enabledTypes.Count == 0) continue;
+
+        GroupItem groupFolder = rootFolder;
+        if (rootFolder != null)
+        {
+            groupFolder = EnsureFolder(doc, CombinePath($"{folderPath}/{profileName}", SanitizeName(group.Value)));
+        }
+
+        foreach (var typeRow in enabledTypes)
+        {
+            var search = new Search();
+            search.Selection.SelectAll();
+            search.SearchConditions.Add(
+                SearchCondition.HasPropertyByDisplayName(l1Category, l1Property)
+                    .EqualValue(new VariantData(group.Value ?? "")));
+            search.SearchConditions.Add(
+                SearchCondition.HasPropertyByDisplayName(l2Category, l2Property)
+                    .EqualValue(new VariantData(typeRow.Value ?? "")));
+
+            var results = search.FindAll(doc, false);
+            if (scopeIds != null) results = FilterByIds(results, scopeIds);
+            if (results == null || results.Count == 0) continue;
+
+            var navisColor = QuickColourPalette.ToNavisworksColor(typeRow.Color);
+            if (permanent) doc.Models.OverridePermanentColor(results, navisColor);
+            else doc.Models.OverrideTemporaryColor(results, navisColor);
+
+            totalColored += results.Count;
+
+            if (groupFolder != null)
+            {
+                var baseName = SanitizeName($"{l2Property} = {TrimForName(typeRow.Value)}");
+
+                if (createSearchSets)
+                {
+                    var ss = new SelectionSet(search)
+                    {
+                        DisplayName = MakeUniqueName(groupFolder, baseName)
+                    };
+                    groupFolder.Children.AddCopy(ss);
+                }
+
+                if (createSnapshots)
+                {
+                    var snap = new SelectionSet(results)
+                    {
+                        DisplayName = MakeUniqueName(groupFolder, baseName + " (Snapshot)")
+                    };
+                    groupFolder.Children.AddCopy(snap);
+                }
+            }
+        }
+    }
+
+    return totalColored;
+}
+```
+
+This reuses your existing internal helpers: `EnsureFolder`, `FilterByIds`, `SanitizeName`, `MakeUniqueName`, etc.
+
+---
+
+### 3.4 Update: `QuickColourControl.xaml` — add Hierarchy tab
+
+Add a new TabItem (third tab) called **Hierarchy Builder**.
+(Keep fonts and row height consistent with Data Scraper; use RowDetails for types.)
+
+I’m not pasting the entire XAML again—Codex should insert this TabItem below your existing tabs:
+
+* Fields: L1 pick, L2 pick (two “Pick…” buttons)
+* Shade spread slider:
+
+  * `TickPlacement="Both" IsSnapToTickEnabled="True" TickFrequency="10"`
+* Categories DataGrid with RowDetails nested Types grid
+* Buttons: Load Hierarchy / Auto Base / Regenerate Shades / Apply Temporary / Generate Permanent
+
+---
+
+### 3.5 Update: `QuickColourControl.xaml.cs` — add hierarchy build + shade assignment
+
+Add fields/bindings:
+
+* `HierarchyL1Category`, `HierarchyL1Property`, `HierarchyL2Category`, `HierarchyL2Property`
+* `ObservableCollection<QuickColourHierarchyGroup> HierarchyGroups`
+* `ShadeSpreadText` or `ShadeSpreadValue` double (0..100)
+
+Implement:
+
+* Pick buttons for L1 and L2 (reuse `PropertyPickerWindow` like you already do)
+* LoadHierarchy_Click:
+
+  * scan RawEntries for the two property keys
+  * build hierarchy groups
+* AutoAssignBaseColours:
+
+  * assign base colour per group
+* RegenerateShades:
+
+  * for each group, generate `N` shades for its types and apply
+
+Finally, apply actions:
+
+* Apply temporary:
+
+  * call `_service.ApplyByHierarchy(... permanent:false ...)`
+* Generate profile:
+
+  * call `_service.ApplyByHierarchy(... permanent:true ... + sets ...)`
+
+---
+
+## 4) Codex prompt (paste as-is)
+
+```text
+Implement “Hierarchy Builder” inside Quick Colour.
+
+Goal: let user pick two properties (Level1 and Level2), e.g. Revit “Category > Type”. Each Level1 group has a base colour, and each Level2 value gets a shade of that base (same hue, varying lightness). User can manually set base colour per group (e.g., make Doors green) and types automatically become shades of that green.
+
+Work order:
+
+1) Add new models:
+- Create QuickColourHierarchyModels.cs with QuickColourHierarchyGroup and QuickColourHierarchyTypeRow (INotifyPropertyChanged, base colour hex editable, swatch brush).
+
+2) Add shade generation:
+- Update QuickColourPalette.cs with GenerateShades(baseColor, n, style, spread01) using HSL conversion. Spread is controlled by UI slider.
+
+3) Add hierarchy apply:
+- Update QuickColourNavisworksService.cs with ApplyByHierarchy(...) which:
+  - builds Search with two ANDed conditions (Level1 equals + Level2 equals)
+  - applies temporary/permanent colour overrides
+  - optionally creates Search Sets and/or Snapshot sets
+  - creates folder structure: Folder/ProfileName/Level1Value/(sets for each Level2)
+
+4) UI:
+- In QuickColourControl.xaml, add a new tab “Hierarchy Builder”:
+  - Pick Level1 property + Pick Level2 property (use PropertyPickerWindow)
+  - Palette style dropdown (Deep/Pastel)
+  - Slider “Shade spread” (10–90%) with TickPlacement="Both", snap to ticks
+  - Buttons: Load Hierarchy, Auto Assign Base Colours, Regenerate Type Shades
+  - DataGrid for groups (FontSize=12, RowHeight~26) showing:
+    Enabled, BaseColor swatch, BaseHex, Level1 value, item count, type count
+    Use RowDetailsTemplate with nested DataGrid for types:
+      Enabled, shade swatch, shade hex, Level2 value, count
+  - Buttons: Apply Temporary (Hierarchy), Clear Temporary, Generate Permanent Profile (Hierarchy), Reset Permanent
+  - Output controls: folder path + profile name + Create Search Sets + Create Snapshots
+
+5) Code-behind:
+- In QuickColourControl.xaml.cs add:
+  - HierarchyGroups collection + bindings
+  - handlers:
+    - Pick L1/L2 property (PropertyPickerWindow)
+    - LoadHierarchy: scan DataScraper RawEntries for L1 and L2 keys, join by ItemPath, group by L1 then L2, counts
+    - AutoAssignBaseColours: assign base colors to groups using palette
+    - RegenerateShades: for each group, assign shades to types using GenerateShades (based on group.BaseColor, type count, palette style, spread slider)
+    - ApplyTemporaryHierarchy: call service.ApplyByHierarchy(permanent:false)
+    - GeneratePermanentHierarchy: call service.ApplyByHierarchy(permanent:true) with set creation options
+
+Constraints:
+- Keep Navisworks API calls on UI thread.
+- Keep UI compact like Data Scraper grid (FontSize 12, RowHeight ~26, no huge spacing).
+- Shade updates should be fast and not require recomputing hierarchy unless properties changed.
+- Build must succeed.
+
+Deliverables: updated Quick Colour tab + new files compile and work.
+```
+
+---
+
+## Practical note about “green for a Category”
+
+With this approach, you get exactly what you described:
+
+* Load Category→Type hierarchy
+* Find the Category row “Doors”
+* Set its BaseHex to `#00A000` (or any green you want)
+* Click “Regenerate Type Shades”
+* All door types become shades of green, while other categories can remain their own base colours or be disabled.
+
+---
+
+If you want an even more “targeted control” feature, the next incremental upgrade is a **“Single Hue Mode”** toggle:
+
+* User picks one hue (green),
+* Each category gets a different lightness band of the same hue,
+* Types get sub-shades inside that band.
+  That produces a very coherent look for discipline-based runs (all electrical = blue hues, etc.).
+
+
+
+Below is the **“targeted control”** feature I meant: **Hue‑Locked Bands** (aka **Single Hue Mode**) for the **Hierarchy Builder (Category → Type)**.
+
+It lets a user say:
+
+* “I want this whole profile to be **green‑family**,”
+* but still keep **high control**:
+
+  * each **Category** gets its own **green band** (dark→light separation),
+  * each **Type** inside the Category gets **sub‑shades** within that band,
+  * and the user can control “how different” categories and types look using sliders.
+
+This produces consistent, professional-looking results and avoids random palettes while still differentiating types clearly.
+
+---
+
+# What you add to the Hierarchy Builder UI
+
+### New controls (top of Hierarchy Builder tab)
+
+1. **Checkbox:** `Lock hue (single hue mode)`
+2. **Hue colour:** swatch + hex textbox + “Pick…” button
+
+   * user enters `#00A000` (green) or picks via a color dialog
+3. **Category contrast slider (separation between categories):**
+
+   * 20–90%
+   * TickPlacement="Both"
+4. Reuse your existing **Type shade spread slider**
+
+   * controls variation within each category’s band
+
+### Behaviour (important)
+
+* When **Lock hue = ON**:
+
+  * Category base colours are **auto-generated** from the single hue (distributed across lightness bands).
+  * Types become shades within their category’s band.
+* When **Lock hue = OFF**:
+
+  * You revert to your existing logic: categories can be different hues, types shade from the category base colour.
+
+---
+
+# Code: Palette utilities you need
+
+## Patch `QuickColourPalette.cs`
+
+Add these **public** helpers to support hue-locked generation (paste inside the `QuickColourPalette` class). They reuse your existing private HSL conversion functions (`RgbToHsl`, `HslToRgb`, `Clamp01`) you already added for shade generation.
+
+```csharp
+public static double GetHue01(Color c)
+{
+    RgbToHsl(c, out var h, out var s, out var l);
+    return h; // 0..1
+}
+
+public static double GetRecommendedSaturation(QuickColourPaletteStyle style)
+{
+    // Pastel keeps saturation low; Deep keeps it high.
+    return style == QuickColourPaletteStyle.Pastel ? 0.35 : 0.78;
+}
+
+public static (double minL, double maxL) ComputeCategoryLightnessRange(QuickColourPaletteStyle style, double contrast01)
+{
+    contrast01 = Clamp01(contrast01);
+
+    // Deep has broader range; Pastel stays bright.
+    double center = style == QuickColourPaletteStyle.Pastel ? 0.78 : 0.55;
+    double maxHalf = style == QuickColourPaletteStyle.Pastel ? 0.18 : 0.33;
+
+    double half = maxHalf * contrast01;
+
+    double minL = Clamp01(center - half);
+    double maxL = Clamp01(center + half);
+
+    // keep within sensible bounds (avoid too dark/too bright)
+    minL = System.Math.Max(minL, 0.18);
+    maxL = System.Math.Min(maxL, 0.92);
+
+    if (maxL < minL)
+    {
+        var t = minL; minL = maxL; maxL = t;
+    }
+
+    return (minL, maxL);
+}
+
+public static Color FromHsl01(double h01, double s01, double l01)
+{
+    return HslToRgb(Clamp01(h01), Clamp01(s01), Clamp01(l01));
+}
+
+public static List<Color> GenerateHslRamp(double h01, double s01, double minL, double maxL, int count)
+{
+    if (count <= 0) return new List<Color>();
+
+    minL = Clamp01(minL);
+    maxL = Clamp01(maxL);
+    if (maxL < minL)
+    {
+        var t = minL; minL = maxL; maxL = t;
+    }
+
+    var list = new List<Color>(count);
+
+    if (count == 1)
+    {
+        list.Add(FromHsl01(h01, s01, (minL + maxL) / 2.0));
+        return list;
+    }
+
+    for (int i = 0; i < count; i++)
+    {
+        double t = (double)i / (count - 1);
+        double l = minL + (maxL - minL) * t;
+        list.Add(FromHsl01(h01, s01, l));
+    }
+
+    return list;
+}
+```
+
+---
+
+# Code: Hierarchy Builder logic (Hue‑Locked Bands)
+
+## Patch `QuickColourControl.xaml.cs` (Hierarchy section)
+
+Add new bindable properties + the core “apply hierarchy colours” method.
+
+### 1) Add properties
+
+```csharp
+// --- Targeted control / single-hue mode ---
+
+private bool _hierarchySingleHueMode;
+public bool HierarchySingleHueMode
+{
+    get => _hierarchySingleHueMode;
+    set
+    {
+        _hierarchySingleHueMode = value;
+        OnPropertyChanged(nameof(HierarchySingleHueMode));
+        OnPropertyChanged(nameof(HierarchyHueSwatchBrush));
+        ApplyHierarchyColours(); // recolour instantly (cheap)
+    }
+}
+
+private string _hierarchyHueHex = "#00A000"; // default green
+public string HierarchyHueHex
+{
+    get => _hierarchyHueHex;
+    set
+    {
+        _hierarchyHueHex = value ?? "#00A000";
+        OnPropertyChanged(nameof(HierarchyHueHex));
+        OnPropertyChanged(nameof(HierarchyHueSwatchBrush));
+        if (HierarchySingleHueMode)
+            ApplyHierarchyColours();
+    }
+}
+
+private double _hierarchyCategoryContrastPct = 70; // 20..90 recommended
+public double HierarchyCategoryContrastPct
+{
+    get => _hierarchyCategoryContrastPct;
+    set
+    {
+        _hierarchyCategoryContrastPct = value;
+        OnPropertyChanged(nameof(HierarchyCategoryContrastPct));
+        if (HierarchySingleHueMode)
+            ApplyHierarchyColours();
+    }
+}
+
+public System.Windows.Media.Brush HierarchyHueSwatchBrush
+{
+    get
+    {
+        var c = ParseHueColor();
+        return new System.Windows.Media.SolidColorBrush(c);
+    }
+}
+
+private System.Windows.Media.Color ParseHueColor()
+{
+    return QuickColourPalette.TryParseHex(HierarchyHueHex, out var c)
+        ? c
+        : System.Windows.Media.Colors.Green;
+}
+```
+
+### 2) Add a Hue “Pick…” handler (optional but very usable)
+
+```csharp
+private void PickHierarchyHue_Click(object sender, RoutedEventArgs e)
+{
+    try
+    {
+        using (var dlg = new System.Windows.Forms.ColorDialog())
+        {
+            dlg.FullOpen = true;
+
+            if (QuickColourPalette.TryParseHex(HierarchyHueHex, out var current))
+                dlg.Color = System.Drawing.Color.FromArgb(current.R, current.G, current.B);
+
+            if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                HierarchyHueHex = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        StatusText = "Pick hue failed: " + ex.Message;
+    }
+}
+```
+
+### 3) Implement the core recolouring method
+
+This is the key piece. Call this after:
+
+* LoadHierarchy
+* AutoAssignBaseColours (if hue lock is OFF)
+* RegenerateTypeShades
+* toggling hue lock / changing sliders / changing hue hex
+
+```csharp
+private double GetTypeSpread01()
+{
+    // Reuse your existing hierarchy “Shade spread” slider property.
+    // If yours is stored as %: 0..100
+    // Replace HierarchyShadeSpreadPct with your actual property name.
+    var pct = HierarchyShadeSpreadPct; 
+    var v = pct / 100.0;
+    if (v < 0) v = 0;
+    if (v > 1) v = 1;
+    return v;
+}
+
+private static double Clamp01(double x)
+{
+    if (x < 0) return 0;
+    if (x > 1) return 1;
+    return x;
+}
+
+private void ApplyHierarchyColours()
+{
+    if (HierarchyGroups == null || HierarchyGroups.Count == 0)
+        return;
+
+    var style = GetPaletteStyle();
+    var typeUsage = System.Math.Max(0.15, GetTypeSpread01()); // always some variation
+
+    // If NOT single-hue mode, keep your existing behaviour:
+    // - group.BaseColor is whatever it is (auto palette or user edit)
+    // - types = GenerateShades(group.BaseColor, ...)
+    if (!HierarchySingleHueMode)
+    {
+        foreach (var g in HierarchyGroups.Where(x => x != null && x.Enabled))
+        {
+            var types = g.Types
+                .Where(t => t != null && t.Enabled)
+                .OrderByDescending(t => t.Count)
+                .ThenBy(t => t.Value)
+                .ToList();
+
+            if (types.Count == 0) continue;
+
+            var shades = QuickColourPalette.GenerateShades(g.BaseColor, types.Count, style, typeUsage);
+            for (int i = 0; i < types.Count; i++)
+                types[i].Color = shades[i];
+        }
+        return;
+    }
+
+    // --- Single hue mode ---
+    var hueColor = ParseHueColor();
+    var hue01 = QuickColourPalette.GetHue01(hueColor);
+    var sat = QuickColourPalette.GetRecommendedSaturation(style);
+
+    var contrast01 = Clamp01(HierarchyCategoryContrastPct / 100.0);
+    var (minL, maxL) = QuickColourPalette.ComputeCategoryLightnessRange(style, contrast01);
+
+    // Stable ordering: biggest categories first, then name
+    var groups = HierarchyGroups
+        .Where(g => g != null && g.Enabled)
+        .OrderByDescending(g => g.Count)
+        .ThenBy(g => g.Value)
+        .ToList();
+
+    int n = groups.Count;
+    if (n == 0) return;
+
+    // Split global lightness range into N bands (one band per category)
+    double bandWidth = (maxL - minL) / n;
+    double pad = bandWidth * 0.08; // spacing so adjacent categories don’t blend too much
+
+    for (int i = 0; i < n; i++)
+    {
+        var g = groups[i];
+
+        double bandMin = minL + bandWidth * i + pad;
+        double bandMax = minL + bandWidth * (i + 1) - pad;
+
+        // Safety in case too few categories / too small range
+        if (bandMax <= bandMin)
+        {
+            bandMin = minL + bandWidth * i;
+            bandMax = minL + bandWidth * (i + 1);
+        }
+
+        double baseL = (bandMin + bandMax) / 2.0;
+
+        // Category base colour (same hue, band-specific lightness)
+        g.BaseColor = QuickColourPalette.FromHsl01(hue01, sat, baseL);
+
+        // Types get shades inside the category band
+        var types = g.Types
+            .Where(t => t != null && t.Enabled)
+            .OrderByDescending(t => t.Count)
+            .ThenBy(t => t.Value)
+            .ToList();
+
+        if (types.Count == 0) continue;
+
+        // Use only part of the band depending on typeUsage
+        double half = ((bandMax - bandMin) / 2.0) * typeUsage;
+        double effMin = System.Math.Max(bandMin, baseL - half);
+        double effMax = System.Math.Min(bandMax, baseL + half);
+
+        var ramp = QuickColourPalette.GenerateHslRamp(hue01, sat, effMin, effMax, types.Count);
+        for (int t = 0; t < types.Count; t++)
+            types[t].Color = ramp[t];
+    }
+}
+```
+
+> Important: this approach guarantees **Category separation** (each category lives in its own lightness band), while Types are still distinct within that band. That’s the “targeted control” part.
+
+---
+
+# XAML: Add the controls (Hierarchy Builder tab)
+
+In your Hierarchy Builder options row (the same row where you have palette + shade spread), add something like:
+
+```xml
+<CheckBox Content="Lock hue (single hue mode)"
+          IsChecked="{Binding HierarchySingleHueMode, Mode=TwoWay}"
+          Margin="0,0,12,0" />
+
+<Border Width="18" Height="18" CornerRadius="2"
+        BorderBrush="Gray" BorderThickness="1"
+        Background="{Binding HierarchyHueSwatchBrush}"
+        Margin="0,0,6,0" />
+
+<TextBox Width="90"
+         Text="{Binding HierarchyHueHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+         IsEnabled="{Binding HierarchySingleHueMode}"
+         Margin="0,0,6,0" />
+
+<Button Content="Pick…"
+        Click="PickHierarchyHue_Click"
+        IsEnabled="{Binding HierarchySingleHueMode}"
+        Margin="0,0,14,0" />
+
+<TextBlock Text="Category contrast:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+
+<Slider Width="170"
+        Minimum="20" Maximum="90"
+        TickFrequency="10"
+        IsSnapToTickEnabled="True"
+        TickPlacement="Both"
+        Value="{Binding HierarchyCategoryContrastPct, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+        IsEnabled="{Binding HierarchySingleHueMode}"
+        Margin="0,0,14,0" />
+```
+
+You should call `ApplyHierarchyColours()` after **LoadHierarchy**, and after any “Regenerate shades” button click.
+
+---
+
+# Codex prompt (paste as a single request)
+
+```text
+Implement “Targeted Control: Hue-Locked Bands (Single Hue Mode)” for Quick Colour → Hierarchy Builder.
+
+Requirements:
+- Add a checkbox “Lock hue (single hue mode)”.
+- When enabled: ALL Level1 categories use the SAME hue, distributed across lightness bands (category contrast slider controls separation). Each Level2 type gets shades within its category band (reuse existing type shade spread slider).
+- Add Hue controls: swatch + hex textbox + Pick button (ColorDialog OK).
+- Add Category contrast slider 20–90%, TickPlacement="Both", snap to ticks.
+- When lock hue is OFF: keep current behavior (categories may be different hues; types shade from each category base color).
+
+Code changes:
+1) QuickColourPalette.cs:
+   - Add GetHue01(Color), GetRecommendedSaturation(style), ComputeCategoryLightnessRange(style, contrast01), FromHsl01(h,s,l), GenerateHslRamp(h,s,minL,maxL,count).
+2) QuickColourControl.xaml:
+   - Add the new controls in Hierarchy Builder options row; enable Hue/Contrast only when lock hue is enabled.
+3) QuickColourControl.xaml.cs:
+   - Add bindable properties: HierarchySingleHueMode, HierarchyHueHex, HierarchyCategoryContrastPct, HierarchyHueSwatchBrush.
+   - Add PickHierarchyHue_Click using ColorDialog.
+   - Implement ApplyHierarchyColours():
+     - if lock hue OFF: types = GenerateShades(group.BaseColor, ...)
+     - if lock hue ON:
+        - compute hue01 from HierarchyHueHex, saturation from style
+        - compute (minL,maxL) from contrast slider
+        - order categories by Count desc then Value
+        - split into N bands, set group.BaseColor at band center
+        - types use GenerateHslRamp within band effective min/max derived from type spread
+   - Call ApplyHierarchyColours() after LoadHierarchy and when hue/contrast/spread toggles change.
+
+Keep DataGrid styling consistent with Data Scraper (FontSize ~12, RowHeight ~26).
+Solution must build.
+```
+
+---
+
+## How this satisfies your “green Category → green Type shades” goal
+
+* If the user wants **one category** to be green and its types shades of green: keep **Lock hue OFF**, edit that category’s BaseHex to green, click “Regenerate shades”.
+* If the user wants the **entire hierarchy** to be green-family (but still separated): turn **Lock hue ON**, set HueHex to green, tune Category Contrast + Type Spread.
+
+If you want the next step after this (still “targeted control” but even more powerful): **Hue Groups** (Doors+Windows share Green; Pipes share Blue; etc.). That’s a small extension once this single-hue foundation is in.
+
+
+Below is a clean, **usable Hue Groups** implementation that builds directly on the **Hierarchy Builder (Category → Type)** + your **Targeted Control (single‑hue bands)** work.
+
+Hue Groups lets users do things like:
+
+* **Architecture** = green family
+* **Mechanical** = blue family
+* **Electrical** = purple family
+* **Fire** = red family
+
+…and then assign each **Category** (Level 1) to a Hue Group so all its **Types** (Level 2) become shades of that family. This gives you targeted control without needing hundreds of manual colour edits.
+
+---
+
+# What “Hue Groups” means in your tool
+
+### Concept
+
+* User defines **Hue Groups** (Name + Hue colour).
+* Each **Category row** chooses a Hue Group (dropdown).
+* Colour algorithm:
+
+  * Categories in the same Hue Group get **lightness bands** (so they’re still distinguishable).
+  * Types within a Category get **shades** inside that category’s band.
+* Optional (highly recommended): **Lock Base Colour** per Category
+
+  * If the user wants “Doors must be *this* green”, they set base hex and lock it.
+  * Hue group colouring won’t overwrite locked categories; it will still shade Types from the locked base colour.
+
+This “lock” solves the real-world need for *targeted control*.
+
+---
+
+# UI changes (Hierarchy Builder tab)
+
+### Add an Expander: **Hue Groups**
+
+* DataGrid: Enabled | Swatch | Group Name | Hue Hex
+* Buttons: Add Group, Remove Group, Reset Defaults
+
+### Add columns to the **Category grid**
+
+* **Hue Group** (dropdown)
+* **Lock** (checkbox)
+* Base colour hex remains editable, but if Lock is off it will be recalculated when you apply/regenerate.
+
+### Add a toggle row:
+
+* Checkbox: **Use Hue Groups**
+* (Optional) Checkbox: **Create set folders by Hue Group** (only affects where sets are created)
+
+---
+
+# Code you need to implement
+
+## 1) New file: `QuickColourHueGroupModels.cs`
+
+```csharp
+using System.Windows.Media;
+
+namespace MicroEng.Navisworks.QuickColour
+{
+    public sealed class QuickColourHueGroup : NotifyBase
+    {
+        private bool _enabled = true;
+        private string _name = "Architecture";
+        private Color _hueColor = Colors.Green;
+        private string _hueHex = "#00A000";
+
+        public bool Enabled
+        {
+            get => _enabled;
+            set => SetField(ref _enabled, value);
+        }
+
+        public string Name
+        {
+            get => _name;
+            set => SetField(ref _name, (value ?? "").Trim());
+        }
+
+        public string HueHex
+        {
+            get => _hueHex;
+            set
+            {
+                var s = (value ?? "").Trim();
+                if (QuickColourPalette.TryParseHex(s, out var c))
+                {
+                    _hueColor = c;
+                    _hueHex = QuickColourPalette.ToHex(c);
+                    OnPropertyChanged(nameof(HueHex));
+                    OnPropertyChanged(nameof(HueColor));
+                    OnPropertyChanged(nameof(SwatchBrush));
+                }
+                else
+                {
+                    // keep old, just normalize displayed value
+                    _hueHex = _hueHex ?? "#00A000";
+                    OnPropertyChanged(nameof(HueHex));
+                }
+            }
+        }
+
+        public Color HueColor => _hueColor;
+
+        public Brush SwatchBrush => new SolidColorBrush(_hueColor);
+    }
+}
+```
+
+---
+
+## 2) Patch: `QuickColourHierarchyModels.cs`
+
+Add two properties to `QuickColourHierarchyGroup`:
+
+* `HueGroupName` (selected group)
+* `LockBaseColor` (UseCustomBaseColor)
+
+Also add a safe way to set computed base colours without marking the row “locked”.
+
+```csharp
+// inside QuickColourHierarchyGroup
+
+private string _hueGroupName = "Architecture";
+public string HueGroupName
+{
+    get => _hueGroupName;
+    set => SetField(ref _hueGroupName, (value ?? "").Trim());
+}
+
+private bool _useCustomBaseColor;
+public bool UseCustomBaseColor
+{
+    get => _useCustomBaseColor;
+    set => SetField(ref _useCustomBaseColor, value);
+}
+
+private bool _suppressCustomMark;
+
+public new Color BaseColor
+{
+    get => _baseColor;
+    set
+    {
+        if (SetField(ref _baseColor, value))
+        {
+            _baseHex = QuickColourPalette.ToHex(value);
+            OnPropertyChanged(nameof(BaseHex));
+            OnPropertyChanged(nameof(BaseSwatchBrush));
+
+            if (!_suppressCustomMark)
+            {
+                UseCustomBaseColor = true;
+            }
+        }
+    }
+}
+
+public new string BaseHex
+{
+    get => _baseHex;
+    set
+    {
+        if (QuickColourPalette.TryParseHex(value, out var parsed))
+        {
+            _suppressCustomMark = true;
+            try
+            {
+                _baseColor = parsed;
+                _baseHex = QuickColourPalette.ToHex(parsed);
+                OnPropertyChanged(nameof(BaseHex));
+                OnPropertyChanged(nameof(BaseColor));
+                OnPropertyChanged(nameof(BaseSwatchBrush));
+            }
+            finally { _suppressCustomMark = false; }
+
+            UseCustomBaseColor = true;
+        }
+        else
+        {
+            _baseHex = QuickColourPalette.ToHex(_baseColor);
+            OnPropertyChanged(nameof(BaseHex));
+        }
+    }
+}
+
+/// <summary>Used by the Hue Groups algorithm; does not mark row as custom/locked.</summary>
+internal void SetComputedBaseColor(Color computed)
+{
+    _suppressCustomMark = true;
+    try
+    {
+        _baseColor = computed;
+        _baseHex = QuickColourPalette.ToHex(computed);
+        OnPropertyChanged(nameof(BaseHex));
+        OnPropertyChanged(nameof(BaseColor));
+        OnPropertyChanged(nameof(BaseSwatchBrush));
+    }
+    finally { _suppressCustomMark = false; }
+
+    UseCustomBaseColor = false;
+}
+```
+
+> If your `BaseColor`/`BaseHex` are not `virtual`, you’ll need to integrate these changes directly into the original properties (not `new`). Codex can handle this refactor—just make it apply cleanly.
+
+---
+
+## 3) Patch: `QuickColourControl.xaml` (Hierarchy Builder tab)
+
+### Add “Use Hue Groups” + group editor
+
+Insert this near your existing hierarchy options row:
+
+```xml
+<CheckBox Content="Use Hue Groups"
+          IsChecked="{Binding HierarchyUseHueGroups, Mode=TwoWay}"
+          Margin="0,0,12,0"/>
+
+<Expander Header="Hue Groups" IsExpanded="False"
+          Margin="0,8,0,8"
+          Visibility="{Binding HierarchyUseHueGroups, Converter={StaticResource BoolToVisibilityConverter}}">
+    <StackPanel>
+        <DataGrid ItemsSource="{Binding HueGroups}"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False"
+                  RowHeight="26"
+                  FontSize="12"
+                  GridLinesVisibility="All">
+            <DataGrid.Columns>
+                <DataGridCheckBoxColumn Header="On" Binding="{Binding Enabled}" Width="42"/>
+                <DataGridTemplateColumn Header="Hue" Width="70">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border Background="{Binding SwatchBrush}"
+                                    BorderBrush="Gray" BorderThickness="1"
+                                    Height="16" Width="52" CornerRadius="2"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Group" Binding="{Binding Name}" Width="160"/>
+                <DataGridTextColumn Header="Hex" Binding="{Binding HueHex, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+            <Button Content="Add Group" Width="110" Margin="0,0,8,0" Click="AddHueGroup_Click"/>
+            <Button Content="Remove Selected" Width="140" Margin="0,0,8,0" Click="RemoveHueGroup_Click"/>
+            <Button Content="Reset Defaults" Width="130" Click="ResetHueGroups_Click"/>
+        </StackPanel>
+    </StackPanel>
+</Expander>
+```
+
+You’ll need `BoolToVisibilityConverter`. If you don’t already have one in your project, add a simple one (Codex can add it in a `Converters` folder). If you want to avoid converters entirely, just leave the expander always visible and disable it when `HierarchyUseHueGroups=false`.
+
+### Add columns to your Category DataGrid
+
+Add these columns in your **Category grid**:
+
+**(A) Lock column**
+
+```xml
+<DataGridCheckBoxColumn Header="Lock" Binding="{Binding UseCustomBaseColor}" Width="52"/>
+```
+
+**(B) Hue Group dropdown column**
+Use a TemplateColumn (most reliable; avoids the DataGridComboBoxColumn binding issues you’ve already hit):
+
+```xml
+<DataGridTemplateColumn Header="Hue Group" Width="160">
+    <DataGridTemplateColumn.CellTemplate>
+        <DataTemplate>
+            <ComboBox ItemsSource="{Binding DataContext.HueGroupOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                      SelectedItem="{Binding HueGroupName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      IsEnabled="{Binding DataContext.HierarchyUseHueGroups, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                      MinWidth="140"/>
+        </DataTemplate>
+    </DataGridTemplateColumn.CellTemplate>
+</DataGridTemplateColumn>
+```
+
+---
+
+## 4) Patch: `QuickColourControl.xaml.cs` (core logic)
+
+### Add collections + toggle
+
+```csharp
+public ObservableCollection<QuickColourHueGroup> HueGroups { get; } = new ObservableCollection<QuickColourHueGroup>();
+public ObservableCollection<string> HueGroupOptions { get; } = new ObservableCollection<string>();
+
+private bool _hierarchyUseHueGroups;
+public bool HierarchyUseHueGroups
+{
+    get => _hierarchyUseHueGroups;
+    set
+    {
+        _hierarchyUseHueGroups = value;
+        OnPropertyChanged(nameof(HierarchyUseHueGroups));
+        RefreshHueGroupOptions();
+        ApplyHierarchyColours();
+    }
+}
+```
+
+### Initialize defaults (call this in constructor after DataContext assignment)
+
+```csharp
+private void EnsureDefaultHueGroups()
+{
+    if (HueGroups.Count > 0) return;
+
+    HueGroups.Add(new QuickColourHueGroup { Name = "Architecture", HueHex = "#00A000" }); // green
+    HueGroups.Add(new QuickColourHueGroup { Name = "Mechanical",   HueHex = "#2563EB" }); // blue
+    HueGroups.Add(new QuickColourHueGroup { Name = "Electrical",   HueHex = "#7C3AED" }); // purple
+    HueGroups.Add(new QuickColourHueGroup { Name = "Fire",         HueHex = "#DC2626" }); // red
+    HueGroups.Add(new QuickColourHueGroup { Name = "Other",        HueHex = "#6B7280" }); // gray
+
+    RefreshHueGroupOptions();
+}
+
+private void RefreshHueGroupOptions()
+{
+    HueGroupOptions.Clear();
+    foreach (var g in HueGroups.Where(x => x.Enabled).Select(x => x.Name).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct())
+        HueGroupOptions.Add(g);
+
+    // Always ensure at least one option for UI stability
+    if (HueGroupOptions.Count == 0)
+        HueGroupOptions.Add("Architecture");
+}
+```
+
+### Buttons: Add/Remove/Reset
+
+```csharp
+private void AddHueGroup_Click(object sender, RoutedEventArgs e)
+{
+    HueGroups.Add(new QuickColourHueGroup { Name = "New Group", HueHex = "#00A000" });
+    RefreshHueGroupOptions();
+}
+
+private void RemoveHueGroup_Click(object sender, RoutedEventArgs e)
+{
+    // You need a SelectedHueGroup property in your control, bound to the HueGroups DataGrid SelectedItem.
+    if (SelectedHueGroup == null) return;
+
+    HueGroups.Remove(SelectedHueGroup);
+    RefreshHueGroupOptions();
+
+    // Reassign any categories that referenced the removed group
+    var fallback = HueGroupOptions.FirstOrDefault() ?? "Architecture";
+    foreach (var cat in HierarchyGroups)
+    {
+        if (cat != null && string.Equals(cat.HueGroupName, SelectedHueGroup.Name, StringComparison.OrdinalIgnoreCase))
+            cat.HueGroupName = fallback;
+    }
+
+    ApplyHierarchyColours();
+}
+
+private void ResetHueGroups_Click(object sender, RoutedEventArgs e)
+{
+    HueGroups.Clear();
+    EnsureDefaultHueGroups();
+
+    // Optional: reset all categories to Architecture
+    foreach (var cat in HierarchyGroups)
+        if (cat != null) cat.HueGroupName = "Architecture";
+
+    ApplyHierarchyColours();
+}
+```
+
+### Update `LoadHierarchy` to set default HueGroupName
+
+After you build `HierarchyGroups`, set:
+
+```csharp
+var defaultGroup = HueGroupOptions.FirstOrDefault() ?? "Architecture";
+foreach (var g in HierarchyGroups)
+{
+    if (g != null && string.IsNullOrWhiteSpace(g.HueGroupName))
+        g.HueGroupName = defaultGroup;
+}
+```
+
+---
+
+## 5) The Hue Groups colour algorithm (drop-in replacement for the single-hue branch)
+
+In your `ApplyHierarchyColours()` method, add this branch:
+
+```csharp
+if (HierarchyUseHueGroups)
+{
+    var style = GetPaletteStyle();
+    var typeSpread01 = Math.Max(0.15, GetTypeSpread01());
+    var contrast01 = Clamp01(HierarchyCategoryContrastPct / 100.0);
+
+    var (minL, maxL) = QuickColourPalette.ComputeCategoryLightnessRange(style, contrast01);
+    var sat = QuickColourPalette.GetRecommendedSaturation(style);
+
+    // groupName -> hueColor
+    var enabledGroups = HueGroups
+        .Where(h => h != null && h.Enabled && !string.IsNullOrWhiteSpace(h.Name))
+        .ToDictionary(h => h.Name, h => h.HueColor, StringComparer.OrdinalIgnoreCase);
+
+    if (enabledGroups.Count == 0)
+        return;
+
+    // Partition categories by HueGroupName
+    var cats = HierarchyGroups.Where(c => c != null && c.Enabled).ToList();
+
+    foreach (var kvp in enabledGroups)
+    {
+        var groupName = kvp.Key;
+        var hueColor = kvp.Value;
+
+        var hue01 = QuickColourPalette.GetHue01(hueColor);
+
+        var catsInGroup = cats
+            .Where(c => string.Equals(c.HueGroupName, groupName, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(c => c.Count)
+            .ThenBy(c => c.Value)
+            .ToList();
+
+        if (catsInGroup.Count == 0) continue;
+
+        int n = catsInGroup.Count;
+        double bandWidth = (maxL - minL) / n;
+        double pad = bandWidth * 0.08;
+
+        for (int i = 0; i < n; i++)
+        {
+            var cat = catsInGroup[i];
+
+            double bandMin = minL + bandWidth * i + pad;
+            double bandMax = minL + bandWidth * (i + 1) - pad;
+            if (bandMax <= bandMin)
+            {
+                bandMin = minL + bandWidth * i;
+                bandMax = minL + bandWidth * (i + 1);
+            }
+
+            double baseL = (bandMin + bandMax) / 2.0;
+
+            // If user locked the base color, keep it.
+            if (!cat.UseCustomBaseColor)
+            {
+                cat.SetComputedBaseColor(QuickColourPalette.FromHsl01(hue01, sat, baseL));
+            }
+
+            // Types shades from the category base color (locked or computed)
+            var types = cat.Types
+                .Where(t => t != null && t.Enabled)
+                .OrderByDescending(t => t.Count)
+                .ThenBy(t => t.Value)
+                .ToList();
+
+            if (types.Count == 0) continue;
+
+            // Shade within band around base lightness
+            double half = ((bandMax - bandMin) / 2.0) * typeSpread01;
+            double effMin = Math.Max(bandMin, baseL - half);
+            double effMax = Math.Min(bandMax, baseL + half);
+
+            // If base is locked to a different hue than the group, still shade from base hue:
+            // Use your existing GenerateShades(cat.BaseColor, ...) OR keep group hue ramp.
+            // Best “targeted control” behaviour: shade from BaseColor itself:
+            var shades = QuickColourPalette.GenerateShades(cat.BaseColor, types.Count, style, typeSpread01);
+            for (int t = 0; t < types.Count; t++)
+                types[t].Color = shades[t];
+        }
+    }
+
+    return;
+}
+```
+
+**Why I recommend shading types from `cat.BaseColor` even in Hue Groups:**
+
+* It respects “Lock” behaviour naturally.
+* It allows slight manual tweaks per category without breaking the group.
+* Hue group is mainly about defaulting the family hue and keeping things coherent.
+
+---
+
+# Codex prompt (single pass work order)
+
+Copy/paste:
+
+```text
+Implement Hue Groups in Quick Colour → Hierarchy Builder.
+
+Goal:
+- User can define Hue Groups (name + hue hex).
+- Each Category (Level1) selects a Hue Group via dropdown.
+- Categories in the same Hue Group become lightness bands of that hue.
+- Types within a Category are shaded from the Category base colour.
+- Add “Lock” option per Category to keep manual base hex and prevent group recalculation overwriting it.
+
+File-by-file edits:
+
+1) Add MicroEng.Navisworks/QuickColour/QuickColourHueGroupModels.cs
+- class QuickColourHueGroup : NotifyBase with Enabled, Name, HueHex, HueColor, SwatchBrush.
+
+2) Patch QuickColourHierarchyModels.cs
+- In QuickColourHierarchyGroup add:
+  - string HueGroupName
+  - bool UseCustomBaseColor (Lock)
+  - internal SetComputedBaseColor(Color c) method that updates base colour without marking custom.
+- Ensure BaseHex/BaseColor changes mark UseCustomBaseColor=true unless suppressed.
+
+3) Patch QuickColourControl.xaml (Hierarchy Builder tab)
+- Add checkbox “Use Hue Groups” bound to HierarchyUseHueGroups.
+- Add an Expander “Hue Groups” with a DataGrid bound to HueGroups (On, Swatch, Name, Hex) + buttons Add/Remove/Reset.
+- Add two columns to the Category grid:
+  - Lock checkbox bound to UseCustomBaseColor
+  - Hue Group dropdown (use DataGridTemplateColumn + ComboBox) binding ItemsSource to HueGroupOptions on UserControl and SelectedItem to HueGroupName.
+- Keep DataGrid styling like Data Scraper (FontSize 12, RowHeight ~26).
+
+4) Patch QuickColourControl.xaml.cs
+- Add ObservableCollection<QuickColourHueGroup> HueGroups and ObservableCollection<string> HueGroupOptions.
+- Add bool HierarchyUseHueGroups; when toggled call RefreshHueGroupOptions() and ApplyHierarchyColours().
+- Implement EnsureDefaultHueGroups() (Architecture/Mechanical/Electrical/Fire/Other) called in constructor.
+- Implement AddHueGroup_Click, RemoveHueGroup_Click (requires SelectedHueGroup), ResetHueGroups_Click.
+- In LoadHierarchy, set default HueGroupName for new categories if blank.
+- Update ApplyHierarchyColours():
+  - If HierarchyUseHueGroups:
+    - For each enabled hue group, get categories assigned to it, distribute them across lightness bands using ComputeCategoryLightnessRange + GetRecommendedSaturation + hue01 from group hue.
+    - For each category:
+      - if not UseCustomBaseColor -> SetComputedBaseColor(computed)
+      - types get shades from cat.BaseColor via GenerateShades
+  - Else keep existing modes (palette and single hue logic).
+
+5) Build and run:
+- Ensure it compiles under net48.
+- Verify dropdown works (use TemplateColumn, not DataGridComboBoxColumn).
+- Verify locked categories keep their base colour after Regenerate/slider changes.
+
+Deliverable:
+- Hue groups work; users can set Architecture=green and have Doors/Windows categories in that group and types become shades of green, with optional per-category locks.
+```
+
+---
+
+## Practical “how users will use it” (the win)
+
+Example workflow you described:
+
+1. Load Category → Type.
+2. Enable **Use Hue Groups**.
+3. Set Hue Group “Architecture” hue to green.
+4. Assign:
+
+   * Doors → Architecture
+   * Windows → Architecture
+   * Rooms → Architecture
+5. Doors/Windows become **different green bands**, and each Type becomes **green shades** under those bands.
+6. Lock “Doors” if you want a very specific green for doors.
+
+This is exactly the “lots of control, but not manual pain” solution.
+
+If you want the next step after Hue Groups: **Auto assignment rules** (e.g., map Revit categories to disciplines by a built-in mapping file users can edit).
+
+Below is a complete, **Auto Assignment Rules** design for Hue Groups that (a) ships with a sensible **default Revit category → discipline** mapping, (b) writes that mapping to a **user-editable JSON file** on first run, and (c) adds a **one-click “Auto Assign”** workflow in the Hierarchy Builder UI.
+
+This is engineered so users can quickly get to “Architecture = green, Mechanical = blue, Electrical = purple…” without manually assigning every category, while still allowing overrides and locks.
+
+---
+
+## What the user gets in the UI
+
+Inside **Quick Colour → Hierarchy Builder → Hue Groups**:
+
+### New “Auto assignment” row
+
+* **Mapping file path** (read-only textbox)
+* Buttons:
+
+  * **Open** (opens the JSON in Notepad/VS Code)
+  * **Reload** (reload mapping without restart)
+  * **Auto Assign** (applies mapping to current Category rows)
+* Options:
+
+  * **Only assign categories currently set to “Other”** (default ON)
+  * **Skip locked categories** (default OFF; lock is for base colour, but you may want this)
+  * **Auto-create missing Hue Groups** (default OFF; prevents surprise groups unless asked)
+* A small status line:
+
+  * “Loaded 14 rules. Fallback=Other. Last applied: 12:52:31”
+
+### Behaviour rules (important)
+
+* The mapping assigns **HueGroupName** for each Category row (Level 1 value).
+* It does **not** override user manual choices unless you allow it (via “Only assign Other” OFF).
+* It does **not** change BaseColour if the category is locked (UseCustomBaseColor / Lock).
+
+---
+
+## Where the mapping file lives (editable by users)
+
+Use a per-user path so editing is easy and doesn’t fight ProgramData deploy:
+
+**Default path**
+
+```
+%APPDATA%\MicroEng\Navisworks\QuickColour\CategoryDisciplineMap.json
+```
+
+On first use:
+
+* If the file doesn’t exist, your plugin writes a default one.
+* Users can then edit it and hit **Reload**.
+
+---
+
+## JSON mapping format
+
+**Versioned, order-sensitive (first match wins):**
+
+```json
+{
+  "version": 1,
+  "fallbackGroup": "Other",
+  "rules": [
+    {
+      "group": "Architecture",
+      "match": [
+        { "type": "exact", "value": "Doors" },
+        { "type": "exact", "value": "Windows" },
+        { "type": "contains", "value": "Wall" },
+        { "type": "exact", "value": "Floors" },
+        { "type": "exact", "value": "Ceilings" },
+        { "type": "exact", "value": "Rooms" },
+        { "type": "wildcard", "value": "OST_*Door*" },
+        { "type": "wildcard", "value": "OST_*Window*" }
+      ]
+    },
+    {
+      "group": "Mechanical",
+      "match": [
+        { "type": "contains", "value": "Duct" },
+        { "type": "contains", "value": "Pipe" },
+        { "type": "contains", "value": "Plumbing" },
+        { "type": "contains", "value": "Mechanical Equipment" }
+      ]
+    },
+    {
+      "group": "Electrical",
+      "match": [
+        { "type": "contains", "value": "Conduit" },
+        { "type": "contains", "value": "Cable Tray" },
+        { "type": "contains", "value": "Lighting" },
+        { "type": "contains", "value": "Electrical" },
+        { "type": "contains", "value": "Data" }
+      ]
+    },
+    {
+      "group": "Fire",
+      "match": [
+        { "type": "contains", "value": "Fire" },
+        { "type": "contains", "value": "Sprinkler" }
+      ]
+    }
+  ]
+}
+```
+
+### Supported matcher types
+
+* `exact`
+* `contains`
+* `startsWith`
+* `endsWith`
+* `wildcard` (`*` and `?`)
+* `regex`
+
+---
+
+## Implementation (code you give Codex)
+
+### 1) Add mapping models + file IO (net48-friendly, no external JSON libs)
+
+Create: `QuickColour/DisciplineMapModels.cs`
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
+using System.Text;
+
+namespace MicroEng.Navisworks.QuickColour
+{
+    [DataContract]
+    public sealed class DisciplineMapFile
+    {
+        [DataMember(Name = "version")] public int Version { get; set; } = 1;
+        [DataMember(Name = "fallbackGroup")] public string FallbackGroup { get; set; } = "Other";
+        [DataMember(Name = "rules")] public List<DisciplineMapRule> Rules { get; set; } = new List<DisciplineMapRule>();
+    }
+
+    [DataContract]
+    public sealed class DisciplineMapRule
+    {
+        [DataMember(Name = "group")] public string Group { get; set; } = "";
+        [DataMember(Name = "match")] public List<DisciplineMapMatcher> Match { get; set; } = new List<DisciplineMapMatcher>();
+    }
+
+    [DataContract]
+    public sealed class DisciplineMapMatcher
+    {
+        [DataMember(Name = "type")] public string Type { get; set; } = "exact";
+        [DataMember(Name = "value")] public string Value { get; set; } = "";
+    }
+
+    internal static class DisciplineMapFileIO
+    {
+        public static DisciplineMapFile Load(string path)
+        {
+            using (var fs = File.OpenRead(path))
+            {
+                var ser = new DataContractJsonSerializer(typeof(DisciplineMapFile));
+                return (DisciplineMapFile)ser.ReadObject(fs);
+            }
+        }
+
+        public static void EnsureDefaultExists(string path, string defaultJson)
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            if (!File.Exists(path))
+                File.WriteAllText(path, defaultJson, Encoding.UTF8);
+        }
+    }
+}
+```
+
+Create: `QuickColour/DisciplineMapMatcherEngine.cs`
+
+```csharp
+using System;
+using System.Text.RegularExpressions;
+
+namespace MicroEng.Navisworks.QuickColour
+{
+    internal static class DisciplineMapMatcherEngine
+    {
+        public static bool IsMatch(string input, string type, string pattern)
+        {
+            input = input ?? "";
+            pattern = pattern ?? "";
+
+            var t = (type ?? "exact").Trim().ToLowerInvariant();
+            switch (t)
+            {
+                case "exact":
+                    return string.Equals(input, pattern, StringComparison.OrdinalIgnoreCase);
+
+                case "contains":
+                    return input.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0;
+
+                case "startswith":
+                case "starts_with":
+                case "start":
+                    return input.StartsWith(pattern, StringComparison.OrdinalIgnoreCase);
+
+                case "endswith":
+                case "ends_with":
+                case "end":
+                    return input.EndsWith(pattern, StringComparison.OrdinalIgnoreCase);
+
+                case "wildcard":
+                    return WildcardMatch(input, pattern);
+
+                case "regex":
+                    return Regex.IsMatch(input, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+                default:
+                    return string.Equals(input, pattern, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+
+        private static bool WildcardMatch(string input, string wildcard)
+        {
+            var rx = "^" + Regex.Escape(wildcard).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+            return Regex.IsMatch(input ?? "", rx, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+    }
+}
+```
+
+---
+
+### 2) Add the auto-assignment service
+
+Create: `QuickColour/QuickColourHueGroupAutoAssignService.cs`
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace MicroEng.Navisworks.QuickColour
+{
+    public sealed class HueGroupAutoAssignOptions
+    {
+        public bool OnlyAssignWhenCurrentlyFallback { get; set; } = true;
+        public bool SkipLockedCategories { get; set; } = false;
+        public bool AutoCreateMissingHueGroups { get; set; } = false;
+    }
+
+    public sealed class HueGroupAutoAssignResult
+    {
+        public int TotalCategories;
+        public int Assigned;
+        public int Unmatched;
+        public int SkippedLocked;
+        public List<string> MissingHueGroups = new List<string>();
+        public Dictionary<string, int> AssignedByGroup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public sealed class QuickColourHueGroupAutoAssignService
+    {
+        public HueGroupAutoAssignResult Apply(
+            DisciplineMapFile map,
+            IList<QuickColourHierarchyGroup> categories,
+            IList<QuickColourHueGroup> hueGroups,
+            HueGroupAutoAssignOptions options,
+            Action<string> log = null)
+        {
+            if (map == null) throw new ArgumentNullException(nameof(map));
+            if (categories == null) throw new ArgumentNullException(nameof(categories));
+            if (hueGroups == null) throw new ArgumentNullException(nameof(hueGroups));
+            options = options ?? new HueGroupAutoAssignOptions();
+
+            var enabledHueGroupNames = new HashSet<string>(
+                hueGroups.Where(h => h != null && h.Enabled && !string.IsNullOrWhiteSpace(h.Name))
+                         .Select(h => h.Name.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            var fallback = string.IsNullOrWhiteSpace(map.FallbackGroup) ? "Other" : map.FallbackGroup.Trim();
+            if (!enabledHueGroupNames.Contains(fallback))
+            {
+                // Prefer "Other" if present; otherwise first available.
+                fallback = enabledHueGroupNames.Contains("Other")
+                    ? "Other"
+                    : enabledHueGroupNames.FirstOrDefault() ?? "Other";
+            }
+
+            var result = new HueGroupAutoAssignResult();
+            result.TotalCategories = categories.Count;
+
+            var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var cat in categories.Where(c => c != null))
+            {
+                if (!cat.Enabled) continue;
+
+                if (options.SkipLockedCategories && cat.UseCustomBaseColor)
+                {
+                    result.SkippedLocked++;
+                    continue;
+                }
+
+                if (options.OnlyAssignWhenCurrentlyFallback)
+                {
+                    var current = (cat.HueGroupName ?? "").Trim();
+                    if (!string.Equals(current, fallback, StringComparison.OrdinalIgnoreCase) &&
+                        !string.IsNullOrWhiteSpace(current))
+                    {
+                        // User already assigned something meaningful; leave it.
+                        continue;
+                    }
+                }
+
+                var assignedGroup = ResolveGroup(map, cat.Value, fallback);
+                if (string.IsNullOrWhiteSpace(assignedGroup))
+                    assignedGroup = fallback;
+
+                if (!enabledHueGroupNames.Contains(assignedGroup))
+                {
+                    if (options.AutoCreateMissingHueGroups)
+                    {
+                        hueGroups.Add(new QuickColourHueGroup { Name = assignedGroup, HueHex = "#6B7280" }); // default gray
+                        enabledHueGroupNames.Add(assignedGroup);
+                    }
+                    else
+                    {
+                        missing.Add(assignedGroup);
+                        assignedGroup = fallback;
+                    }
+                }
+
+                cat.HueGroupName = assignedGroup;
+
+                result.Assigned++;
+                if (!result.AssignedByGroup.ContainsKey(assignedGroup))
+                    result.AssignedByGroup[assignedGroup] = 0;
+                result.AssignedByGroup[assignedGroup]++;
+            }
+
+            result.MissingHueGroups = missing.OrderBy(s => s).ToList();
+            result.Unmatched = categories.Count(c => c != null && c.Enabled && string.Equals((c.HueGroupName ?? "").Trim(), fallback, StringComparison.OrdinalIgnoreCase));
+
+            if (result.MissingHueGroups.Count > 0)
+                log?.Invoke("HueGroup AutoAssign: mapping referenced unknown groups: " + string.Join(", ", result.MissingHueGroups));
+
+            log?.Invoke($"HueGroup AutoAssign: Assigned={result.Assigned}, Fallback='{fallback}', SkippedLocked={result.SkippedLocked}.");
+
+            return result;
+        }
+
+        private static string ResolveGroup(DisciplineMapFile map, string categoryValue, string fallback)
+        {
+            categoryValue = (categoryValue ?? "").Trim();
+            foreach (var rule in map.Rules ?? Enumerable.Empty<DisciplineMapRule>())
+            {
+                var group = (rule?.Group ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(group)) continue;
+
+                var matchers = rule.Match ?? new List<DisciplineMapMatcher>();
+                foreach (var m in matchers)
+                {
+                    var type = (m?.Type ?? "exact").Trim();
+                    var value = (m?.Value ?? "").Trim();
+                    if (string.IsNullOrWhiteSpace(value)) continue;
+
+                    if (DisciplineMapMatcherEngine.IsMatch(categoryValue, type, value))
+                        return group;
+                }
+            }
+            return fallback;
+        }
+    }
+}
+```
+
+---
+
+### 3) Default JSON (embed as constant in your control)
+
+Inside `QuickColourControl.xaml.cs` (or a dedicated `Defaults` class):
+
+```csharp
+private const string DefaultCategoryDisciplineMapJson = @"{
+  ""version"": 1,
+  ""fallbackGroup"": ""Other"",
+  ""rules"": [
+    { ""group"": ""Architecture"", ""match"": [
+      { ""type"": ""exact"", ""value"": ""Doors"" },
+      { ""type"": ""exact"", ""value"": ""Windows"" },
+      { ""type"": ""contains"", ""value"": ""Wall"" },
+      { ""type"": ""exact"", ""value"": ""Floors"" },
+      { ""type"": ""exact"", ""value"": ""Ceilings"" },
+      { ""type"": ""exact"", ""value"": ""Rooms"" },
+      { ""type"": ""wildcard"", ""value"": ""OST_*Door*"" },
+      { ""type"": ""wildcard"", ""value"": ""OST_*Window*"" }
+    ]},
+    { ""group"": ""Mechanical"", ""match"": [
+      { ""type"": ""contains"", ""value"": ""Duct"" },
+      { ""type"": ""contains"", ""value"": ""Pipe"" },
+      { ""type"": ""contains"", ""value"": ""Plumbing"" },
+      { ""type"": ""contains"", ""value"": ""Mechanical Equipment"" }
+    ]},
+    { ""group"": ""Electrical"", ""match"": [
+      { ""type"": ""contains"", ""value"": ""Conduit"" },
+      { ""type"": ""contains"", ""value"": ""Cable Tray"" },
+      { ""type"": ""contains"", ""value"": ""Lighting"" },
+      { ""type"": ""contains"", ""value"": ""Electrical"" },
+      { ""type"": ""contains"", ""value"": ""Data"" }
+    ]},
+    { ""group"": ""Fire"", ""match"": [
+      { ""type"": ""contains"", ""value"": ""Fire"" },
+      { ""type"": ""contains"", ""value"": ""Sprinkler"" }
+    ]}
+  ]
+}";
+```
+
+---
+
+### 4) Wire into your control
+
+In `QuickColourControl.xaml.cs` add:
+
+* `MappingFilePath` property
+* `ReloadMapping()` and `ApplyAutoAssign()`
+
+Suggested:
+
+```csharp
+private string _disciplineMapPath;
+private DisciplineMapFile _disciplineMap;
+private readonly QuickColourHueGroupAutoAssignService _autoAssign = new QuickColourHueGroupAutoAssignService();
+
+public string DisciplineMapPath
+{
+    get => _disciplineMapPath;
+    set { _disciplineMapPath = value; OnPropertyChanged(nameof(DisciplineMapPath)); }
+}
+
+private void InitDisciplineMap()
+{
+    var baseDir = System.IO.Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "MicroEng", "Navisworks", "QuickColour");
+
+    DisciplineMapPath = System.IO.Path.Combine(baseDir, "CategoryDisciplineMap.json");
+
+    DisciplineMapFileIO.EnsureDefaultExists(DisciplineMapPath, DefaultCategoryDisciplineMapJson);
+    ReloadDisciplineMap();
+}
+
+private void ReloadDisciplineMap()
+{
+    _disciplineMap = DisciplineMapFileIO.Load(DisciplineMapPath);
+    StatusText = $"Loaded category map: {_disciplineMap?.Rules?.Count ?? 0} rules (fallback={_disciplineMap?.FallbackGroup}).";
+}
+
+private void OpenDisciplineMap_Click(object sender, RoutedEventArgs e)
+{
+    try
+    {
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = DisciplineMapPath,
+            UseShellExecute = true
+        };
+        System.Diagnostics.Process.Start(psi);
+    }
+    catch (Exception ex)
+    {
+        StatusText = "Open map failed: " + ex.Message;
+    }
+}
+
+private void ReloadDisciplineMap_Click(object sender, RoutedEventArgs e)
+{
+    try { ReloadDisciplineMap(); }
+    catch (Exception ex) { StatusText = "Reload map failed: " + ex.Message; }
+}
+
+private void AutoAssignHueGroups_Click(object sender, RoutedEventArgs e)
+{
+    try
+    {
+        if (_disciplineMap == null) ReloadDisciplineMap();
+        if (HierarchyGroups == null || HierarchyGroups.Count == 0)
+        {
+            StatusText = "No categories loaded. Run Load Hierarchy first.";
+            return;
+        }
+
+        var options = new HueGroupAutoAssignOptions
+        {
+            OnlyAssignWhenCurrentlyFallback = AutoAssignOnlyFallback,   // bind from UI checkbox
+            SkipLockedCategories = AutoAssignSkipLocked,                // bind from UI checkbox
+            AutoCreateMissingHueGroups = AutoAssignCreateMissingGroups  // bind from UI checkbox
+        };
+
+        var res = _autoAssign.Apply(_disciplineMap, HierarchyGroups.ToList(), HueGroups.ToList(), options, msg => Log(msg));
+
+        if (res.MissingHueGroups.Count > 0)
+            StatusText = $"Auto assigned. Missing groups in UI: {string.Join(", ", res.MissingHueGroups)} (mapped to fallback).";
+        else
+            StatusText = $"Auto assigned {res.Assigned} categories.";
+
+        RefreshHueGroupOptions(); // if auto-create was enabled
+        ApplyHierarchyColours();  // recolour based on new group assignment
+    }
+    catch (Exception ex)
+    {
+        StatusText = "Auto assign failed: " + ex.Message;
+    }
+}
+```
+
+*(Your actual `HierarchyGroups` is likely an ObservableCollection; adjust `.ToList()` usage.)*
+
+---
+
+## “Codex work order” prompt (one-pass, file-by-file)
+
+Paste this into Codex:
+
+```text
+Implement Auto Assignment Rules for Hue Groups in Quick Colour → Hierarchy Builder.
+
+Goal:
+- Provide a built-in editable JSON mapping file that maps Revit Category strings to Hue Groups (disciplines).
+- Add UI buttons Open/Reload/Auto Assign and apply mapping to Category rows (Level1 groups).
+- Keep Data Scraper-style compact grids (FontSize 12, RowHeight ~26). Do not break existing Hue Group logic.
+
+Work order (sequenced):
+
+1) Add files:
+- QuickColour/DisciplineMapModels.cs:
+  - DataContract models: DisciplineMapFile {version,fallbackGroup,rules}, DisciplineMapRule {group, match[]}, DisciplineMapMatcher {type,value}
+  - DisciplineMapFileIO.Load(path) using DataContractJsonSerializer
+  - EnsureDefaultExists(path, defaultJson) writes file if missing
+
+- QuickColour/DisciplineMapMatcherEngine.cs:
+  - IsMatch(input,type,pattern) supporting exact/contains/startswith/endswith/wildcard/regex
+
+- QuickColour/QuickColourHueGroupAutoAssignService.cs:
+  - Apply(map, categories, hueGroups, options, log)
+  - Options: OnlyAssignWhenCurrentlyFallback (default true), SkipLockedCategories, AutoCreateMissingHueGroups
+  - First match wins; unknown groups either auto-create or fall back.
+
+2) In QuickColourControl.xaml.cs:
+- Add DefaultCategoryDisciplineMapJson constant string (reasonable Revit category mapping).
+- Add DisciplineMapPath property and InitDisciplineMap() that writes default mapping to:
+  %APPDATA%\MicroEng\Navisworks\QuickColour\CategoryDisciplineMap.json
+- Add ReloadDisciplineMap(), OpenDisciplineMap_Click, ReloadDisciplineMap_Click, AutoAssignHueGroups_Click.
+- On constructor/init call InitDisciplineMap().
+- When AutoAssign runs: update category.HueGroupName, then RefreshHueGroupOptions() and ApplyHierarchyColours().
+
+3) In QuickColourControl.xaml (Hierarchy Builder → Hue Groups section):
+- Add an “Auto Assignment” row:
+  - read-only textbox bound DisciplineMapPath
+  - buttons: Open (OpenDisciplineMap_Click), Reload (ReloadDisciplineMap_Click), Auto Assign (AutoAssignHueGroups_Click)
+  - options checkboxes bound:
+    - AutoAssignOnlyFallback
+    - AutoAssignSkipLocked
+    - AutoAssignCreateMissingGroups
+- Keep styling consistent (compact, Data Scraper like).
+
+4) Ensure behavior:
+- Default HueGroup for new categories should be “Other” when Hue Groups are enabled so auto-assign fills meaningfully.
+- Do not override user-chosen groups when OnlyAssignWhenCurrentlyFallback is enabled.
+- Locked categories keep BaseColor regardless; HueGroupName may still be assigned.
+
+5) Build net48 and run.
+```
+
+---
+
+## One recommendation that prevents confusion
+
+When Hue Groups is enabled, set new categories’ default group to **Other** (not Architecture). Auto assignment then becomes intuitive: everything starts as “Other” and the map assigns what it can.
+
+If you want, I can also propose a “Preview mapping” grid (shows which categories will be assigned to which group before applying), but the above is the minimal high-value implementation.
+
+Below is a **Preview Mapping Grid** design that will let users see (before applying) exactly how the JSON mapping will assign **Category → Hue Group**, what will change, what will be skipped, and why. It’s intentionally **fast** (no Navisworks searches), and styled like your **Data Scraper** DataGrid (compact, readable).
+
+---
+
+# What the Preview Mapping Grid should do
+
+For each **Category (Level 1 value)** currently loaded in Hierarchy Builder, show:
+
+* **Current Hue Group** (what the category is set to now)
+* **Proposed Hue Group** (what the mapping would assign if you hit Apply)
+* **Status** (Will change / No change / Skipped (locked) / Skipped (already assigned) / Unmatched → fallback / Missing group → fallback / Will create group)
+* **Matched rule** details:
+
+  * Rule Group (the mapping group it matched)
+  * Matcher type (exact/contains/wildcard/regex)
+  * Matcher pattern
+* Counts:
+
+  * Category item count
+  * Type count
+
+This immediately answers: “Why did Doors go to Architecture?”, “What will change if I apply?”, and “Why didn’t that one get assigned?”
+
+---
+
+# Best UI placement
+
+Inside **Hierarchy Builder → Hue Groups** section:
+
+1. **Auto Assignment** row (path + Open/Reload)
+2. **Preview / Apply** row (Preview button, Apply button, filters)
+3. **Preview Grid** (DataGrid, compact)
+4. **Summary line** (“Will change: 12, No change: 54, Skipped locked: 3, Unmatched: 9…”)
+
+This keeps the user’s mental model aligned: preview sits right next to the mapping file.
+
+---
+
+# Code: Add preview models
+
+Create a new file:
+
+## `QuickColour/HueGroupAutoAssignPreviewModels.cs`
+
+```csharp
+using System;
+
+namespace MicroEng.Navisworks.QuickColour
+{
+    public sealed class HueGroupAutoAssignPreviewRow : NotifyBase
+    {
+        private string _category = "";
+        private int _count;
+        private int _typeCount;
+
+        private bool _locked;
+        private string _currentGroup = "";
+        private string _proposedGroup = "";
+
+        private string _status = "";
+        private string _reason = "";
+
+        private string _matchedRuleGroup = "";
+        private string _matchedMatcherType = "";
+        private string _matchedMatcherValue = "";
+
+        private bool _willChange;
+
+        public string Category { get => _category; set => SetField(ref _category, value ?? ""); }
+        public int Count { get => _count; set => SetField(ref _count, value); }
+        public int TypeCount { get => _typeCount; set => SetField(ref _typeCount, value); }
+
+        public bool Locked { get => _locked; set => SetField(ref _locked, value); }
+        public string CurrentGroup { get => _currentGroup; set => SetField(ref _currentGroup, value ?? ""); }
+        public string ProposedGroup { get => _proposedGroup; set => SetField(ref _proposedGroup, value ?? ""); }
+
+        public string Status { get => _status; set => SetField(ref _status, value ?? ""); }
+        public string Reason { get => _reason; set => SetField(ref _reason, value ?? ""); }
+
+        public string MatchedRuleGroup { get => _matchedRuleGroup; set => SetField(ref _matchedRuleGroup, value ?? ""); }
+        public string MatchedMatcherType { get => _matchedMatcherType; set => SetField(ref _matchedMatcherType, value ?? ""); }
+        public string MatchedMatcherValue { get => _matchedMatcherValue; set => SetField(ref _matchedMatcherValue, value ?? ""); }
+
+        public bool WillChange { get => _willChange; set => SetField(ref _willChange, value); }
+    }
+
+    public sealed class HueGroupAutoAssignPreviewResult
+    {
+        public int Total;
+        public int WillChange;
+        public int NoChange;
+        public int SkippedLocked;
+        public int SkippedAlreadyAssigned;
+        public int UnmatchedFallback;
+        public int MissingGroupFallback;
+        public int WillCreateMissingGroup;
+    }
+}
+```
+
+---
+
+# Code: Extend your auto-assign service with a dry-run “BuildPreview”
+
+Patch your existing:
+
+## `QuickColour/QuickColourHueGroupAutoAssignService.cs`
+
+Add a new public method `BuildPreview(...)` that uses the same matching logic as Apply but **does not modify categories**.
+
+### Add/replace these helper structs inside the service
+
+```csharp
+private sealed class ResolveDetails
+{
+    public string Group;
+    public string MatcherType;
+    public string MatcherValue;
+}
+```
+
+### Replace your ResolveGroup with a “resolve with details”
+
+Change the existing private `ResolveGroup(...)` into:
+
+```csharp
+private static ResolveDetails ResolveGroupWithDetails(DisciplineMapFile map, string categoryValue, string fallback)
+{
+    categoryValue = (categoryValue ?? "").Trim();
+
+    foreach (var rule in map.Rules ?? new System.Collections.Generic.List<DisciplineMapRule>())
+    {
+        var group = (rule?.Group ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(group)) continue;
+
+        var matchers = rule.Match ?? new System.Collections.Generic.List<DisciplineMapMatcher>();
+        foreach (var m in matchers)
+        {
+            var type = (m?.Type ?? "exact").Trim();
+            var value = (m?.Value ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(value)) continue;
+
+            if (DisciplineMapMatcherEngine.IsMatch(categoryValue, type, value))
+            {
+                return new ResolveDetails
+                {
+                    Group = group,
+                    MatcherType = type,
+                    MatcherValue = value
+                };
+            }
+        }
+    }
+
+    return new ResolveDetails
+    {
+        Group = fallback,
+        MatcherType = "",
+        MatcherValue = ""
+    };
+}
+```
+
+### Add the preview builder method
+
+```csharp
+public HueGroupAutoAssignPreviewResult BuildPreview(
+    DisciplineMapFile map,
+    System.Collections.Generic.IList<QuickColourHierarchyGroup> categories,
+    System.Collections.Generic.IList<QuickColourHueGroup> hueGroups,
+    HueGroupAutoAssignOptions options,
+    System.Collections.Generic.IList<HueGroupAutoAssignPreviewRow> outputRows,
+    Action<string> log = null)
+{
+    if (map == null) throw new ArgumentNullException(nameof(map));
+    if (categories == null) throw new ArgumentNullException(nameof(categories));
+    if (hueGroups == null) throw new ArgumentNullException(nameof(hueGroups));
+    if (outputRows == null) throw new ArgumentNullException(nameof(outputRows));
+    options = options ?? new HueGroupAutoAssignOptions();
+
+    outputRows.Clear();
+
+    var enabledHueGroupNames = new System.Collections.Generic.HashSet<string>(
+        hueGroups.Where(h => h != null && h.Enabled && !string.IsNullOrWhiteSpace(h.Name))
+                 .Select(h => h.Name.Trim()),
+        StringComparer.OrdinalIgnoreCase);
+
+    var fallback = string.IsNullOrWhiteSpace(map.FallbackGroup) ? "Other" : map.FallbackGroup.Trim();
+    if (!enabledHueGroupNames.Contains(fallback))
+    {
+        fallback = enabledHueGroupNames.Contains("Other")
+            ? "Other"
+            : enabledHueGroupNames.FirstOrDefault() ?? "Other";
+    }
+
+    var summary = new HueGroupAutoAssignPreviewResult();
+    summary.Total = categories.Count;
+
+    foreach (var cat in categories.Where(c => c != null))
+    {
+        if (!cat.Enabled) continue;
+
+        var current = (cat.HueGroupName ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(current))
+            current = fallback;
+
+        var row = new HueGroupAutoAssignPreviewRow
+        {
+            Category = cat.Value ?? "",
+            Count = cat.Count,
+            TypeCount = cat.Types?.Count ?? 0,
+            Locked = cat.UseCustomBaseColor,
+            CurrentGroup = current
+        };
+
+        // 1) Skip locked categories (optional)
+        if (options.SkipLockedCategories && cat.UseCustomBaseColor)
+        {
+            row.ProposedGroup = current;
+            row.Status = "Skipped (Locked)";
+            row.Reason = "Category is locked.";
+            row.WillChange = false;
+            summary.SkippedLocked++;
+            outputRows.Add(row);
+            continue;
+        }
+
+        // 2) Skip already assigned categories if OnlyAssignWhenCurrentlyFallback
+        if (options.OnlyAssignWhenCurrentlyFallback)
+        {
+            if (!string.Equals(current, fallback, StringComparison.OrdinalIgnoreCase))
+            {
+                row.ProposedGroup = current;
+                row.Status = "Skipped (Already assigned)";
+                row.Reason = $"Only assigns categories currently set to '{fallback}'.";
+                row.WillChange = false;
+                summary.SkippedAlreadyAssigned++;
+                outputRows.Add(row);
+                continue;
+            }
+        }
+
+        // 3) Resolve mapping
+        var details = ResolveGroupWithDetails(map, cat.Value, fallback);
+        var resolved = (details?.Group ?? fallback).Trim();
+        if (string.IsNullOrWhiteSpace(resolved))
+            resolved = fallback;
+
+        row.MatchedRuleGroup = resolved;
+        row.MatchedMatcherType = string.IsNullOrWhiteSpace(details?.MatcherType) ? "—" : details.MatcherType;
+        row.MatchedMatcherValue = string.IsNullOrWhiteSpace(details?.MatcherValue) ? "—" : details.MatcherValue;
+
+        // 4) Handle missing hue groups
+        if (!enabledHueGroupNames.Contains(resolved))
+        {
+            if (options.AutoCreateMissingHueGroups)
+            {
+                row.ProposedGroup = resolved;
+                row.Status = "Will create group";
+                row.Reason = "Group not found in UI; will be created (Auto-create enabled).";
+                row.WillChange = !string.Equals(current, resolved, StringComparison.OrdinalIgnoreCase);
+                if (row.WillChange) summary.WillChange++; else summary.NoChange++;
+                summary.WillCreateMissingGroup++;
+                outputRows.Add(row);
+                continue;
+            }
+            else
+            {
+                row.ProposedGroup = fallback;
+                row.Status = "Missing group → fallback";
+                row.Reason = $"Mapping resolved to '{resolved}' which does not exist; will use fallback '{fallback}'.";
+                row.WillChange = !string.Equals(current, fallback, StringComparison.OrdinalIgnoreCase);
+                if (row.WillChange) summary.WillChange++; else summary.NoChange++;
+                summary.MissingGroupFallback++;
+                outputRows.Add(row);
+                continue;
+            }
+        }
+
+        // 5) Normal outcome
+        row.ProposedGroup = resolved;
+
+        if (string.Equals(resolved, fallback, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(row.MatchedMatcherType, "—", StringComparison.OrdinalIgnoreCase))
+        {
+            row.Status = "Unmatched → fallback";
+            row.Reason = $"No rule matched; fallback '{fallback}'.";
+            summary.UnmatchedFallback++;
+        }
+        else
+        {
+            row.Status = string.Equals(current, resolved, StringComparison.OrdinalIgnoreCase)
+                ? "No change"
+                : "Will change";
+            row.Reason = string.Equals(current, resolved, StringComparison.OrdinalIgnoreCase)
+                ? "Already assigned to this group."
+                : "Will be updated by mapping.";
+        }
+
+        row.WillChange = !string.Equals(current, resolved, StringComparison.OrdinalIgnoreCase);
+        if (row.WillChange) summary.WillChange++; else summary.NoChange++;
+
+        outputRows.Add(row);
+    }
+
+    log?.Invoke($"HueGroup Preview: total={summary.Total}, willChange={summary.WillChange}, skippedLocked={summary.SkippedLocked}, unmatched={summary.UnmatchedFallback}.");
+    return summary;
+}
+```
+
+**Key point:** This uses the same mapping logic, but doesn’t mutate anything. Users can iterate safely.
+
+---
+
+# XAML: Add the Preview grid
+
+In `QuickColourControl.xaml` (Hue Groups area), add:
+
+* A “Preview mapping” button
+* A filter toggle
+* The preview DataGrid
+
+Example snippet (use standard WPF controls; WPF-UI will style them implicitly):
+
+```xml
+<StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+    <Button Content="Preview" Width="90" Margin="0,0,8,0" Click="PreviewHueMap_Click"/>
+    <Button Content="Apply" Width="90" Margin="0,0,8,0" Click="AutoAssignHueGroups_Click"/>
+    <CheckBox Content="Show changes only"
+              IsChecked="{Binding PreviewShowChangesOnly, Mode=TwoWay}"
+              VerticalAlignment="Center"/>
+</StackPanel>
+
+<TextBlock Text="{Binding AutoAssignPreviewSummary}"
+           Margin="0,6,0,6"
+           FontSize="12"
+           Opacity="0.9"/>
+
+<DataGrid ItemsSource="{Binding AutoAssignPreviewRows}"
+          AutoGenerateColumns="False"
+          CanUserAddRows="False"
+          IsReadOnly="True"
+          GridLinesVisibility="All"
+          HeadersVisibility="Column"
+          RowHeight="26"
+          FontSize="12"
+          Margin="0,0,0,8">
+    <DataGrid.Columns>
+        <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="220"/>
+        <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="70"/>
+        <DataGridTextColumn Header="Types" Binding="{Binding TypeCount}" Width="60"/>
+
+        <DataGridCheckBoxColumn Header="Lock" Binding="{Binding Locked}" Width="55"/>
+
+        <DataGridTextColumn Header="Current" Binding="{Binding CurrentGroup}" Width="140"/>
+        <DataGridTextColumn Header="Proposed" Binding="{Binding ProposedGroup}" Width="140"/>
+
+        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="170"/>
+        <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="260"/>
+
+        <DataGridTextColumn Header="Matched Group" Binding="{Binding MatchedRuleGroup}" Width="140"/>
+        <DataGridTextColumn Header="Match Type" Binding="{Binding MatchedMatcherType}" Width="90"/>
+        <DataGridTextColumn Header="Pattern" Binding="{Binding MatchedMatcherValue}" Width="220"/>
+    </DataGrid.Columns>
+</DataGrid>
+```
+
+If you want closer parity with Data Scraper: also set `CanUserReorderColumns="True"`.
+
+---
+
+# Code-behind wiring (QuickColourControl.xaml.cs)
+
+Add properties:
+
+```csharp
+public System.Collections.ObjectModel.ObservableCollection<HueGroupAutoAssignPreviewRow> AutoAssignPreviewRows { get; }
+    = new System.Collections.ObjectModel.ObservableCollection<HueGroupAutoAssignPreviewRow>();
+
+private string _autoAssignPreviewSummary;
+public string AutoAssignPreviewSummary
+{
+    get => _autoAssignPreviewSummary;
+    set { _autoAssignPreviewSummary = value; OnPropertyChanged(nameof(AutoAssignPreviewSummary)); }
+}
+
+private bool _previewShowChangesOnly;
+public bool PreviewShowChangesOnly
+{
+    get => _previewShowChangesOnly;
+    set { _previewShowChangesOnly = value; OnPropertyChanged(nameof(PreviewShowChangesOnly)); }
+}
+```
+
+Add click handler:
+
+```csharp
+private void PreviewHueMap_Click(object sender, RoutedEventArgs e)
+{
+    try
+    {
+        if (_disciplineMap == null) ReloadDisciplineMap();
+        if (HierarchyGroups == null || HierarchyGroups.Count == 0)
+        {
+            AutoAssignPreviewSummary = "No hierarchy loaded. Run 'Load Hierarchy' first.";
+            AutoAssignPreviewRows.Clear();
+            return;
+        }
+
+        var options = new HueGroupAutoAssignOptions
+        {
+            OnlyAssignWhenCurrentlyFallback = AutoAssignOnlyFallback,
+            SkipLockedCategories = AutoAssignSkipLocked,
+            AutoCreateMissingHueGroups = AutoAssignCreateMissingGroups
+        };
+
+        var rows = new System.Collections.Generic.List<HueGroupAutoAssignPreviewRow>();
+        var summary = _autoAssign.BuildPreview(
+            _disciplineMap,
+            HierarchyGroups.ToList(),
+            HueGroups.ToList(),
+            options,
+            rows,
+            msg => Log(msg));
+
+        AutoAssignPreviewRows.Clear();
+
+        foreach (var r in rows)
+        {
+            if (PreviewShowChangesOnly && !r.WillChange) continue;
+            AutoAssignPreviewRows.Add(r);
+        }
+
+        AutoAssignPreviewSummary =
+            $"Preview: Total={summary.Total}, Will change={summary.WillChange}, " +
+            $"No change={summary.NoChange}, Skipped locked={summary.SkippedLocked}, " +
+            $"Skipped assigned={summary.SkippedAlreadyAssigned}, Unmatched→fallback={summary.UnmatchedFallback}, " +
+            $"Missing group→fallback={summary.MissingGroupFallback}, Will create group={summary.WillCreateMissingGroup}.";
+    }
+    catch (Exception ex)
+    {
+        AutoAssignPreviewSummary = "Preview failed: " + ex.Message;
+    }
+}
+```
+
+If `HierarchyGroups`/`HueGroups` are already Lists, remove `.ToList()`.
+
+---
+
+# Codex “one-pass work order” (sequenced checklist)
+
+Paste into Codex:
+
+```text
+Add a “Preview mapping” grid for Hue Group auto assignment in Quick Colour → Hierarchy Builder.
+
+Work order:
+1) Add file QuickColour/HueGroupAutoAssignPreviewModels.cs:
+   - HueGroupAutoAssignPreviewRow (Category, Count, TypeCount, Locked, CurrentGroup, ProposedGroup, Status, Reason, MatchedRuleGroup, MatchedMatcherType, MatchedMatcherValue, WillChange)
+   - HueGroupAutoAssignPreviewResult counters
+
+2) Update QuickColourHueGroupAutoAssignService.cs:
+   - Replace ResolveGroup with ResolveGroupWithDetails returning group + matcher type/value.
+   - Add BuildPreview(map, categories, hueGroups, options, outputRows, log) that:
+     - Does NOT mutate categories/hue groups
+     - Uses same logic as Apply (fallback handling, OnlyAssignWhenCurrentlyFallback, SkipLockedCategories, AutoCreateMissingHueGroups)
+     - Fills outputRows and returns summary counts.
+
+3) Update QuickColourControl.xaml:
+   - Under Hue Groups Auto Assignment section add:
+     - Buttons: Preview (PreviewHueMap_Click) and Apply (existing AutoAssignHueGroups_Click)
+     - Checkbox “Show changes only”
+     - TextBlock bound to AutoAssignPreviewSummary
+     - DataGrid bound to AutoAssignPreviewRows with compact styling (FontSize=12, RowHeight=26, GridLinesVisibility=All)
+     - Columns: Category, Count, Types, Lock, Current, Proposed, Status, Reason, Matched Group, Match Type, Pattern
+
+4) Update QuickColourControl.xaml.cs:
+   - Add ObservableCollection AutoAssignPreviewRows, string AutoAssignPreviewSummary, bool PreviewShowChangesOnly
+   - Add PreviewHueMap_Click that loads map + builds preview rows via service.BuildPreview
+   - Apply “Show changes only” filtering without expensive operations.
+
+5) Build net48 and verify in Navisworks:
+   - Load hierarchy
+   - Use Preview to see proposed assignments
+   - Apply and confirm resulting HueGroupName changes and colours update.
+```
+
+---
+
+## Why this will help immediately
+
+When users see mis-assignments (e.g., “Curtain Wall Panels” going to Mechanical due to a broad “contains ‘Wall’” rule), they’ll be able to:
+
+* identify the exact matcher that fired,
+* adjust JSON,
+* reload,
+* preview again,
+* then apply.
+
+That eliminates “trial and error runs” and makes this feature robust and auditable.
+
+If you want an extra “pro” improvement after this: add a **“Rule Order”** column in the preview (first match wins), so users understand priority.

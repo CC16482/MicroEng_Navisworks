@@ -36,6 +36,7 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetGeneratorQuickBuilderPage.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetGeneratorSmartGroupingPage.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetGeneratorWindow.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetScopePickerWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperControl.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperRunProgressWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepMappingPage.g.cs
@@ -58,6 +59,7 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetGeneratorQuickBuilderPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetGeneratorSmartGroupingPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetGeneratorWindow.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\SmartSetScopePickerWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperControl.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperRunProgressWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepMappingPage.baml

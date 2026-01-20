@@ -1,13 +1,19 @@
 # MicroEng Handoff
 
 ## Status
-- Last build: not rerun after Smart Set Generator/UI updates (rerun `dotnet build` to confirm).
+- Last build: `dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj /p:DeployToProgramData=false` (ProgramData deploy locked by Navisworks).
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
 - Working tree was clean at last check (no uncommitted changes).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
 - Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 
 ## Recent changes
+- Quick Colour tool implemented (Hierarchy Builder tab + hue groups + auto-assign + preview grid).
+- Quick Colour applies temp/permanent overrides by Category + Type (dual-property AND search).
+- Single-hue mode added with hue pick + category contrast bands; types shade within band.
+- Hue Groups editor added (default Architecture/Mechanical/Electrical/Fire/Other) with per-category lock.
+- Auto-assign mapping file created at `%APPDATA%\MicroEng\Navisworks\QuickColour\CategoryDisciplineMap.json` (Open/Reload/Apply + preview rows).
+- Quick Colour window and command added; panel now includes Quick Colour card button.
 - Smart Set Generator rules grid dropdowns now render with template ComboBoxes (Category/Property/Condition) and are clickable.
 - Smart Set Scope Picker window added with WPF-UI styling, dark mode, and tri-state tree checkboxes for model-tree scopes.
 - Smart Grouping now has its own output/scope settings, uses WPF-UI dropdowns, and generation applies grouping scope.
@@ -48,6 +54,25 @@
 - Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
 
 ## Key files touched
+- `MicroEng.Navisworks/QuickColour/NotifyBase.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourModels.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourPalette.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourHierarchyModels.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourHueGroupModels.cs`
+- `MicroEng.Navisworks/QuickColour/HueGroupAutoAssignPreviewModels.cs`
+- `MicroEng.Navisworks/QuickColour/DisciplineMapModels.cs`
+- `MicroEng.Navisworks/QuickColour/DisciplineMapMatcherEngine.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourHueGroupAutoAssignService.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourNavisworksService.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourControl.xaml`
+- `MicroEng.Navisworks/QuickColour/QuickColourControl.xaml.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourWindow.xaml`
+- `MicroEng.Navisworks/QuickColour/QuickColourWindow.xaml.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourPlugins.cs`
+- `MicroEng.Navisworks/MicroEngPlugins.cs`
+- `MicroEng.Navisworks/MicroEngPanelControl.xaml`
+- `MicroEng.Navisworks/MicroEngPanelControl.xaml.cs`
+- `MicroEng.Navisworks/MicroEng.Navisworks.addin`
 - `MicroEng.Navisworks/MicroEngPanelControl.xaml`
 - `MicroEng.Navisworks/MicroEngPanelControl.xaml.cs`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorControl.xaml`
@@ -89,6 +114,11 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
+- Quick Colour: Load hierarchy, edit base hex, Regenerate Type Shades updates type colors.
+- Quick Colour: Single hue mode (lock hue) produces category bands + type subshades.
+- Quick Colour: Hue Groups assigns categories and respects Lock base color.
+- Quick Colour: Auto-assign mapping writes default JSON to AppData; Preview shows proposed changes.
+- Quick Colour: Apply Temporary/Permanent colors + optional Search/Snapshot set output.
 - Smart Sets: Condition/category/property dropdowns are clickable in Quick Builder rules grid.
 - Smart Sets: Include Blanks toggles empty-set generation in Quick Builder and Smart Grouping.
 - Smart Sets: Scope picker tree uses WPF-UI checkbox visuals; indeterminate only shows for ancestors.

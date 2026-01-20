@@ -19,11 +19,15 @@
     <ResourceDictionary>
       <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
       <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
-      <Style x:Key="RuleValueTextBoxStyle" TargetType="TextBox">
+      <Style x:Key="RuleValueTextBoxStyle"
+             TargetType="TextBox"
+             BasedOn="{StaticResource {x:Type TextBox}}">
         <Setter Property="Padding" Value="4,1" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
       </Style>
-      <Style x:Key="RuleComboBoxStyle" TargetType="ComboBox">
+      <Style x:Key="RuleComboBoxStyle"
+             TargetType="ComboBox"
+             BasedOn="{StaticResource {x:Type ComboBox}}">
         <Setter Property="Padding" Value="4,1" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="IsEditable" Value="True" />
@@ -117,6 +121,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="Auto" />
@@ -163,13 +168,47 @@
                       SelectedItem="{Binding CurrentRecipe.ScopeSelectionSetName}" />
           </Grid>
 
-          <StackPanel Grid.Row="2"
+          <CheckBox Grid.Row="2"
+                    Grid.ColumnSpan="4"
+                    Content="Include Blanks"
+                    IsChecked="{Binding CurrentRecipe.IncludeBlanks}"
+                    Margin="0,6,0,0"
+                    VerticalAlignment="Center" />
+
+          <StackPanel Grid.Row="3"
                       Grid.ColumnSpan="4"
                       Orientation="Horizontal"
                       HorizontalAlignment="Right"
                       Margin="0,6,0,0">
-            <ui:Button Content="Use current selection" Click="UseCurrentSelectionScope_Click" />
-            <ui:Button Content="Clear scope" Margin="6,0,0,0" Click="ClearScope_Click" />
+            <ui:Button Content="Pick scope..." Click="PickScope_Click">
+              <ui:Button.Style>
+                <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding CurrentRecipe.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.ModelTree}">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding CurrentRecipe.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.PropertyFilter}">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </ui:Button.Style>
+            </ui:Button>
+            <ui:Button Content="Use current selection" Margin="6,0,0,0" Click="UseCurrentSelectionScope_Click">
+              <ui:Button.Style>
+                <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding CurrentRecipe.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.CurrentSelection}">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </ui:Button.Style>
+            </ui:Button>
+            <ui:Button Content="Clear scope" Margin="6,0,0,0" Click="ClearScope_Click"
+                       Visibility="{Binding CurrentRecipe.IsScopeConstrained, Converter={StaticResource BoolToVisibilityConverter}}" />
           </StackPanel>
         </Grid>
 
@@ -230,7 +269,6 @@
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
                   <CheckBox IsChecked="{Binding Enabled}"
-                            Style="{DynamicResource SmartSetNeutralCheckBoxStyle}"
                             Padding="0"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center" />
@@ -238,26 +276,35 @@
               </DataGridTemplateColumn.CellTemplate>
             </DataGridTemplateColumn>
             <DataGridTextColumn Header="Group" Binding="{Binding GroupId}" Width="60" />
-            <DataGridComboBoxColumn Header="Category"
-                                    Width="170"
-                                    ItemsSource="{Binding DataContext.CategoryOptions, ElementName=Root}"
-                                    SelectedItemBinding="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
-                                    ElementStyle="{StaticResource RuleComboBoxStyle}"
-                                    EditingElementStyle="{StaticResource RuleComboBoxStyle}" />
-            <DataGridComboBoxColumn Header="Property"
-                                    Width="190"
-                                    ItemsSource="{Binding PropertyOptions}"
-                                    SelectedItemBinding="{Binding Property, UpdateSourceTrigger=PropertyChanged}"
-                                    ElementStyle="{StaticResource RuleComboBoxStyle}"
-                                    EditingElementStyle="{StaticResource RuleComboBoxStyle}" />
-            <DataGridComboBoxColumn Header="Condition"
-                                    Width="120"
-                                    ItemsSource="{Binding DataContext.ConditionOptions, ElementName=Root}"
-                                    SelectedValuePath="Value"
-                                    DisplayMemberPath="Label"
-                                    SelectedValueBinding="{Binding Operator, UpdateSourceTrigger=PropertyChanged}"
-                                    ElementStyle="{StaticResource RuleConditionComboBoxStyle}"
-                                    EditingElementStyle="{StaticResource RuleConditionComboBoxStyle}" />
+            <DataGridTemplateColumn Header="Category" Width="170">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <ComboBox ItemsSource="{Binding DataContext.CategoryOptions, RelativeSource={RelativeSource AncestorType={x:Type smartsets:SmartSetGeneratorQuickBuilderPage}}}"
+                            SelectedItem="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
+                            Style="{StaticResource RuleComboBoxStyle}" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTemplateColumn Header="Property" Width="190">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <ComboBox ItemsSource="{Binding PropertyOptions}"
+                            SelectedItem="{Binding Property, UpdateSourceTrigger=PropertyChanged}"
+                            Style="{StaticResource RuleComboBoxStyle}" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
+            <DataGridTemplateColumn Header="Condition" Width="120">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <ComboBox ItemsSource="{Binding DataContext.ConditionOptions, RelativeSource={RelativeSource AncestorType={x:Type smartsets:SmartSetGeneratorQuickBuilderPage}}}"
+                            SelectedValuePath="Value"
+                            DisplayMemberPath="Label"
+                            SelectedValue="{Binding Operator, UpdateSourceTrigger=PropertyChanged}"
+                            Style="{StaticResource RuleConditionComboBoxStyle}" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
             <DataGridTemplateColumn Header="Value" Width="*">
               <DataGridTemplateColumn.CellTemplate>
                 <DataTemplate>
@@ -307,8 +354,7 @@
             <CheckBox Content="Fast preview (cached)"
                       IsChecked="{Binding UseFastPreview}"
                       IsEnabled="{Binding CanUseFastPreview}"
-                      ToolTip="Fast preview is disabled when scope is constrained."
-                      Style="{DynamicResource SmartSetNeutralCheckBoxStyle}" />
+                      ToolTip="Fast preview is disabled when scope is constrained." />
             <ui:Button Content="Preview" Margin="8,0,0,0" Click="Preview_Click" />
             <ui:Button Content="Select Results" Margin="6,0,0,0"
                        IsEnabled="{Binding CanSelectPreviewResults}"

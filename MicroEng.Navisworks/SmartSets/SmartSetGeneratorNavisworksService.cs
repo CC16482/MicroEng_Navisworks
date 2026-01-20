@@ -31,6 +31,9 @@ namespace MicroEng.Navisworks.SmartSets
             var wantsSelectionSet = recipe.OutputType == SmartSetOutputType.SelectionSet
                 || recipe.OutputType == SmartSetOutputType.Both;
             var fallbackToSelection = recipe.OutputType == SmartSetOutputType.SearchSet && !supportsSearchSet;
+            var includeBlanks = recipe.IncludeBlanks;
+            ModelItemCollection results = null;
+            var resultCount = 0;
 
             if (!supportsSearchSet && wantsSearchSet)
             {
@@ -38,6 +41,18 @@ namespace MicroEng.Navisworks.SmartSets
                 if (fallbackToSelection)
                 {
                     log?.Invoke("Creating Selection Set snapshot instead.");
+                }
+            }
+
+            if (wantsSelectionSet || fallbackToSelection || !includeBlanks)
+            {
+                results = GetGroupedResults(doc, recipe, rules, out _, log);
+                resultCount = results?.Count ?? 0;
+
+                if (!includeBlanks && resultCount == 0)
+                {
+                    log?.Invoke($"Skipped empty set: {recipe.Name} (Include Blanks disabled).");
+                    return;
                 }
             }
 
@@ -60,13 +75,13 @@ namespace MicroEng.Navisworks.SmartSets
             if (wantsSelectionSet || fallbackToSelection)
             {
                 var folder = EnsureFolder(doc, recipe.FolderPath);
-                var results = GetGroupedResults(doc, recipe, rules, out _, log);
                 var selectionName = recipe.Name + " (Snapshot)";
                 if (fallbackToSelection)
                 {
                     selectionName = recipe.Name;
                 }
-                var selSet = new SelectionSet(results)
+                var selectionResults = results ?? new ModelItemCollection();
+                var selSet = new SelectionSet(selectionResults)
                 {
                     DisplayName = MakeUniqueName(folder, selectionName)
                 };
@@ -117,6 +132,7 @@ namespace MicroEng.Navisworks.SmartSets
                 || recipe.OutputType == SmartSetOutputType.Both;
             var wantsSelectionSet = recipe.OutputType == SmartSetOutputType.SelectionSet
                 || recipe.OutputType == SmartSetOutputType.Both;
+            var includeBlanks = recipe.IncludeBlanks;
 
             var baseRules = rules.Where(r => !ReferenceEquals(r, splitRule)).ToList();
             var supportsSearchSet = baseRules.All(IsSearchSetSupportedOperator);
@@ -126,7 +142,7 @@ namespace MicroEng.Navisworks.SmartSets
                 log?.Invoke("Search Set output disabled: unsupported operators present.");
             }
 
-            var folder = EnsureFolder(doc, recipe.FolderPath);
+            GroupItem folder = null;
             var created = 0;
 
             foreach (var value in values)
@@ -146,8 +162,20 @@ namespace MicroEng.Navisworks.SmartSets
 
                 var setName = BuildMultiSetName(recipe.Name, value);
 
+                ModelItemCollection results = null;
+                if (!includeBlanks || wantsSelectionSet)
+                {
+                    results = GetGroupedResults(doc, recipe, rulesForSet, out _, log);
+                    if (!includeBlanks && (results?.Count ?? 0) == 0)
+                    {
+                        log?.Invoke($"Skipped empty set: {setName} (Include Blanks disabled).");
+                        continue;
+                    }
+                }
+
                 if (wantsSearchSet && supportsSearchSet)
                 {
+                    folder ??= EnsureFolder(doc, recipe.FolderPath);
                     var search = BuildSearchForGroup(doc, recipe, rulesForSet, forSearchSet: true, out _, log);
                     var ss = new SelectionSet(search)
                     {
@@ -160,7 +188,7 @@ namespace MicroEng.Navisworks.SmartSets
 
                 if (wantsSelectionSet)
                 {
-                    var results = GetGroupedResults(doc, recipe, rulesForSet, out _, log);
+                    folder ??= EnsureFolder(doc, recipe.FolderPath);
                     var selSet = new SelectionSet(results)
                     {
                         DisplayName = MakeUniqueName(folder, setName + " (Snapshot)")
@@ -216,6 +244,7 @@ namespace MicroEng.Navisworks.SmartSets
                 || recipe.OutputType == SmartSetOutputType.Both;
             var wantsSelectionSet = recipe.OutputType == SmartSetOutputType.SelectionSet
                 || recipe.OutputType == SmartSetOutputType.Both;
+            var includeBlanks = recipe.IncludeBlanks;
 
             var baseRules = rules.Where(r => !ReferenceEquals(r, splitRule)).ToList();
             var supportsSearchSet = baseRules.All(IsSearchSetSupportedOperator);
@@ -232,11 +261,23 @@ namespace MicroEng.Navisworks.SmartSets
                 return 0;
             }
 
-            var folder = EnsureFolder(doc, recipe.FolderPath);
+            ModelItemCollection results = null;
+            if (!includeBlanks || wantsSelectionSet)
+            {
+                results = search.FindAll(doc, false);
+                if (!includeBlanks && (results?.Count ?? 0) == 0)
+                {
+                    log?.Invoke($"Skipped empty set: {recipe.Name} (Include Blanks disabled).");
+                    return 0;
+                }
+            }
+
+            GroupItem folder = null;
             var created = 0;
 
             if (wantsSearchSet && supportsSearchSet)
             {
+                folder ??= EnsureFolder(doc, recipe.FolderPath);
                 var ss = new SelectionSet(search)
                 {
                     DisplayName = MakeUniqueName(folder, recipe.Name)
@@ -248,7 +289,7 @@ namespace MicroEng.Navisworks.SmartSets
 
             if (wantsSelectionSet)
             {
-                var results = search.FindAll(doc, false);
+                folder ??= EnsureFolder(doc, recipe.FolderPath);
                 var selSet = new SelectionSet(results)
                 {
                     DisplayName = MakeUniqueName(folder, recipe.Name + " (Snapshot)")
@@ -263,17 +304,19 @@ namespace MicroEng.Navisworks.SmartSets
 
         public void GenerateGroupedSearchSets(
             Document doc,
-            SmartSetRecipe recipe,
-            string folderPath,
-            string baseName,
+            SmartSetGroupingSpec grouping,
             string cat1,
             string prop1,
             bool use2,
             string cat2,
             string prop2,
-            IEnumerable<SmartGroupRow> groups)
+            IEnumerable<SmartGroupRow> groups,
+            Action<string> log = null)
         {
-            var folder = EnsureFolder(doc, folderPath);
+            var folderPath = grouping?.OutputFolderPath ?? "MicroEng/Smart Sets";
+            var baseName = grouping?.OutputName ?? "";
+            var includeBlanks = grouping?.IncludeBlanks ?? false;
+            GroupItem folder = null;
 
             foreach (var group in groups)
             {
@@ -303,8 +346,19 @@ namespace MicroEng.Navisworks.SmartSets
                     });
                 }
 
-                var search = BuildSearchForGroup(doc, recipe, rules, forSearchSet: true, out _, null);
+                var search = BuildSearchForGroup(doc, grouping, rules, forSearchSet: true, out _, null);
 
+                if (!includeBlanks)
+                {
+                    var results = search.FindAll(doc, false);
+                    if (results == null || results.Count == 0)
+                    {
+                        log?.Invoke($"Skipped empty set: {recipeName} (Include Blanks disabled).");
+                        continue;
+                    }
+                }
+
+                folder ??= EnsureFolder(doc, folderPath);
                 var set = new SelectionSet(search)
                 {
                     DisplayName = MakeUniqueName(folder, recipeName)
@@ -403,6 +457,77 @@ namespace MicroEng.Navisworks.SmartSets
 
             requiresPostFilter = false;
 
+            var scopeFilter = BuildScopeFilterCondition(recipe, log);
+            if (scopeFilter != null)
+            {
+                search.SearchConditions.Add(scopeFilter);
+            }
+
+            foreach (var rule in rules)
+            {
+                if (rule == null || !rule.Enabled)
+                {
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(rule.Category) || string.IsNullOrWhiteSpace(rule.Property))
+                {
+                    continue;
+                }
+
+                var cond = SearchCondition.HasPropertyByDisplayName(rule.Category, rule.Property);
+
+                var effectiveOperator = GetEffectiveOperator(rule);
+
+                switch (effectiveOperator)
+                {
+                    case SmartSetOperator.Defined:
+                        search.SearchConditions.Add(cond);
+                        break;
+                    case SmartSetOperator.Undefined:
+                        search.SearchConditions.Add(cond.Negate());
+                        break;
+                    case SmartSetOperator.Equals:
+                        search.SearchConditions.Add(cond.EqualValue(new VariantData(rule.Value ?? "")));
+                        break;
+                    case SmartSetOperator.NotEquals:
+                        search.SearchConditions.Add(cond.EqualValue(new VariantData(rule.Value ?? "")).Negate());
+                        break;
+                    case SmartSetOperator.Contains:
+                        search.SearchConditions.Add(cond.DisplayStringContains(rule.Value ?? ""));
+                        break;
+                    case SmartSetOperator.Wildcard:
+                        search.SearchConditions.Add(cond.DisplayStringWildcard(rule.Value ?? ""));
+                        break;
+                    default:
+                        requiresPostFilter = true;
+                        search.SearchConditions.Add(cond);
+                        break;
+                }
+            }
+
+            return search;
+        }
+
+        private Search BuildSearchForGroup(
+            Document doc,
+            SmartSetGroupingSpec grouping,
+            IEnumerable<SmartSetRule> rules,
+            bool forSearchSet,
+            out bool requiresPostFilter,
+            Action<string> log = null)
+        {
+            var search = new Search();
+            ApplyScopeToSearch(doc, grouping, search, log);
+
+            requiresPostFilter = false;
+
+            var scopeFilter = BuildScopeFilterCondition(grouping, log);
+            if (scopeFilter != null)
+            {
+                search.SearchConditions.Add(scopeFilter);
+            }
+
             foreach (var rule in rules)
             {
                 if (rule == null || !rule.Enabled)
@@ -462,10 +587,16 @@ namespace MicroEng.Navisworks.SmartSets
 
             var search = new Search();
             ApplyScopeToSearch(doc, recipe, search, log);
+            var scopeFilter = BuildScopeFilterCondition(recipe, log);
 
             foreach (var value in values)
             {
                 var group = new List<SearchCondition>();
+
+                if (scopeFilter != null)
+                {
+                    group.Add(scopeFilter);
+                }
 
                 foreach (var rule in baseRules)
                 {
@@ -537,6 +668,12 @@ namespace MicroEng.Navisworks.SmartSets
                 return;
             }
 
+            if (recipe.ScopeMode == SmartSetScopeMode.PropertyFilter)
+            {
+                search.Selection.SelectAll();
+                return;
+            }
+
             if (recipe.ScopeMode == SmartSetScopeMode.CurrentSelection)
             {
                 var selection = doc.CurrentSelection?.SelectedItems;
@@ -566,6 +703,96 @@ namespace MicroEng.Navisworks.SmartSets
                 if (items == null || items.Count == 0)
                 {
                     log?.Invoke($"Scope selection set not found or empty: {name}. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                search.Selection.Clear();
+                search.Selection.CopyFrom(items);
+                return;
+            }
+
+            if (recipe.ScopeMode == SmartSetScopeMode.ModelTree)
+            {
+                var items = ResolveScopeModelItems(doc, recipe, log);
+                if (items == null || items.Count == 0)
+                {
+                    log?.Invoke("Scope tree selection could not be resolved. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                search.Selection.Clear();
+                search.Selection.CopyFrom(items);
+                return;
+            }
+
+            search.Selection.SelectAll();
+        }
+
+        private static void ApplyScopeToSearch(Document doc, SmartSetGroupingSpec grouping, Search search, Action<string> log)
+        {
+            if (search == null)
+            {
+                return;
+            }
+
+            if (doc == null || grouping == null || grouping.ScopeMode == SmartSetScopeMode.AllModel)
+            {
+                search.Selection.SelectAll();
+                return;
+            }
+
+            if (grouping.ScopeMode == SmartSetScopeMode.PropertyFilter)
+            {
+                search.Selection.SelectAll();
+                return;
+            }
+
+            if (grouping.ScopeMode == SmartSetScopeMode.CurrentSelection)
+            {
+                var selection = doc.CurrentSelection?.SelectedItems;
+                if (selection == null || selection.Count == 0)
+                {
+                    log?.Invoke("Scope uses current selection but it is empty. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                search.Selection.Clear();
+                search.Selection.CopyFrom(selection);
+                return;
+            }
+
+            if (grouping.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
+            {
+                var name = grouping.ScopeSelectionSetName;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    log?.Invoke("Scope selection set not specified. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                var items = GetSelectionSetItems(doc, name);
+                if (items == null || items.Count == 0)
+                {
+                    log?.Invoke($"Scope selection set not found or empty: {name}. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                search.Selection.Clear();
+                search.Selection.CopyFrom(items);
+                return;
+            }
+
+            if (grouping.ScopeMode == SmartSetScopeMode.ModelTree)
+            {
+                var items = ResolveScopeModelItems(doc, grouping, log);
+                if (items == null || items.Count == 0)
+                {
+                    log?.Invoke("Scope tree selection could not be resolved. Using entire model.");
                     search.Selection.SelectAll();
                     return;
                 }
@@ -625,6 +852,214 @@ namespace MicroEng.Navisworks.SmartSets
             }
 
             return null;
+        }
+
+        private static ModelItemCollection ResolveScopeModelItems(Document doc, SmartSetRecipe recipe, Action<string> log)
+        {
+            if (doc?.Models?.RootItems == null || recipe?.ScopeModelPaths == null || recipe.ScopeModelPaths.Count == 0)
+            {
+                return null;
+            }
+
+            var items = new ModelItemCollection();
+            var added = new HashSet<Guid>();
+            foreach (var path in recipe.ScopeModelPaths)
+            {
+                var resolved = ResolveModelPath(doc.Models.RootItems, path);
+                if (resolved == null)
+                {
+                    log?.Invoke($"Scope path not found: {string.Join(" > ", path ?? new List<string>())}");
+                    continue;
+                }
+
+                var id = resolved.InstanceGuid;
+                if (id == Guid.Empty || added.Add(id))
+                {
+                    items.Add(resolved);
+                }
+            }
+
+            return items;
+        }
+
+        private static ModelItemCollection ResolveScopeModelItems(Document doc, SmartSetGroupingSpec grouping, Action<string> log)
+        {
+            if (doc?.Models?.RootItems == null || grouping?.ScopeModelPaths == null || grouping.ScopeModelPaths.Count == 0)
+            {
+                return null;
+            }
+
+            var items = new ModelItemCollection();
+            var added = new HashSet<Guid>();
+            foreach (var path in grouping.ScopeModelPaths)
+            {
+                var resolved = ResolveModelPath(doc.Models.RootItems, path);
+                if (resolved == null)
+                {
+                    log?.Invoke($"Scope path not found: {string.Join(" > ", path ?? new List<string>())}");
+                    continue;
+                }
+
+                var id = resolved.InstanceGuid;
+                if (id == Guid.Empty || added.Add(id))
+                {
+                    items.Add(resolved);
+                }
+            }
+
+            return items;
+        }
+
+        private static ModelItem ResolveModelPath(IEnumerable<ModelItem> roots, IReadOnlyList<string> path)
+        {
+            if (roots == null || path == null || path.Count == 0)
+            {
+                return null;
+            }
+
+            var current = FindRootByLabel(roots, path[0]);
+            if (current == null)
+            {
+                return null;
+            }
+
+            for (var i = 1; i < path.Count; i++)
+            {
+                var segment = path[i];
+                if (string.IsNullOrWhiteSpace(segment))
+                {
+                    return null;
+                }
+
+                var next = FindChildByLabel(current, segment);
+                if (next == null)
+                {
+                    return null;
+                }
+
+                current = next;
+            }
+
+            return current;
+        }
+
+        private static ModelItem FindRootByLabel(IEnumerable<ModelItem> roots, string label)
+        {
+            if (string.IsNullOrWhiteSpace(label))
+            {
+                return null;
+            }
+
+            foreach (var root in roots)
+            {
+                if (root == null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(GetItemLabel(root), label, StringComparison.OrdinalIgnoreCase))
+                {
+                    return root;
+                }
+            }
+
+            return null;
+        }
+
+        private static ModelItem FindChildByLabel(ModelItem parent, string label)
+        {
+            try
+            {
+                if (parent?.Children == null)
+                {
+                    return null;
+                }
+
+                foreach (var child in parent.Children)
+                {
+                    if (child == null)
+                    {
+                        continue;
+                    }
+
+                    if (string.Equals(GetItemLabel(child), label, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return child;
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+
+            return null;
+        }
+
+        private static string GetItemLabel(ModelItem item)
+        {
+            if (item == null)
+            {
+                return "";
+            }
+
+            var label = item.DisplayName ?? "";
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                return label;
+            }
+
+            label = item.ClassDisplayName ?? "";
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                return label;
+            }
+
+            label = item.ClassName ?? "";
+            if (!string.IsNullOrWhiteSpace(label))
+            {
+                return label;
+            }
+
+            return item.InstanceGuid.ToString();
+        }
+
+        private static SearchCondition BuildScopeFilterCondition(SmartSetRecipe recipe, Action<string> log)
+        {
+            if (recipe == null || recipe.ScopeMode != SmartSetScopeMode.PropertyFilter)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(recipe.ScopeFilterCategory)
+                || string.IsNullOrWhiteSpace(recipe.ScopeFilterProperty)
+                || string.IsNullOrWhiteSpace(recipe.ScopeFilterValue))
+            {
+                log?.Invoke("Scope property filter is incomplete. Using entire model.");
+                return null;
+            }
+
+            return SearchCondition.HasPropertyByDisplayName(recipe.ScopeFilterCategory, recipe.ScopeFilterProperty)
+                .EqualValue(new VariantData(recipe.ScopeFilterValue ?? ""));
+        }
+
+        private static SearchCondition BuildScopeFilterCondition(SmartSetGroupingSpec grouping, Action<string> log)
+        {
+            if (grouping == null || grouping.ScopeMode != SmartSetScopeMode.PropertyFilter)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(grouping.ScopeFilterCategory)
+                || string.IsNullOrWhiteSpace(grouping.ScopeFilterProperty)
+                || string.IsNullOrWhiteSpace(grouping.ScopeFilterValue))
+            {
+                log?.Invoke("Scope property filter is incomplete. Using entire model.");
+                return null;
+            }
+
+            return SearchCondition.HasPropertyByDisplayName(grouping.ScopeFilterCategory, grouping.ScopeFilterProperty)
+                .EqualValue(new VariantData(grouping.ScopeFilterValue ?? ""));
         }
 
         private static bool TryBuildSearchCondition(SmartSetRule rule, out SearchCondition condition)

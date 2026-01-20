@@ -164,6 +164,8 @@ namespace MicroEng.Navisworks.SmartSets
 
         public ObservableCollection<string> ScraperProfiles { get; } = new ObservableCollection<string>();
         public ObservableCollection<string> CategoryOptions { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> GroupByPropertyOptions { get; } = new ObservableCollection<string>();
+        public ObservableCollection<string> ThenByPropertyOptions { get; } = new ObservableCollection<string>();
         public ObservableCollection<ConditionOption> ConditionOptions { get; }
         public ObservableCollection<SearchSetModeOption> SearchSetModeOptions { get; }
         public ObservableCollection<SearchInModeOption> SearchInModeOptions { get; }
@@ -192,7 +194,9 @@ namespace MicroEng.Navisworks.SmartSets
 
                 _currentRecipe = value ?? new SmartSetRecipe();
                 _currentRecipe.Rules ??= new ObservableCollection<SmartSetRule>();
+                _currentRecipe.Grouping ??= new SmartSetGroupingSpec();
                 EnsureScopeDefaults(_currentRecipe);
+                EnsureGroupingDefaults(_currentRecipe.Grouping);
                 HookRecipe(_currentRecipe);
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(CanUseFastPreview));
@@ -219,6 +223,11 @@ namespace MicroEng.Navisworks.SmartSets
                     if (string.IsNullOrWhiteSpace(CurrentRecipe.FolderPath))
                     {
                         CurrentRecipe.FolderPath = BuildDefaultFolderPath(value);
+                    }
+
+                    if (CurrentRecipe.Grouping != null && string.IsNullOrWhiteSpace(CurrentRecipe.Grouping.OutputFolderPath))
+                    {
+                        CurrentRecipe.Grouping.OutputFolderPath = BuildDefaultFolderPath(value);
                     }
                 }
                 OnPropertyChanged();
@@ -372,6 +381,10 @@ namespace MicroEng.Navisworks.SmartSets
             }
 
             recipe.PropertyChanged += OnRecipePropertyChanged;
+            if (recipe.Grouping != null)
+            {
+                recipe.Grouping.PropertyChanged += OnGroupingPropertyChanged;
+            }
             if (recipe.Rules == null)
             {
                 return;
@@ -392,6 +405,10 @@ namespace MicroEng.Navisworks.SmartSets
             }
 
             recipe.PropertyChanged -= OnRecipePropertyChanged;
+            if (recipe.Grouping != null)
+            {
+                recipe.Grouping.PropertyChanged -= OnGroupingPropertyChanged;
+            }
             if (recipe.Rules == null)
             {
                 return;
@@ -413,21 +430,11 @@ namespace MicroEng.Navisworks.SmartSets
 
             if (string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeMode), StringComparison.Ordinal))
             {
-                if (recipe.ScopeMode == SmartSetScopeMode.AllModel)
+                UpdateScopeSummary(recipe);
+
+                if (recipe.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
                 {
-                    recipe.ScopeSelectionSetName = "";
-                    recipe.ScopeSummary = "Entire model";
-                }
-                else if (recipe.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
-                {
-                    recipe.ScopeSummary = string.IsNullOrWhiteSpace(recipe.ScopeSelectionSetName)
-                        ? "Saved selection set"
-                        : $"Saved selection set: {recipe.ScopeSelectionSetName}";
                     RefreshSavedSelectionSets();
-                }
-                else if (recipe.ScopeMode == SmartSetScopeMode.CurrentSelection)
-                {
-                    recipe.ScopeSummary = "Current selection";
                 }
 
                 OnPropertyChanged(nameof(CanUseFastPreview));
@@ -435,12 +442,18 @@ namespace MicroEng.Navisworks.SmartSets
             }
             else if (string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeSelectionSetName), StringComparison.Ordinal))
             {
-                if (recipe.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
-                {
-                    recipe.ScopeSummary = string.IsNullOrWhiteSpace(recipe.ScopeSelectionSetName)
-                        ? "Saved selection set"
-                        : $"Saved selection set: {recipe.ScopeSelectionSetName}";
-                }
+                UpdateScopeSummary(recipe);
+                OnPropertyChanged(nameof(CanUseFastPreview));
+                EnforcePreviewCompatibility(showStatus: false);
+            }
+            else if (string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeModelPaths), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeFilterCategory), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeFilterProperty), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetRecipe.ScopeFilterValue), StringComparison.Ordinal))
+            {
+                UpdateScopeSummary(recipe);
+                OnPropertyChanged(nameof(CanUseFastPreview));
+                EnforcePreviewCompatibility(showStatus: false);
             }
         }
 
@@ -451,29 +464,145 @@ namespace MicroEng.Navisworks.SmartSets
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(recipe.ScopeSummary))
+            recipe.ScopeSelectionSetName ??= "";
+            recipe.ScopeModelPaths ??= new List<List<string>>();
+            recipe.ScopeFilterCategory ??= "";
+            recipe.ScopeFilterProperty ??= "";
+            recipe.ScopeFilterValue ??= "";
+
+            UpdateScopeSummary(recipe);
+        }
+
+        private static void EnsureGroupingDefaults(SmartSetGroupingSpec grouping)
+        {
+            if (grouping == null)
             {
-                if (recipe.ScopeMode == SmartSetScopeMode.AllModel)
-                {
+                return;
+            }
+
+            grouping.OutputName ??= "New Grouping";
+            grouping.OutputFolderPath ??= "MicroEng/Smart Sets";
+            grouping.ScopeSelectionSetName ??= "";
+            grouping.ScopeModelPaths ??= new List<List<string>>();
+            grouping.ScopeFilterCategory ??= "";
+            grouping.ScopeFilterProperty ??= "";
+            grouping.ScopeFilterValue ??= "";
+
+            UpdateGroupingScopeSummary(grouping);
+        }
+
+        private static void UpdateScopeSummary(SmartSetRecipe recipe)
+        {
+            if (recipe == null)
+            {
+                return;
+            }
+
+            switch (recipe.ScopeMode)
+            {
+                case SmartSetScopeMode.AllModel:
                     recipe.ScopeSummary = "Entire model";
-                }
-                else if (recipe.ScopeMode == SmartSetScopeMode.CurrentSelection)
-                {
-                    recipe.ScopeSummary = "Current selection";
-                }
-                else if (recipe.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
-                {
+                    break;
+                case SmartSetScopeMode.CurrentSelection:
+                    if (string.IsNullOrWhiteSpace(recipe.ScopeSummary)
+                        || !recipe.ScopeSummary.StartsWith("Current selection", StringComparison.OrdinalIgnoreCase))
+                    {
+                        recipe.ScopeSummary = "Current selection";
+                    }
+                    break;
+                case SmartSetScopeMode.SavedSelectionSet:
                     recipe.ScopeSummary = string.IsNullOrWhiteSpace(recipe.ScopeSelectionSetName)
                         ? "Saved selection set"
                         : $"Saved selection set: {recipe.ScopeSelectionSetName}";
-                }
-                else
-                {
-                    recipe.ScopeSummary = "Scope active";
-                }
+                    break;
+                case SmartSetScopeMode.ModelTree:
+                    recipe.ScopeSummary = BuildTreeScopeSummary(recipe.ScopeModelPaths);
+                    break;
+                case SmartSetScopeMode.PropertyFilter:
+                    recipe.ScopeSummary = BuildFilterScopeSummary(recipe);
+                    break;
+                default:
+                    if (string.IsNullOrWhiteSpace(recipe.ScopeSummary))
+                    {
+                        recipe.ScopeSummary = "Scope active";
+                    }
+                    break;
+            }
+        }
+
+        private static void UpdateGroupingScopeSummary(SmartSetGroupingSpec grouping)
+        {
+            if (grouping == null)
+            {
+                return;
             }
 
-            recipe.ScopeSelectionSetName ??= "";
+            switch (grouping.ScopeMode)
+            {
+                case SmartSetScopeMode.AllModel:
+                    grouping.ScopeSummary = "Entire model";
+                    break;
+                case SmartSetScopeMode.CurrentSelection:
+                    if (string.IsNullOrWhiteSpace(grouping.ScopeSummary)
+                        || !grouping.ScopeSummary.StartsWith("Current selection", StringComparison.OrdinalIgnoreCase))
+                    {
+                        grouping.ScopeSummary = "Current selection";
+                    }
+                    break;
+                case SmartSetScopeMode.SavedSelectionSet:
+                    grouping.ScopeSummary = string.IsNullOrWhiteSpace(grouping.ScopeSelectionSetName)
+                        ? "Saved selection set"
+                        : $"Saved selection set: {grouping.ScopeSelectionSetName}";
+                    break;
+                case SmartSetScopeMode.ModelTree:
+                    grouping.ScopeSummary = BuildTreeScopeSummary(grouping.ScopeModelPaths);
+                    break;
+                case SmartSetScopeMode.PropertyFilter:
+                    grouping.ScopeSummary = BuildFilterScopeSummary(grouping);
+                    break;
+                default:
+                    if (string.IsNullOrWhiteSpace(grouping.ScopeSummary))
+                    {
+                        grouping.ScopeSummary = "Scope active";
+                    }
+                    break;
+            }
+        }
+
+        private static string BuildTreeScopeSummary(IReadOnlyList<List<string>> paths)
+        {
+            if (paths == null || paths.Count == 0)
+            {
+                return "Tree selection";
+            }
+
+            if (paths.Count == 1)
+            {
+                var path = paths[0] ?? new List<string>();
+                return path.Count == 0 ? "Tree selection" : $"Tree selection: {string.Join(" > ", path)}";
+            }
+
+            return $"Tree selection ({paths.Count} items)";
+        }
+
+        private static string BuildFilterScopeSummary(SmartSetRecipe recipe)
+        {
+            if (recipe == null || !recipe.HasScopePropertyFilter)
+            {
+                return "Property filter";
+            }
+
+            return $"Property filter: {recipe.ScopeFilterCategory} / {recipe.ScopeFilterProperty} = {recipe.ScopeFilterValue}";
+        }
+
+        private static string BuildFilterScopeSummary(SmartSetGroupingSpec grouping)
+        {
+            if (grouping == null || !grouping.HasScopePropertyFilter)
+            {
+                return "Property filter";
+            }
+
+            return $"Property filter: {grouping.ScopeFilterCategory} / {grouping.ScopeFilterProperty} = {grouping.ScopeFilterValue}";
         }
 
         private void EnforcePreviewCompatibility(bool showStatus)
@@ -553,6 +682,47 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
+        private void OnGroupingPropertyChanged(object sender, PropertyChangedEventArgs e)
+        {
+            if (sender is not SmartSetGroupingSpec grouping)
+            {
+                return;
+            }
+
+            if (string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.GroupByCategory), StringComparison.Ordinal))
+            {
+                EnsureCategoryOption(grouping.GroupByCategory);
+                UpdateGroupingPropertyOptionsFor(grouping.GroupByCategory, grouping.GroupByProperty, GroupByPropertyOptions);
+            }
+            else if (string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ThenByCategory), StringComparison.Ordinal))
+            {
+                EnsureCategoryOption(grouping.ThenByCategory);
+                UpdateGroupingPropertyOptionsFor(grouping.ThenByCategory, grouping.ThenByProperty, ThenByPropertyOptions);
+            }
+            else if (string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.GroupByProperty), StringComparison.Ordinal))
+            {
+                EnsurePropertyOption(GroupByPropertyOptions, grouping.GroupByProperty);
+            }
+            else if (string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ThenByProperty), StringComparison.Ordinal))
+            {
+                EnsurePropertyOption(ThenByPropertyOptions, grouping.ThenByProperty);
+            }
+            else if (string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ScopeMode), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ScopeSelectionSetName), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ScopeModelPaths), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ScopeFilterCategory), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ScopeFilterProperty), StringComparison.Ordinal)
+                || string.Equals(e.PropertyName, nameof(SmartSetGroupingSpec.ScopeFilterValue), StringComparison.Ordinal))
+            {
+                if (grouping.ScopeMode == SmartSetScopeMode.SavedSelectionSet)
+                {
+                    RefreshSavedSelectionSets();
+                }
+
+                UpdateGroupingScopeSummary(grouping);
+            }
+        }
+
         private void RefreshCategoryAndPropertyOptions()
         {
             _propertyOptionsByCategory.Clear();
@@ -597,6 +767,20 @@ namespace MicroEng.Navisworks.SmartSets
                     }
                 }
             }
+            if (CurrentRecipe?.Grouping != null)
+            {
+                if (!string.IsNullOrWhiteSpace(CurrentRecipe.Grouping.GroupByCategory)
+                    && !ContainsIgnoreCase(categories, CurrentRecipe.Grouping.GroupByCategory))
+                {
+                    categories.Add(CurrentRecipe.Grouping.GroupByCategory);
+                }
+
+                if (!string.IsNullOrWhiteSpace(CurrentRecipe.Grouping.ThenByCategory)
+                    && !ContainsIgnoreCase(categories, CurrentRecipe.Grouping.ThenByCategory))
+                {
+                    categories.Add(CurrentRecipe.Grouping.ThenByCategory);
+                }
+            }
 
             categories = categories
                 .Where(c => !string.IsNullOrWhiteSpace(c))
@@ -616,6 +800,8 @@ namespace MicroEng.Navisworks.SmartSets
                     UpdateRulePropertyOptions(rule);
                 }
             }
+
+            UpdateGroupingPropertyOptions();
         }
 
         private void UpdateRulePropertyOptions(SmartSetRule rule)
@@ -669,6 +855,49 @@ namespace MicroEng.Navisworks.SmartSets
             if (!ContainsIgnoreCase(rule.PropertyOptions, value))
             {
                 rule.PropertyOptions.Insert(0, value);
+            }
+        }
+
+        private void UpdateGroupingPropertyOptions()
+        {
+            var grouping = CurrentRecipe?.Grouping;
+            if (grouping == null)
+            {
+                GroupByPropertyOptions.Clear();
+                ThenByPropertyOptions.Clear();
+                return;
+            }
+
+            UpdateGroupingPropertyOptionsFor(grouping.GroupByCategory, grouping.GroupByProperty, GroupByPropertyOptions);
+            UpdateGroupingPropertyOptionsFor(grouping.ThenByCategory, grouping.ThenByProperty, ThenByPropertyOptions);
+        }
+
+        private void UpdateGroupingPropertyOptionsFor(string category, string selectedValue, ObservableCollection<string> targetOptions)
+        {
+            targetOptions.Clear();
+
+            if (!string.IsNullOrWhiteSpace(category)
+                && _propertyOptionsByCategory.TryGetValue(category, out var options))
+            {
+                foreach (var option in options)
+                {
+                    targetOptions.Add(option);
+                }
+            }
+
+            EnsurePropertyOption(targetOptions, selectedValue);
+        }
+
+        private static void EnsurePropertyOption(ObservableCollection<string> options, string value)
+        {
+            if (options == null || string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            if (!ContainsIgnoreCase(options, value))
+            {
+                options.Insert(0, value);
             }
         }
 
@@ -781,6 +1010,10 @@ namespace MicroEng.Navisworks.SmartSets
 
             CurrentRecipe.ScopeMode = SmartSetScopeMode.CurrentSelection;
             CurrentRecipe.ScopeSelectionSetName = "";
+            CurrentRecipe.ScopeModelPaths = new List<List<string>>();
+            CurrentRecipe.ScopeFilterCategory = "";
+            CurrentRecipe.ScopeFilterProperty = "";
+            CurrentRecipe.ScopeFilterValue = "";
             CurrentRecipe.ScopeSummary = $"Current selection ({selection.Count} items)";
             EnforcePreviewCompatibility(showStatus: true);
         }
@@ -789,8 +1022,158 @@ namespace MicroEng.Navisworks.SmartSets
         {
             CurrentRecipe.ScopeMode = SmartSetScopeMode.AllModel;
             CurrentRecipe.ScopeSelectionSetName = "";
+            CurrentRecipe.ScopeModelPaths = new List<List<string>>();
+            CurrentRecipe.ScopeFilterCategory = "";
+            CurrentRecipe.ScopeFilterProperty = "";
+            CurrentRecipe.ScopeFilterValue = "";
             CurrentRecipe.ScopeSummary = "Entire model";
             PreviewStatusText = "Scope cleared.";
+        }
+
+        internal void PickScope_Click(object sender, RoutedEventArgs e)
+        {
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null)
+            {
+                PreviewStatusText = "No active document.";
+                return;
+            }
+
+            IEnumerable<ScrapedPropertyDescriptor> properties = null;
+            var session = GetSelectedSession();
+            if (session != null)
+            {
+                properties = new DataScraperSessionAdapter(session).Properties.ToList();
+            }
+
+            var picker = new SmartSetScopePickerWindow(doc, properties, CurrentRecipe)
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            if (picker.ShowDialog() == true && picker.Result != null)
+            {
+                ApplyScopePickerResult(picker.Result);
+            }
+        }
+
+        private void ApplyScopePickerResult(SmartSetScopePickerResult result)
+        {
+            if (result == null)
+            {
+                return;
+            }
+
+            CurrentRecipe.ScopeSelectionSetName = "";
+            CurrentRecipe.ScopeModelPaths = result.ModelPaths ?? new List<List<string>>();
+            CurrentRecipe.ScopeFilterCategory = result.FilterCategory ?? "";
+            CurrentRecipe.ScopeFilterProperty = result.FilterProperty ?? "";
+            CurrentRecipe.ScopeFilterValue = result.FilterValue ?? "";
+            CurrentRecipe.SearchInMode = result.SearchInMode;
+            CurrentRecipe.ScopeMode = result.ScopeMode;
+
+            UpdateScopeSummary(CurrentRecipe);
+            OnPropertyChanged(nameof(CanUseFastPreview));
+            EnforcePreviewCompatibility(showStatus: true);
+        }
+
+        internal void UseCurrentGroupingScope_Click(object sender, RoutedEventArgs e)
+        {
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null || CurrentRecipe?.Grouping == null)
+            {
+                return;
+            }
+
+            var selection = doc.CurrentSelection?.SelectedItems;
+            if (selection == null || selection.Count == 0)
+            {
+                return;
+            }
+
+            var grouping = CurrentRecipe.Grouping;
+            grouping.ScopeMode = SmartSetScopeMode.CurrentSelection;
+            grouping.ScopeSelectionSetName = "";
+            grouping.ScopeModelPaths = new List<List<string>>();
+            grouping.ScopeFilterCategory = "";
+            grouping.ScopeFilterProperty = "";
+            grouping.ScopeFilterValue = "";
+            grouping.ScopeSummary = $"Current selection ({selection.Count} items)";
+        }
+
+        internal void ClearGroupingScope_Click(object sender, RoutedEventArgs e)
+        {
+            var grouping = CurrentRecipe?.Grouping;
+            if (grouping == null)
+            {
+                return;
+            }
+
+            grouping.ScopeMode = SmartSetScopeMode.AllModel;
+            grouping.ScopeSelectionSetName = "";
+            grouping.ScopeModelPaths = new List<List<string>>();
+            grouping.ScopeFilterCategory = "";
+            grouping.ScopeFilterProperty = "";
+            grouping.ScopeFilterValue = "";
+            grouping.ScopeSummary = "Entire model";
+        }
+
+        internal void PickGroupingScope_Click(object sender, RoutedEventArgs e)
+        {
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null || CurrentRecipe?.Grouping == null)
+            {
+                return;
+            }
+
+            IEnumerable<ScrapedPropertyDescriptor> properties = null;
+            var session = GetSelectedSession();
+            if (session != null)
+            {
+                properties = new DataScraperSessionAdapter(session).Properties.ToList();
+            }
+
+            var grouping = CurrentRecipe.Grouping;
+            var tempRecipe = new SmartSetRecipe
+            {
+                SearchInMode = grouping.SearchInMode,
+                ScopeMode = grouping.ScopeMode,
+                ScopeSelectionSetName = grouping.ScopeSelectionSetName,
+                ScopeModelPaths = grouping.ScopeModelPaths?.Select(p => p?.ToList() ?? new List<string>()).ToList()
+                    ?? new List<List<string>>(),
+                ScopeFilterCategory = grouping.ScopeFilterCategory,
+                ScopeFilterProperty = grouping.ScopeFilterProperty,
+                ScopeFilterValue = grouping.ScopeFilterValue
+            };
+
+            var picker = new SmartSetScopePickerWindow(doc, properties, tempRecipe)
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            if (picker.ShowDialog() == true && picker.Result != null)
+            {
+                ApplyGroupingScopePickerResult(picker.Result);
+            }
+        }
+
+        private void ApplyGroupingScopePickerResult(SmartSetScopePickerResult result)
+        {
+            if (result == null || CurrentRecipe?.Grouping == null)
+            {
+                return;
+            }
+
+            var grouping = CurrentRecipe.Grouping;
+            grouping.ScopeSelectionSetName = "";
+            grouping.ScopeModelPaths = result.ModelPaths ?? new List<List<string>>();
+            grouping.ScopeFilterCategory = result.FilterCategory ?? "";
+            grouping.ScopeFilterProperty = result.FilterProperty ?? "";
+            grouping.ScopeFilterValue = result.FilterValue ?? "";
+            grouping.SearchInMode = result.SearchInMode;
+            grouping.ScopeMode = result.ScopeMode;
+
+            UpdateGroupingScopeSummary(grouping);
         }
 
         private void PickProperty_Click(object sender, RoutedEventArgs e)
@@ -1153,6 +1536,15 @@ namespace MicroEng.Navisworks.SmartSets
             {
                 GroupRows.Add(row);
             }
+
+            if (GroupRows.Count == 0)
+            {
+                PreviewStatusText = "No groups found. Adjust Group By/Then By or lower Min Count.";
+            }
+            else
+            {
+                PreviewStatusText = $"Found {GroupRows.Count} groups.";
+            }
         }
 
         internal void GenerateGroups_Click(object sender, RoutedEventArgs e)
@@ -1169,22 +1561,30 @@ namespace MicroEng.Navisworks.SmartSets
             {
                 PreviewGroups_Click(sender, e);
             }
+            if (GroupRows.Count == 0)
+            {
+                return;
+            }
 
-            var folder = string.IsNullOrWhiteSpace(CurrentRecipe.FolderPath)
-                ? BuildDefaultFolderPath(SelectedScraperProfile)
-                : CurrentRecipe.FolderPath;
+            if (string.IsNullOrWhiteSpace(grouping.OutputName))
+            {
+                grouping.OutputName = "New Grouping";
+            }
+            if (string.IsNullOrWhiteSpace(grouping.OutputFolderPath))
+            {
+                grouping.OutputFolderPath = BuildDefaultFolderPath(SelectedScraperProfile);
+            }
 
             _navisworksService.GenerateGroupedSearchSets(
                 doc,
-                CurrentRecipe,
-                folder,
-                CurrentRecipe.Name,
+                grouping,
                 grouping.GroupByCategory,
                 grouping.GroupByProperty,
                 grouping.UseThenBy,
                 grouping.ThenByCategory,
                 grouping.ThenByProperty,
-                GroupRows.ToList());
+                GroupRows.ToList(),
+                msg => MicroEngActions.Log(msg));
 
             MicroEngActions.Log("SmartSets: generated grouped search sets.");
             PreviewStatusText = "Generated grouped search sets.";
@@ -1477,7 +1877,9 @@ namespace MicroEng.Navisworks.SmartSets
             {
                 new ScopeModeOption(SmartSetScopeMode.AllModel, "All model"),
                 new ScopeModeOption(SmartSetScopeMode.CurrentSelection, "Current selection"),
-                new ScopeModeOption(SmartSetScopeMode.SavedSelectionSet, "Saved selection set")
+                new ScopeModeOption(SmartSetScopeMode.SavedSelectionSet, "Saved selection set"),
+                new ScopeModeOption(SmartSetScopeMode.ModelTree, "Tree selection"),
+                new ScopeModeOption(SmartSetScopeMode.PropertyFilter, "Property filter")
             };
         }
 

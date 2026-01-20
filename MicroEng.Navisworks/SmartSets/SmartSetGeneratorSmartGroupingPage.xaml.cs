@@ -24,6 +24,21 @@ namespace MicroEng.Navisworks.SmartSets
             _owner.PickThenBy_Click(sender, e);
         }
 
+        private void PickGroupingScope_Click(object sender, RoutedEventArgs e)
+        {
+            _owner.PickGroupingScope_Click(sender, e);
+        }
+
+        private void UseCurrentGroupingScope_Click(object sender, RoutedEventArgs e)
+        {
+            _owner.UseCurrentGroupingScope_Click(sender, e);
+        }
+
+        private void ClearGroupingScope_Click(object sender, RoutedEventArgs e)
+        {
+            _owner.ClearGroupingScope_Click(sender, e);
+        }
+
         private void PreviewGroups_Click(object sender, RoutedEventArgs e)
         {
             _owner.PreviewGroups_Click(sender, e);

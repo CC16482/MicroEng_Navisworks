@@ -17,7 +17,7 @@ namespace MicroEng.Navisworks
 
         private readonly DataScraperService _service = new();
         private List<ScrapedPropertyView> _currentProperties = new();
-        private ScrapeScopeType _lastScope = ScrapeScopeType.CurrentSelection;
+        private ScrapeScopeType _lastScope = ScrapeScopeType.EntireModel;
         private string _lastSelectionSet;
         private string _lastSearchSet;
         private List<RawRow> _rawRows = new();
@@ -129,7 +129,7 @@ namespace MicroEng.Navisworks
             if (SelectionSetRadio.IsChecked == true) return ScrapeScopeType.SelectionSet;
             if (SearchSetRadio.IsChecked == true) return ScrapeScopeType.SearchSet;
             if (EntireModelRadio.IsChecked == true) return ScrapeScopeType.EntireModel;
-            return ScrapeScopeType.CurrentSelection;
+            return ScrapeScopeType.EntireModel;
         }
 
         private void HistoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -204,7 +204,7 @@ namespace MicroEng.Navisworks
         {
             if (HistoryList.SelectedItem is ScrapeSession session)
             {
-                _lastScope = Enum.TryParse<ScrapeScopeType>(session.ScopeType, out var scope) ? scope : ScrapeScopeType.CurrentSelection;
+                _lastScope = Enum.TryParse<ScrapeScopeType>(session.ScopeType, out var scope) ? scope : ScrapeScopeType.EntireModel;
                 Run_Click(sender, e);
             }
         }

@@ -5,6 +5,7 @@
       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:local="clr-namespace:MicroEng.Navisworks"
+      xmlns:smartsets="clr-namespace:MicroEng.Navisworks.SmartSets"
       xmlns:system="clr-namespace:System;assembly=System"
       mc:Ignorable="d"
       d:DesignHeight="600"
@@ -16,6 +17,15 @@
   <UserControl.Resources>
     <ResourceDictionary>
       <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+      <Style x:Key="GroupingComboBoxStyle"
+             TargetType="ComboBox"
+             BasedOn="{StaticResource {x:Type ComboBox}}">
+        <Setter Property="Padding" Value="4,1" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="IsEditable" Value="True" />
+        <Setter Property="IsTextSearchEnabled" Value="True" />
+      </Style>
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
       </ResourceDictionary.MergedDictionaries>
@@ -24,6 +34,7 @@
 
   <Grid Margin="12">
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
@@ -54,15 +65,139 @@
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="220" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="220" />
+        </Grid.ColumnDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Group Name:" Margin="0,0,6,0" VerticalAlignment="Center" />
+        <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3"
+                 Text="{Binding CurrentRecipe.Grouping.OutputName, UpdateSourceTrigger=PropertyChanged}" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Folder Path:" Margin="0,6,6,0" VerticalAlignment="Center" />
+        <TextBox Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,0"
+                 Text="{Binding CurrentRecipe.Grouping.OutputFolderPath, UpdateSourceTrigger=PropertyChanged}" />
+
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Search in:" Margin="0,6,6,0" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="2" Grid.Column="1" Margin="0,6,0,0"
+                  ItemsSource="{Binding SearchInModeOptions}"
+                  DisplayMemberPath="Label"
+                  SelectedValuePath="Value"
+                  SelectedValue="{Binding CurrentRecipe.Grouping.SearchInMode}"
+                  Style="{StaticResource GroupingComboBoxStyle}" />
+
+        <TextBlock Grid.Row="2" Grid.Column="2" Text="Scope:" Margin="12,6,6,0" VerticalAlignment="Center" />
+        <ComboBox Grid.Row="2" Grid.Column="3" Margin="0,6,0,0"
+                  ItemsSource="{Binding ScopeModeOptions}"
+                  DisplayMemberPath="Label"
+                  SelectedValuePath="Value"
+                  SelectedValue="{Binding CurrentRecipe.Grouping.ScopeMode}"
+                  Style="{StaticResource GroupingComboBoxStyle}" />
+
+        <Grid Grid.Row="3" Grid.ColumnSpan="4">
+          <Grid.Style>
+            <Style TargetType="Grid">
+              <Setter Property="Visibility" Value="Collapsed" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding CurrentRecipe.Grouping.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.SavedSelectionSet}">
+                  <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </Grid.Style>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="220" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="220" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock Grid.Column="0" Text="Saved set:" Margin="0,6,6,0" VerticalAlignment="Center" />
+          <ComboBox Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,0"
+                    ItemsSource="{Binding SavedSelectionSets}"
+                    SelectedItem="{Binding CurrentRecipe.Grouping.ScopeSelectionSetName}"
+                    Style="{StaticResource GroupingComboBoxStyle}" />
+        </Grid>
+
+        <Grid Grid.Row="4" Grid.ColumnSpan="4" Margin="0,6,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+
+          <TextBlock Grid.Column="0"
+                     Text="{Binding CurrentRecipe.Grouping.ScopeSummary, StringFormat=Scope: {0}}"
+                     VerticalAlignment="Center"
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                     Visibility="{Binding CurrentRecipe.Grouping.IsScopeConstrained, Converter={StaticResource BoolToVisibilityConverter}}" />
+
+          <StackPanel Grid.Column="1"
+                      Orientation="Horizontal"
+                      HorizontalAlignment="Right">
+            <ui:Button Content="Pick scope..." Click="PickGroupingScope_Click">
+              <ui:Button.Style>
+                <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding CurrentRecipe.Grouping.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.ModelTree}">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding CurrentRecipe.Grouping.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.PropertyFilter}">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </ui:Button.Style>
+            </ui:Button>
+            <ui:Button Content="Use current selection" Margin="6,0,0,0" Click="UseCurrentGroupingScope_Click">
+              <ui:Button.Style>
+                <Style TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding CurrentRecipe.Grouping.ScopeMode}" Value="{x:Static smartsets:SmartSetScopeMode.CurrentSelection}">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </ui:Button.Style>
+            </ui:Button>
+            <ui:Button Content="Clear scope"
+                       Margin="6,0,0,0"
+                       Click="ClearGroupingScope_Click"
+                       Visibility="{Binding CurrentRecipe.Grouping.IsScopeConstrained, Converter={StaticResource BoolToVisibilityConverter}}" />
+          </StackPanel>
+        </Grid>
+      </Grid>
+    </ui:Card>
+
+    <ui:Card Grid.Row="2"
+             Padding="10"
+             Margin="0,0,0,8"
+             HorizontalAlignment="Stretch"
+             HorizontalContentAlignment="Stretch">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
           <TextBlock Text="Group By:" VerticalAlignment="Center" Margin="0,0,6,0" />
-          <TextBox Width="160"
-                   Text="{Binding CurrentRecipe.Grouping.GroupByCategory, UpdateSourceTrigger=PropertyChanged}" />
+          <ComboBox Width="160"
+                    ItemsSource="{Binding CategoryOptions}"
+                    SelectedItem="{Binding CurrentRecipe.Grouping.GroupByCategory, UpdateSourceTrigger=PropertyChanged}"
+                    Style="{StaticResource GroupingComboBoxStyle}" />
           <TextBlock Text="Property:" VerticalAlignment="Center" Margin="8,0,6,0" />
-          <TextBox Width="200"
-                   Text="{Binding CurrentRecipe.Grouping.GroupByProperty, UpdateSourceTrigger=PropertyChanged}" />
+          <ComboBox Width="200"
+                    ItemsSource="{Binding GroupByPropertyOptions}"
+                    SelectedItem="{Binding CurrentRecipe.Grouping.GroupByProperty, UpdateSourceTrigger=PropertyChanged}"
+                    Style="{StaticResource GroupingComboBoxStyle}" />
           <ui:Button Content="Pick" Margin="6,0,0,0" Click="PickGroupBy_Click" />
         </StackPanel>
 
@@ -70,19 +205,22 @@
           <CheckBox Content="Then By"
                     IsChecked="{Binding CurrentRecipe.Grouping.UseThenBy}"
                     VerticalAlignment="Center"
-                    Margin="0,0,6,0"
-                    Style="{DynamicResource SmartSetNeutralCheckBoxStyle}" />
-          <TextBox Width="160"
-                   Text="{Binding CurrentRecipe.Grouping.ThenByCategory, UpdateSourceTrigger=PropertyChanged}"
-                   IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+                    Margin="0,0,6,0" />
+          <ComboBox Width="160"
+                    ItemsSource="{Binding CategoryOptions}"
+                    SelectedItem="{Binding CurrentRecipe.Grouping.ThenByCategory, UpdateSourceTrigger=PropertyChanged}"
+                    IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}"
+                    Style="{StaticResource GroupingComboBoxStyle}" />
           <TextBlock Text="Property:" VerticalAlignment="Center" Margin="8,0,6,0" />
-          <TextBox Width="200"
-                   Text="{Binding CurrentRecipe.Grouping.ThenByProperty, UpdateSourceTrigger=PropertyChanged}"
-                   IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}" />
+          <ComboBox Width="200"
+                    ItemsSource="{Binding ThenByPropertyOptions}"
+                    SelectedItem="{Binding CurrentRecipe.Grouping.ThenByProperty, UpdateSourceTrigger=PropertyChanged}"
+                    IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}"
+                    Style="{StaticResource GroupingComboBoxStyle}" />
           <ui:Button Content="Pick"
                      Margin="6,0,0,0"
                      IsEnabled="{Binding CurrentRecipe.Grouping.UseThenBy}"
-                     Click="PickThenBy_Click" />
+                    Click="PickThenBy_Click" />
         </StackPanel>
 
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
@@ -95,8 +233,7 @@
           <CheckBox Content="Include Blanks"
                     IsChecked="{Binding CurrentRecipe.Grouping.IncludeBlanks}"
                     Margin="12,0,0,0"
-                    VerticalAlignment="Center"
-                    Style="{DynamicResource SmartSetNeutralCheckBoxStyle}" />
+                    VerticalAlignment="Center" />
         </StackPanel>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,8,0,0">
@@ -106,7 +243,7 @@
       </Grid>
     </ui:Card>
 
-    <ui:Card Grid.Row="2"
+    <ui:Card Grid.Row="3"
              Padding="10"
              HorizontalAlignment="Stretch"
              HorizontalContentAlignment="Stretch"

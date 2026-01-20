@@ -88,11 +88,11 @@
             <ui:TextBlock Text="Scope" FontSize="13" FontWeight="SemiBold" Grid.ColumnSpan="2" />
 
             <StackPanel Grid.Row="1" Orientation="Vertical">
-              <RadioButton x:Name="SingleItemRadio" Content="Single Item (pick current selection)" IsChecked="True" />
+              <RadioButton x:Name="EntireModelRadio" Content="Entire Model" IsChecked="True" />
               <RadioButton x:Name="CurrentSelectionRadio" Content="Current Selection" />
+              <RadioButton x:Name="SingleItemRadio" Content="Single Item (pick current selection)" />
               <RadioButton x:Name="SelectionSetRadio" Content="Selection Set (coming soon)" IsEnabled="False" />
               <RadioButton x:Name="SearchSetRadio" Content="Search Set (coming soon)" IsEnabled="False" />
-              <RadioButton x:Name="EntireModelRadio" Content="Entire Model" />
             </StackPanel>
 
             <StackPanel Grid.Column="1" Grid.Row="1">

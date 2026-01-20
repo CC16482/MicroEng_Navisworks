@@ -65,6 +65,11 @@ namespace MicroEng.Navisworks.SmartSets
             _owner.ClearScope_Click(sender, e);
         }
 
+        private void PickScope_Click(object sender, RoutedEventArgs e)
+        {
+            _owner.PickScope_Click(sender, e);
+        }
+
         private void Preview_Click(object sender, RoutedEventArgs e)
         {
             _owner.Preview_Click(sender, e);

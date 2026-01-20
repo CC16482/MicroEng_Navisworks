@@ -8,6 +8,12 @@
 - Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 
 ## Recent changes
+- Smart Set Generator rules grid dropdowns now render with template ComboBoxes (Category/Property/Condition) and are clickable.
+- Smart Set Scope Picker window added with WPF-UI styling, dark mode, and tri-state tree checkboxes for model-tree scopes.
+- Smart Grouping now has its own output/scope settings, uses WPF-UI dropdowns, and generation applies grouping scope.
+- Include Blanks option added to Quick Builder; generation skips empty sets when unchecked (also applied to Smart Grouping).
+- Smart Set Generator checkboxes now use the WPF-UI default tickbox style (custom template removed).
+- Data Scraper scope list reordered with Entire Model first and default selected.
 - MicroEng Tools panel buttons now use card-style `ui:CardAction` with icons; added Smart Set Generator entry.
 - Smart Set Generator dock pane + command added (`MicroEng.SmartSetGenerator.DockPane` / `MicroEng.SmartSetGenerator.Command`).
 - Smart Set Generator UI includes Quick Builder, Smart Grouping, From Selection, and Packs tabs.
@@ -38,13 +44,16 @@
 - Variation check: baseline CPU variant + GPU variant added for direct CPU vs GPU comparison.
 
 ## Open issues
-- Smart Set Generator: Condition dropdown in the rules grid is not rendering in the UI. Likely needs a template-based ComboBox in the DataGrid cell or Wpf.Ui DataGrid style adjustment.
+- Data Scraper: Selection/Search set scopes are still disabled (set lists are empty).
+- Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
 
 ## Key files touched
 - `MicroEng.Navisworks/MicroEngPanelControl.xaml`
 - `MicroEng.Navisworks/MicroEngPanelControl.xaml.cs`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorControl.xaml`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorControl.xaml.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetGeneratorQuickBuilderPage.xaml`
+- `MicroEng.Navisworks/SmartSets/SmartSetGeneratorSmartGroupingPage.xaml`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorPlugins.cs`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorNavisworksService.cs`
 - `MicroEng.Navisworks/SmartSets/SmartSetModels.cs`
@@ -56,6 +65,10 @@
 - `MicroEng.Navisworks/SmartSets/DataScraperSessionAdapter.cs`
 - `MicroEng.Navisworks/SmartSets/PropertyPickerWindow.xaml`
 - `MicroEng.Navisworks/SmartSets/PropertyPickerWindow.xaml.cs`
+- `MicroEng.Navisworks/SmartSets/SmartSetScopePickerWindow.xaml`
+- `MicroEng.Navisworks/SmartSets/SmartSetScopePickerWindow.xaml.cs`
+- `MicroEng.Navisworks/DataScraperWindow.xaml`
+- `MicroEng.Navisworks/DataScraperWindow.xaml.cs`
 - `MicroEng.Navisworks/SpaceMapperModels.cs`
 - `MicroEng.Navisworks/SpaceMapperEngines.cs`
 - `MicroEng.Navisworks/SpaceMapperGeometry.cs`
@@ -76,7 +89,10 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
-- Smart Sets: Condition dropdown appears and is editable in Quick Builder rules grid.
+- Smart Sets: Condition/category/property dropdowns are clickable in Quick Builder rules grid.
+- Smart Sets: Include Blanks toggles empty-set generation in Quick Builder and Smart Grouping.
+- Smart Sets: Scope picker tree uses WPF-UI checkbox visuals; indeterminate only shows for ancestors.
+- Data Scraper: Entire Model is first and default in the scope list.
 - Smart Sets: Property picker opens and populates Category/Property + sample values.
 - Smart Sets: Fast preview returns counts from Data Scraper cache; live preview still works.
 - Smart Sets: Save/Load recipes create JSON in ProgramData.

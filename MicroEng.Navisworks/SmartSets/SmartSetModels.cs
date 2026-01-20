@@ -43,7 +43,9 @@ namespace MicroEng.Navisworks.SmartSets
     {
         AllModel,
         CurrentSelection,
-        SavedSelectionSet
+        SavedSelectionSet,
+        ModelTree,
+        PropertyFilter
     }
 
     [DataContract]
@@ -167,6 +169,16 @@ namespace MicroEng.Navisworks.SmartSets
         private int _maxGroups = 50;
         private int _minCount = 5;
         private bool _includeBlanks;
+        private string _outputName = "New Grouping";
+        private string _outputFolderPath = "MicroEng/Smart Sets";
+        private SmartSetSearchInMode _searchInMode = SmartSetSearchInMode.Standard;
+        private SmartSetScopeMode _scopeMode = SmartSetScopeMode.AllModel;
+        private string _scopeSelectionSetName = "";
+        private string _scopeSummary = "Entire model";
+        private List<List<string>> _scopeModelPaths = new List<List<string>>();
+        private string _scopeFilterCategory = "";
+        private string _scopeFilterProperty = "";
+        private string _scopeFilterValue = "";
 
         [DataMember(Order = 1)]
         public bool EnableSmartGrouping
@@ -267,11 +279,193 @@ namespace MicroEng.Navisworks.SmartSets
             }
         }
 
+        [DataMember(Order = 10)]
+        public string OutputName
+        {
+            get => _outputName;
+            set
+            {
+                _outputName = value ?? "";
+                OnPropertyChanged();
+            }
+        }
+
+        [DataMember(Order = 11)]
+        public string OutputFolderPath
+        {
+            get => _outputFolderPath;
+            set
+            {
+                _outputFolderPath = value ?? "";
+                OnPropertyChanged();
+            }
+        }
+
+        [DataMember(Order = 12)]
+        public SmartSetSearchInMode SearchInMode
+        {
+            get => _searchInMode;
+            set
+            {
+                _searchInMode = value;
+                OnPropertyChanged();
+            }
+        }
+
+        [DataMember(Order = 13)]
+        public SmartSetScopeMode ScopeMode
+        {
+            get => _scopeMode;
+            set
+            {
+                _scopeMode = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 14)]
+        public string ScopeSelectionSetName
+        {
+            get => _scopeSelectionSetName;
+            set
+            {
+                _scopeSelectionSetName = value ?? "";
+                OnPropertyChanged();
+            }
+        }
+
+        [DataMember(Order = 15)]
+        public string ScopeSummary
+        {
+            get => _scopeSummary;
+            set
+            {
+                _scopeSummary = value ?? "";
+                OnPropertyChanged();
+            }
+        }
+
+        [IgnoreDataMember]
+        public bool IsScopeConstrained
+        {
+            get
+            {
+                if (ScopeMode == SmartSetScopeMode.AllModel)
+                {
+                    return false;
+                }
+
+                if (ScopeMode == SmartSetScopeMode.ModelTree)
+                {
+                    return ScopeModelPaths != null && ScopeModelPaths.Count > 0;
+                }
+
+                if (ScopeMode == SmartSetScopeMode.PropertyFilter)
+                {
+                    return HasScopePropertyFilter;
+                }
+
+                return true;
+            }
+        }
+
+        [DataMember(Order = 16)]
+        public List<List<string>> ScopeModelPaths
+        {
+            get => _scopeModelPaths;
+            set
+            {
+                _scopeModelPaths = value ?? new List<List<string>>();
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 17)]
+        public string ScopeFilterCategory
+        {
+            get => _scopeFilterCategory;
+            set
+            {
+                _scopeFilterCategory = value ?? "";
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 18)]
+        public string ScopeFilterProperty
+        {
+            get => _scopeFilterProperty;
+            set
+            {
+                _scopeFilterProperty = value ?? "";
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 19)]
+        public string ScopeFilterValue
+        {
+            get => _scopeFilterValue;
+            set
+            {
+                _scopeFilterValue = value ?? "";
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [IgnoreDataMember]
+        public bool HasScopePropertyFilter =>
+            !string.IsNullOrWhiteSpace(ScopeFilterCategory)
+            && !string.IsNullOrWhiteSpace(ScopeFilterProperty)
+            && !string.IsNullOrWhiteSpace(ScopeFilterValue);
+
         public event PropertyChangedEventHandler PropertyChanged;
 
         private void OnPropertyChanged([CallerMemberName] string name = null)
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+
+        [OnDeserialized]
+        private void OnDeserialized(StreamingContext context)
+        {
+            if (string.IsNullOrWhiteSpace(_outputName))
+            {
+                _outputName = "New Grouping";
+            }
+
+            if (string.IsNullOrWhiteSpace(_outputFolderPath))
+            {
+                _outputFolderPath = "MicroEng/Smart Sets";
+            }
+
+            if (string.IsNullOrWhiteSpace(_scopeSummary))
+            {
+                _scopeSummary = _scopeMode == SmartSetScopeMode.AllModel ? "Entire model" : "Scope active";
+            }
+
+            _scopeSelectionSetName ??= "";
+            _scopeModelPaths ??= new List<List<string>>();
+            _scopeFilterCategory ??= "";
+            _scopeFilterProperty ??= "";
+            _scopeFilterValue ??= "";
+
+            if (_scopeMode == SmartSetScopeMode.ModelTree && (_scopeModelPaths == null || _scopeModelPaths.Count == 0))
+            {
+                _scopeMode = SmartSetScopeMode.AllModel;
+                _scopeSummary = "Entire model";
+            }
+
+            if (_scopeMode == SmartSetScopeMode.PropertyFilter && !HasScopePropertyFilter)
+            {
+                _scopeMode = SmartSetScopeMode.AllModel;
+                _scopeSummary = "Entire model";
+            }
         }
     }
 
@@ -289,6 +483,11 @@ namespace MicroEng.Navisworks.SmartSets
         private SmartSetScopeMode _scopeMode = SmartSetScopeMode.AllModel;
         private string _scopeSelectionSetName = "";
         private string _scopeSummary = "Entire model";
+        private List<List<string>> _scopeModelPaths = new List<List<string>>();
+        private string _scopeFilterCategory = "";
+        private string _scopeFilterProperty = "";
+        private string _scopeFilterValue = "";
+        private bool _includeBlanks;
 
         [DataMember(Order = 1)]
         public int Version { get; set; } = 1;
@@ -430,7 +629,93 @@ namespace MicroEng.Navisworks.SmartSets
         }
 
         [IgnoreDataMember]
-        public bool IsScopeConstrained => ScopeMode != SmartSetScopeMode.AllModel;
+        public bool IsScopeConstrained
+        {
+            get
+            {
+                if (ScopeMode == SmartSetScopeMode.AllModel)
+                {
+                    return false;
+                }
+
+                if (ScopeMode == SmartSetScopeMode.ModelTree)
+                {
+                    return ScopeModelPaths != null && ScopeModelPaths.Count > 0;
+                }
+
+                if (ScopeMode == SmartSetScopeMode.PropertyFilter)
+                {
+                    return HasScopePropertyFilter;
+                }
+
+                return true;
+            }
+        }
+
+        [DataMember(Order = 17)]
+        public List<List<string>> ScopeModelPaths
+        {
+            get => _scopeModelPaths;
+            set
+            {
+                _scopeModelPaths = value ?? new List<List<string>>();
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 18)]
+        public string ScopeFilterCategory
+        {
+            get => _scopeFilterCategory;
+            set
+            {
+                _scopeFilterCategory = value ?? "";
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 19)]
+        public string ScopeFilterProperty
+        {
+            get => _scopeFilterProperty;
+            set
+            {
+                _scopeFilterProperty = value ?? "";
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 20)]
+        public string ScopeFilterValue
+        {
+            get => _scopeFilterValue;
+            set
+            {
+                _scopeFilterValue = value ?? "";
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(IsScopeConstrained));
+            }
+        }
+
+        [DataMember(Order = 21)]
+        public bool IncludeBlanks
+        {
+            get => _includeBlanks;
+            set
+            {
+                _includeBlanks = value;
+                OnPropertyChanged();
+            }
+        }
+
+        [IgnoreDataMember]
+        public bool HasScopePropertyFilter =>
+            !string.IsNullOrWhiteSpace(ScopeFilterCategory)
+            && !string.IsNullOrWhiteSpace(ScopeFilterProperty)
+            && !string.IsNullOrWhiteSpace(ScopeFilterValue);
 
         public event PropertyChangedEventHandler PropertyChanged;
 
@@ -453,6 +738,22 @@ namespace MicroEng.Navisworks.SmartSets
             }
 
             _scopeSelectionSetName ??= "";
+            _scopeModelPaths ??= new List<List<string>>();
+            _scopeFilterCategory ??= "";
+            _scopeFilterProperty ??= "";
+            _scopeFilterValue ??= "";
+
+            if (_scopeMode == SmartSetScopeMode.ModelTree && (_scopeModelPaths == null || _scopeModelPaths.Count == 0))
+            {
+                _scopeMode = SmartSetScopeMode.AllModel;
+                _scopeSummary = "Entire model";
+            }
+
+            if (_scopeMode == SmartSetScopeMode.PropertyFilter && !HasScopePropertyFilter)
+            {
+                _scopeMode = SmartSetScopeMode.AllModel;
+                _scopeSummary = "Entire model";
+            }
         }
     }
 

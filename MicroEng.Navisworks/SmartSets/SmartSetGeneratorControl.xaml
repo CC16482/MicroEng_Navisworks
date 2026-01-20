@@ -27,64 +27,6 @@
                 <Setter Property="Margin" Value="0,0,8,0" />
                 <Setter Property="MinWidth" Value="120" />
             </Style>
-            <Style x:Key="SmartSetNeutralCheckBoxStyle" TargetType="CheckBox">
-                <Setter Property="Padding" Value="6,0,0,0" />
-                <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
-                <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
-                <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="CheckBox">
-                            <Grid SnapsToDevicePixels="True">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Border x:Name="Box"
-                                        Width="16"
-                                        Height="16"
-                                        Background="{TemplateBinding Background}"
-                                        BorderBrush="{TemplateBinding BorderBrush}"
-                                        BorderThickness="{TemplateBinding BorderThickness}"
-                                        CornerRadius="2"
-                                        VerticalAlignment="Center"
-                                        HorizontalAlignment="Center" />
-                                <Path x:Name="CheckMark"
-                                      Data="M 3 8 L 6 11 L 12 4"
-                                      Stroke="{TemplateBinding Foreground}"
-                                      StrokeThickness="2"
-                                      StrokeStartLineCap="Square"
-                                      StrokeEndLineCap="Square"
-                                      StrokeLineJoin="Miter"
-                                      Visibility="Collapsed"
-                                      VerticalAlignment="Center"
-                                      HorizontalAlignment="Center" />
-                                <ContentPresenter Grid.Column="1"
-                                                  Margin="{TemplateBinding Padding}"
-                                                  VerticalAlignment="Center"
-                                                  RecognizesAccessKey="True"
-                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
-                            </Grid>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsChecked" Value="True">
-                                    <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
-                                </Trigger>
-                                <Trigger Property="IsEnabled" Value="False">
-                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource ControlFillColorDisabledBrush}" />
-                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
-                                    <Setter TargetName="CheckMark" Property="Stroke" Value="{DynamicResource TextFillColorDisabledBrush}" />
-                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
-                                </Trigger>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
-                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
     <Grid>

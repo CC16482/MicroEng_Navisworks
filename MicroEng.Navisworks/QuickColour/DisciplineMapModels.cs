@@ -33,10 +33,30 @@ namespace MicroEng.Navisworks.QuickColour
     {
         public static DisciplineMapFile Load(string path)
         {
-            using (var fs = File.OpenRead(path))
+            if (!File.Exists(path))
+            {
+                return new DisciplineMapFile();
+            }
+
+            var json = ReadAllTextNormalized(path);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return new DisciplineMapFile();
+            }
+
+            var startObj = json.IndexOf('{');
+            var startArr = json.IndexOf('[');
+            var start = startObj >= 0 && startArr >= 0 ? Math.Min(startObj, startArr) : Math.Max(startObj, startArr);
+            if (start > 0)
+            {
+                json = json.Substring(start);
+            }
+
+            var bytes = Encoding.UTF8.GetBytes(json);
+            using (var ms = new MemoryStream(bytes))
             {
                 var ser = new DataContractJsonSerializer(typeof(DisciplineMapFile));
-                return (DisciplineMapFile)ser.ReadObject(fs);
+                return (DisciplineMapFile)ser.ReadObject(ms);
             }
         }
 
@@ -50,7 +70,26 @@ namespace MicroEng.Navisworks.QuickColour
 
             if (!File.Exists(path))
             {
-                File.WriteAllText(path, defaultJson ?? "{}", Encoding.UTF8);
+                File.WriteAllText(path, defaultJson ?? "{}", new UTF8Encoding(false));
+            }
+        }
+
+        private static string ReadAllTextNormalized(string path)
+        {
+            using (var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+            {
+                var text = reader.ReadToEnd();
+                if (string.IsNullOrEmpty(text))
+                {
+                    return text;
+                }
+
+                if (text[0] == '\uFEFF')
+                {
+                    text = text.Substring(1);
+                }
+
+                return text.TrimStart();
             }
         }
     }

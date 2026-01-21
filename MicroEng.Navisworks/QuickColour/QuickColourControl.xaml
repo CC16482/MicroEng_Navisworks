@@ -4,6 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:profiles="clr-namespace:MicroEng.Navisworks.QuickColour.Profiles"
              xmlns:local="clr-namespace:MicroEng.Navisworks"
              xmlns:system="clr-namespace:System;assembly=System"
              mc:Ignorable="d"
@@ -16,6 +17,14 @@
         <ResourceDictionary>
             <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
             <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+            <Style x:Key="HierarchyComboBoxStyle"
+                   TargetType="ComboBox"
+                   BasedOn="{StaticResource {x:Type ComboBox}}">
+                <Setter Property="Padding" Value="4,1" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="IsEditable" Value="True" />
+                <Setter Property="IsTextSearchEnabled" Value="True" />
+            </Style>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
             </ResourceDictionary.MergedDictionaries>
@@ -67,26 +76,248 @@
                         VerticalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch">
-                <TabItem Header="Appearance Profile">
-                    <StackPanel Margin="10">
-                        <ui:TextBlock Text="Appearance Profile" FontSize="14" FontWeight="SemiBold" />
-                        <ui:TextBlock Text="Define reusable appearance profiles (coming soon)."
-                                      Margin="0,4,0,0"
-                                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
+                <TabItem Header="Profiles">
+                    <profiles:QuickColourProfilesPage x:Name="ProfilesPage"
+                                                      HorizontalAlignment="Stretch"
+                                                      VerticalAlignment="Stretch" />
                 </TabItem>
 
                 <TabItem Header="Quick Colour">
-                    <StackPanel Margin="10">
-                        <ui:TextBlock Text="Quick Colour" FontSize="14" FontWeight="SemiBold" />
-                        <ui:TextBlock Text="Single-property coloring presets (coming soon)."
-                                      Margin="0,4,0,0"
-                                      Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
+                    <Grid Margin="12">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <ui:Card Grid.Row="0"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 HorizontalContentAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0">
+                                    <ui:TextBlock Text="Quick Colour" FontSize="16" FontWeight="SemiBold" />
+                                    <ui:TextBlock Text="Colorize by a single property using the Data Scraper cache."
+                                                  Margin="0,4,0,0"
+                                                  FontSize="12"
+                                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                </StackPanel>
+
+                                <Grid Grid.Row="1" Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="160" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Column="0" Text="Profile:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding ScraperProfiles}"
+                                              SelectedItem="{Binding SelectedScraperProfile}"
+                                              DisplayMemberPath="Label" />
+                                    <ui:Button Grid.Column="2" Content="Refresh" Margin="6,0,0,0" Click="RefreshProfiles_Click" />
+                                    <TextBlock Grid.Column="3" Text="Scope:" VerticalAlignment="Center" Margin="12,0,6,0" />
+                                    <ComboBox Grid.Column="4"
+                                              ItemsSource="{Binding ScopeOptions}"
+                                              DisplayMemberPath="Label"
+                                              SelectedValuePath="Value"
+                                              SelectedValue="{Binding QuickColourScope}"
+                                              Width="180" />
+                                </Grid>
+
+                                <Grid Grid.Row="2" Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="Selection set:"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0"
+                                               Visibility="{Binding IsQuickColourSelectionSetScope, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding ScopeSelectionSetOptions}"
+                                              SelectedItem="{Binding QuickColourScopeSelectionSetName}"
+                                              MinWidth="220"
+                                              Visibility="{Binding IsQuickColourSelectionSetScope, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <ui:Button Grid.Column="2"
+                                               Content="Pick scope..."
+                                               Margin="12,0,0,0"
+                                               Click="PickQuickColourScope_Click"
+                                               Visibility="{Binding IsQuickColourScopePickerEnabled, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <TextBlock Grid.Column="3"
+                                               Text="{Binding QuickColourScopeSummary}"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                </Grid>
+
+                                <Grid Grid.Row="3" Margin="0,8,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="260" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Category:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox Grid.Row="0" Grid.Column="1"
+                                              ItemsSource="{Binding QuickColourCategoryOptions}"
+                                              SelectedItem="{Binding QuickColourCategory, UpdateSourceTrigger=PropertyChanged}"
+                                              Style="{StaticResource HierarchyComboBoxStyle}"
+                                              MinWidth="260" />
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Property:" VerticalAlignment="Center" Margin="0,6,6,0" />
+                                    <ComboBox Grid.Row="1" Grid.Column="1"
+                                              ItemsSource="{Binding QuickColourPropertyOptions}"
+                                              SelectedItem="{Binding QuickColourProperty, UpdateSourceTrigger=PropertyChanged}"
+                                              Style="{StaticResource HierarchyComboBoxStyle}"
+                                              MinWidth="260"
+                                              Margin="0,6,0,0" />
+
+                                    <ui:Button Grid.Row="0"
+                                               Grid.Column="2"
+                                               Grid.RowSpan="2"
+                                               Content="Load Values"
+                                               Appearance="Primary"
+                                               Padding="12,6"
+                                               Margin="12,0,0,0"
+                                               VerticalAlignment="Bottom"
+                                               Click="LoadQuickColourValues_Click" />
+                                </Grid>
+
+                                <WrapPanel Grid.Row="4" Margin="0,8,0,0">
+                                    <TextBlock Text="Palette:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox ItemsSource="{Binding QuickColourPaletteOptions}"
+                                              SelectedItem="{Binding QuickColourPaletteKind}"
+                                              Width="140"
+                                              Margin="0,0,12,0" />
+                                    <StackPanel Orientation="Horizontal"
+                                                Margin="0,0,12,0"
+                                                VerticalAlignment="Center"
+                                                Visibility="{Binding IsQuickColourCustomPalette, Converter={StaticResource BoolToVisibilityConverter}}">
+                                        <TextBlock Text="Base:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <Border Width="18"
+                                                Height="18"
+                                                CornerRadius="2"
+                                                Background="{Binding QuickColourCustomBaseColorBrush}"
+                                                BorderThickness="1"
+                                                BorderBrush="#333"
+                                                Margin="0,0,6,0" />
+                                        <TextBox Text="{Binding QuickColourCustomBaseColorHex, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="90"
+                                                 Margin="0,0,6,0" />
+                                        <ui:Button Content="Pick" Click="PickQuickColourBaseColor_Click" />
+                                    </StackPanel>
+                                    <CheckBox Content="Stable colors"
+                                              IsChecked="{Binding QuickColourStableColors}"
+                                              VerticalAlignment="Center"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Text="Seed:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Text="{Binding QuickColourStableSeed}"
+                                             Width="120"
+                                             IsEnabled="{Binding QuickColourStableColors}"
+                                             Margin="0,0,12,0" />
+                                    <ui:Button Content="Auto Assign Colors" Click="AutoAssignQuickColours_Click" />
+                                </WrapPanel>
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="1"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 VerticalContentAlignment="Stretch"
+                                 HorizontalContentAlignment="Stretch"
+                                 VerticalAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Text="Values" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                <ui:DataGrid Grid.Row="1"
+                                             ItemsSource="{Binding QuickColourValues}"
+                                             AutoGenerateColumns="False"
+                                             CanUserAddRows="False"
+                                             RowHeight="26"
+                                             FontSize="12"
+                                             GridLinesVisibility="All"
+                                             HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                                             VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}">
+                                    <ui:DataGrid.Columns>
+                                        <DataGridCheckBoxColumn Header="On" Binding="{Binding Enabled}" Width="42" />
+                                        <DataGridTemplateColumn Header="Color" Width="64">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <Button Padding="0"
+                                                            Background="Transparent"
+                                                            BorderThickness="0"
+                                                            Click="PickQuickColourValueColor_Click"
+                                                            ToolTip="Pick color">
+                                                        <Border Background="{Binding SwatchBrush}"
+                                                                BorderBrush="Gray" BorderThickness="1"
+                                                                Height="16" Width="48" CornerRadius="2" />
+                                                    </Button>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="Hex" Binding="{Binding ColorHex, UpdateSourceTrigger=PropertyChanged}" Width="90" />
+                                        <DataGridTextColumn Header="Value" Binding="{Binding DisplayValue}" Width="240" />
+                                        <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="80" />
+                                    </ui:DataGrid.Columns>
+                                </ui:DataGrid>
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="2" Padding="10">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Text="Actions" FontSize="13" FontWeight="SemiBold" />
+                                <WrapPanel Grid.Row="1" Margin="0,6,0,0">
+                                    <ui:Button Content="Save Profile" Margin="0,0,6,0" Click="SaveQuickColourProfile_Click" />
+                                    <ui:Button Content="Save As" Margin="0,0,12,0" Click="SaveQuickColourProfileAs_Click" />
+                                    <ui:Button Content="Apply Temporary" Appearance="Primary" Margin="0,0,6,0" Click="ApplyQuickColourTemporary_Click" />
+                                    <ui:Button Content="Clear Temporary" Margin="0,0,6,0" Click="ClearTemporary_Click" />
+                                    <ui:Button Content="Apply Permanent" Appearance="Primary" Margin="12,0,6,0" Click="ApplyQuickColourPermanent_Click" />
+                                    <ui:Button Content="Reset Permanent" Margin="0,0,6,0" Click="ResetPermanent_Click" />
+                                    <ui:Button Content="Export Legend" Margin="12,0,0,0" Click="ExportQuickColourLegend_Click" />
+                                </WrapPanel>
+                                <WrapPanel Grid.Row="2" Margin="0,8,0,0">
+                                    <CheckBox Content="Create Search Sets"
+                                              IsChecked="{Binding QuickColourCreateSearchSets}"
+                                              Margin="0,0,12,0" />
+                                    <CheckBox Content="Create Snapshots"
+                                              IsChecked="{Binding QuickColourCreateSnapshots}"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Text="Folder:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Text="{Binding QuickColourFolderPath}" Width="220" Margin="0,0,12,0" />
+                                    <TextBlock Text="Profile name:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Text="{Binding QuickColourProfileName}" Width="180" />
+                                </WrapPanel>
+                            </Grid>
+                        </ui:Card>
+                    </Grid>
                 </TabItem>
 
                 <TabItem Header="Hierarchy Builder">
-                    <Grid Margin="10">
+                    <Grid Margin="12">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -97,124 +328,231 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <Grid Grid.Row="0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="2*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="Profile:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <ComboBox ItemsSource="{Binding ScraperProfiles}"
-                                          SelectedItem="{Binding SelectedScraperProfile}"
-                                          DisplayMemberPath="Label"
-                                          Width="220"
-                                          Margin="0,0,8,0" />
-                                <ui:Button Content="Refresh" Padding="10,4" Margin="0,0,8,0" Click="RefreshProfiles_Click" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                                <TextBlock Text="Scope:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <ComboBox ItemsSource="{Binding ScopeOptions}"
-                                          SelectedItem="{Binding SelectedScope}"
-                                          Width="160" />
-                            </StackPanel>
-                        </Grid>
+                        <ui:Card Grid.Row="0"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 HorizontalContentAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
 
-                        <Grid Grid.Row="1" Margin="0,8,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel>
-                                <TextBlock Text="Level 1 property" FontWeight="SemiBold" />
-                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                    <TextBox Text="{Binding HierarchyL1Label}" IsReadOnly="True" MinWidth="260" />
-                                    <ui:Button Content="Pick..." Margin="8,0,0,0" Click="PickHierarchyL1_Click" />
+                                <StackPanel Grid.Row="0">
+                                    <ui:TextBlock Text="Hierarchy Builder" FontSize="16" FontWeight="SemiBold" />
+                                    <ui:TextBlock Text="Build base colours by Level 1 and shades by Level 2."
+                                                  Margin="0,4,0,0"
+                                                  FontSize="12"
+                                                  Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                 </StackPanel>
-                            </StackPanel>
-                            <StackPanel Grid.Column="1">
-                                <TextBlock Text="Level 2 property" FontWeight="SemiBold" />
-                                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                                    <TextBox Text="{Binding HierarchyL2Label}" IsReadOnly="True" MinWidth="260" />
-                                    <ui:Button Content="Pick..." Margin="8,0,0,0" Click="PickHierarchyL2_Click" />
-                                </StackPanel>
-                            </StackPanel>
-                            <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
-                                <ui:Button Content="Load Hierarchy"
-                                           Appearance="Primary"
-                                           Padding="12,6"
-                                           Click="LoadHierarchy_Click" />
-                            </StackPanel>
-                        </Grid>
 
-                        <WrapPanel Grid.Row="2" Margin="0,10,0,0">
-                            <TextBlock Text="Palette:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                            <ComboBox ItemsSource="{Binding PaletteStyleOptions}"
-                                      SelectedItem="{Binding HierarchyPaletteStyle}"
-                                      Width="110"
-                                      Margin="0,0,12,0" />
-                            <TextBlock Text="Type shade spread:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                            <Slider Width="140"
-                                    Minimum="10" Maximum="90"
-                                    TickFrequency="10"
-                                    IsSnapToTickEnabled="True"
-                                    TickPlacement="Both"
-                                    Value="{Binding HierarchyShadeSpreadPct, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                    Margin="0,0,12,0" />
-                            <TextBlock Text="Sort types:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                            <ComboBox ItemsSource="{Binding TypeSortOptions}"
-                                      SelectedItem="{Binding HierarchyTypeSortMode}"
-                                      Width="110"
-                                      Margin="0,0,12,0" />
-                            <CheckBox Content="Include blanks"
-                                      IsChecked="{Binding HierarchyIncludeBlanks}"
-                                      VerticalAlignment="Center"
-                                      Margin="0,0,12,0" />
-                            <TextBlock Text="Max categories:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                            <TextBox Text="{Binding HierarchyMaxCategories}" Width="60" Margin="0,0,12,0" />
-                            <TextBlock Text="Max types:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                            <TextBox Text="{Binding HierarchyMaxTypesPerCategory}" Width="60" Margin="0,0,12,0" />
-                        </WrapPanel>
+                                <Grid Grid.Row="1" Margin="0,8,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="160" />
+                                    </Grid.ColumnDefinitions>
 
-                        <WrapPanel Grid.Row="3" Margin="0,8,0,0">
-                            <CheckBox Content="Lock hue (single hue mode)"
-                                      IsChecked="{Binding HierarchySingleHueMode, Mode=TwoWay}"
-                                      Margin="0,0,12,0" />
-                            <Border Width="18" Height="18" CornerRadius="2"
-                                    BorderBrush="Gray" BorderThickness="1"
-                                    Background="{Binding HierarchyHueSwatchBrush}"
-                                    Margin="0,0,6,0" />
-                            <TextBox Width="90"
-                                     Text="{Binding HierarchyHueHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                     IsEnabled="{Binding HierarchySingleHueMode}"
-                                     Margin="0,0,6,0" />
-                            <ui:Button Content="Pick..."
-                                       Click="PickHierarchyHue_Click"
-                                       IsEnabled="{Binding HierarchySingleHueMode}"
-                                       Margin="0,0,14,0" />
-                            <TextBlock Text="Category contrast:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                            <Slider Width="140"
-                                    Minimum="20" Maximum="90"
-                                    TickFrequency="10"
-                                    IsSnapToTickEnabled="True"
-                                    TickPlacement="Both"
-                                    Value="{Binding HierarchyCategoryContrastPct, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                    IsEnabled="{Binding HierarchySingleHueMode}"
-                                    Margin="0,0,14,0" />
-                            <CheckBox Content="Use Hue Groups"
-                                      IsChecked="{Binding HierarchyUseHueGroups, Mode=TwoWay}"
-                                      Margin="0,0,12,0" />
-                            <CheckBox Content="Create folders by Hue Group"
-                                      IsChecked="{Binding CreateFoldersByHueGroup, Mode=TwoWay}"
-                                      IsEnabled="{Binding HierarchyUseHueGroups}"
-                                      Margin="0,0,12,0" />
-                        </WrapPanel>
+                                    <TextBlock Grid.Column="0" Text="Profile:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding ScraperProfiles}"
+                                              SelectedItem="{Binding SelectedScraperProfile}"
+                                              DisplayMemberPath="Label" />
+                                    <ui:Button Grid.Column="2" Content="Refresh" Margin="6,0,0,0" Click="RefreshProfiles_Click" />
+                                    <TextBlock Grid.Column="3" Text="Scope:" VerticalAlignment="Center" Margin="12,0,6,0" />
+                                    <ComboBox Grid.Column="4"
+                                              ItemsSource="{Binding ScopeOptions}"
+                                              DisplayMemberPath="Label"
+                                              SelectedValuePath="Value"
+                                              SelectedValue="{Binding SelectedScope}"
+                                              Width="180" />
+                                </Grid>
 
-                        <Expander Grid.Row="4"
-                                  Header="Hue Groups"
-                                  IsExpanded="False"
-                                  Margin="0,8,0,8"
-                                  Visibility="{Binding HierarchyUseHueGroups, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <Grid Grid.Row="2" Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0"
+                                               Text="Selection set:"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,6,0"
+                                               Visibility="{Binding IsHierarchySelectionSetScope, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <ComboBox Grid.Column="1"
+                                              ItemsSource="{Binding ScopeSelectionSetOptions}"
+                                              SelectedItem="{Binding HierarchyScopeSelectionSetName}"
+                                              MinWidth="220"
+                                              Visibility="{Binding IsHierarchySelectionSetScope, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <ui:Button Grid.Column="2"
+                                               Content="Pick scope..."
+                                               Margin="12,0,0,0"
+                                               Click="PickHierarchyScope_Click"
+                                               Visibility="{Binding IsHierarchyScopePickerEnabled, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <TextBlock Grid.Column="3"
+                                               Text="{Binding HierarchyScopeSummary}"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                </Grid>
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="1"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 HorizontalContentAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Text="Property Levels" FontSize="13" FontWeight="SemiBold" />
+                                <Grid Grid.Row="1" Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Level 1 property" FontWeight="SemiBold" />
+                                        <StackPanel Margin="0,4,0,0">
+                                            <TextBlock Text="Category:" />
+                                            <ComboBox ItemsSource="{Binding HierarchyCategoryOptions}"
+                                                      SelectedItem="{Binding HierarchyL1Category, UpdateSourceTrigger=PropertyChanged}"
+                                                      Style="{StaticResource HierarchyComboBoxStyle}"
+                                                      MinWidth="260" />
+                                            <TextBlock Text="Property:" Margin="0,6,0,0" />
+                                            <ComboBox ItemsSource="{Binding HierarchyL1PropertyOptions}"
+                                                      SelectedItem="{Binding HierarchyL1Property, UpdateSourceTrigger=PropertyChanged}"
+                                                      Style="{StaticResource HierarchyComboBoxStyle}"
+                                                      MinWidth="260" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="Level 2 property" FontWeight="SemiBold" />
+                                        <StackPanel Margin="0,4,0,0">
+                                            <TextBlock Text="Category:" />
+                                            <ComboBox ItemsSource="{Binding HierarchyCategoryOptions}"
+                                                      SelectedItem="{Binding HierarchyL2Category, UpdateSourceTrigger=PropertyChanged}"
+                                                      Style="{StaticResource HierarchyComboBoxStyle}"
+                                                      MinWidth="260" />
+                                            <TextBlock Text="Property:" Margin="0,6,0,0" />
+                                            <ComboBox ItemsSource="{Binding HierarchyL2PropertyOptions}"
+                                                      SelectedItem="{Binding HierarchyL2Property, UpdateSourceTrigger=PropertyChanged}"
+                                                      Style="{StaticResource HierarchyComboBoxStyle}"
+                                                      MinWidth="260" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
+                                        <ui:Button Content="Load Hierarchy"
+                                                   Appearance="Primary"
+                                                   Padding="12,6"
+                                                   Click="LoadHierarchy_Click" />
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="2"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 HorizontalContentAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Text="Palette &amp; Limits" FontSize="13" FontWeight="SemiBold" />
+                                <WrapPanel Grid.Row="1" Margin="0,6,0,0">
+                                    <TextBlock Text="Palette:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox ItemsSource="{Binding PaletteStyleOptions}"
+                                              SelectedItem="{Binding HierarchyPaletteStyle}"
+                                              Width="110"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Text="Type shade spread:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <Slider Width="140"
+                                            Minimum="10" Maximum="90"
+                                            TickFrequency="10"
+                                            IsSnapToTickEnabled="True"
+                                            TickPlacement="Both"
+                                            Value="{Binding HierarchyShadeSpreadPct, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            Margin="0,0,12,0" />
+                                    <TextBlock Text="Sort types:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox ItemsSource="{Binding TypeSortOptions}"
+                                              SelectedItem="{Binding HierarchyTypeSortMode}"
+                                              Width="110"
+                                              Margin="0,0,12,0" />
+                                    <CheckBox Content="Include blanks"
+                                              IsChecked="{Binding HierarchyIncludeBlanks}"
+                                              VerticalAlignment="Center"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Text="Max categories:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Text="{Binding HierarchyMaxCategories}" Width="60" Margin="0,0,12,0" />
+                                    <TextBlock Text="Max types:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Text="{Binding HierarchyMaxTypesPerCategory}" Width="60" Margin="0,0,12,0" />
+                                </WrapPanel>
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="3"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 HorizontalContentAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Text="Hue Controls" FontSize="13" FontWeight="SemiBold" />
+                                <WrapPanel Grid.Row="1" Margin="0,6,0,0">
+                                    <CheckBox Content="Lock hue (single hue mode)"
+                                              IsChecked="{Binding HierarchySingleHueMode, Mode=TwoWay}"
+                                              Margin="0,0,12,0" />
+                                    <Border Width="18" Height="18" CornerRadius="2"
+                                            BorderBrush="Gray" BorderThickness="1"
+                                            Background="{Binding HierarchyHueSwatchBrush}"
+                                            Margin="0,0,6,0" />
+                                    <TextBox Width="90"
+                                             Text="{Binding HierarchyHueHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             IsEnabled="{Binding HierarchySingleHueMode}"
+                                             Margin="0,0,6,0" />
+                                    <ui:Button Content="Pick..."
+                                               Click="PickHierarchyHue_Click"
+                                               IsEnabled="{Binding HierarchySingleHueMode}"
+                                               Margin="0,0,14,0" />
+                                    <TextBlock Text="Category contrast:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <Slider Width="140"
+                                            Minimum="20" Maximum="90"
+                                            TickFrequency="10"
+                                            IsSnapToTickEnabled="True"
+                                            TickPlacement="Both"
+                                            Value="{Binding HierarchyCategoryContrastPct, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            IsEnabled="{Binding HierarchySingleHueMode}"
+                                            Margin="0,0,14,0" />
+                                </WrapPanel>
+                                <WrapPanel Grid.Row="2" Margin="0,6,0,0">
+                                    <CheckBox Content="Use Hue Groups"
+                                              IsChecked="{Binding HierarchyUseHueGroups, Mode=TwoWay}"
+                                              Margin="0,0,12,0" />
+                                    <CheckBox Content="Create folders by Hue Group"
+                                              IsChecked="{Binding CreateFoldersByHueGroup, Mode=TwoWay}"
+                                              IsEnabled="{Binding HierarchyUseHueGroups}"
+                                              Margin="0,0,12,0" />
+                                </WrapPanel>
+                            </Grid>
+                        </ui:Card>
+
+                        <ui:Card Grid.Row="4"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 Visibility="{Binding HierarchyUseHueGroups, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <Expander Header="Hue Groups"
+                                      IsExpanded="False">
                             <StackPanel>
                                 <ui:DataGrid ItemsSource="{Binding HueGroups}"
                                              SelectedItem="{Binding SelectedHueGroup}"
@@ -310,18 +648,31 @@
                                     </ui:DataGrid.Columns>
                                 </ui:DataGrid>
                             </StackPanel>
-                        </Expander>
+                            </Expander>
+                        </ui:Card>
 
-                        <ui:DataGrid Grid.Row="5"
-                                     ItemsSource="{Binding HierarchyGroups}"
-                                     AutoGenerateColumns="False"
-                                     CanUserAddRows="False"
-                                     RowHeight="26"
-                                     FontSize="12"
-                                     GridLinesVisibility="All"
-                                     HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                                     VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                                     RowDetailsVisibilityMode="VisibleWhenSelected">
+                        <ui:Card Grid.Row="5"
+                                 Padding="10"
+                                 Margin="0,0,0,8"
+                                 HorizontalContentAlignment="Stretch"
+                                 VerticalContentAlignment="Stretch"
+                                 VerticalAlignment="Stretch">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Text="Hierarchy" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6" />
+                                <ui:DataGrid Grid.Row="1"
+                                             ItemsSource="{Binding HierarchyGroups}"
+                                             AutoGenerateColumns="False"
+                                             CanUserAddRows="False"
+                                             RowHeight="26"
+                                             FontSize="12"
+                                             GridLinesVisibility="All"
+                                             HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                                             VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                                             RowDetailsVisibilityMode="VisibleWhenSelected">
                             <ui:DataGrid.Columns>
                                 <DataGridCheckBoxColumn Header="On" Binding="{Binding Enabled}" Width="42" />
                                 <DataGridTemplateColumn Header="Base" Width="64">
@@ -377,30 +728,42 @@
                                     </ui:DataGrid>
                                 </DataTemplate>
                             </ui:DataGrid.RowDetailsTemplate>
-                        </ui:DataGrid>
+                                </ui:DataGrid>
+                            </Grid>
+                        </ui:Card>
 
-                        <StackPanel Grid.Row="6" Margin="0,10,0,0">
-                            <WrapPanel>
-                                <ui:Button Content="Auto Assign Base Colours" Margin="0,0,8,0" Click="AutoAssignBaseColours_Click" />
-                                <ui:Button Content="Regenerate Type Shades" Margin="0,0,8,0" Click="RegenerateTypeShades_Click" />
-                                <ui:Button Content="Apply Temporary" Appearance="Primary" Margin="12,0,8,0" Click="ApplyTemporary_Click" />
-                                <ui:Button Content="Clear Temporary" Margin="0,0,8,0" Click="ClearTemporary_Click" />
-                                <ui:Button Content="Generate Permanent Profile" Appearance="Primary" Margin="12,0,8,0" Click="ApplyPermanent_Click" />
-                                <ui:Button Content="Reset Permanent" Margin="0,0,8,0" Click="ResetPermanent_Click" />
-                            </WrapPanel>
-                            <WrapPanel Margin="0,8,0,0">
-                                <CheckBox Content="Create Search Sets"
-                                          IsChecked="{Binding CreateSearchSets}"
-                                          Margin="0,0,12,0" />
-                                <CheckBox Content="Create Snapshots"
-                                          IsChecked="{Binding CreateSnapshots}"
-                                          Margin="0,0,12,0" />
-                                <TextBlock Text="Folder:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <TextBox Text="{Binding OutputFolderPath}" Width="220" Margin="0,0,12,0" />
-                                <TextBlock Text="Profile name:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                <TextBox Text="{Binding OutputProfileName}" Width="180" />
-                            </WrapPanel>
-                        </StackPanel>
+                        <ui:Card Grid.Row="6" Padding="10">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <ui:TextBlock Text="Actions" FontSize="13" FontWeight="SemiBold" />
+                                <WrapPanel Grid.Row="1" Margin="0,6,0,0">
+                                    <ui:Button Content="Save Profile" Margin="0,0,6,0" Click="SaveHierarchyProfile_Click" />
+                                    <ui:Button Content="Save As" Margin="0,0,12,0" Click="SaveHierarchyProfileAs_Click" />
+                                    <ui:Button Content="Auto Assign Base Colours" Margin="0,0,8,0" Click="AutoAssignBaseColours_Click" />
+                                    <ui:Button Content="Regenerate Type Shades" Margin="0,0,8,0" Click="RegenerateTypeShades_Click" />
+                                    <ui:Button Content="Apply Temporary" Appearance="Primary" Margin="12,0,8,0" Click="ApplyTemporary_Click" />
+                                    <ui:Button Content="Clear Temporary" Margin="0,0,8,0" Click="ClearTemporary_Click" />
+                                    <ui:Button Content="Generate Permanent Profile" Appearance="Primary" Margin="12,0,8,0" Click="ApplyPermanent_Click" />
+                                    <ui:Button Content="Reset Permanent" Margin="0,0,8,0" Click="ResetPermanent_Click" />
+                                </WrapPanel>
+                                <WrapPanel Grid.Row="2" Margin="0,8,0,0">
+                                    <CheckBox Content="Create Search Sets"
+                                              IsChecked="{Binding CreateSearchSets}"
+                                              Margin="0,0,12,0" />
+                                    <CheckBox Content="Create Snapshots"
+                                              IsChecked="{Binding CreateSnapshots}"
+                                              Margin="0,0,12,0" />
+                                    <TextBlock Text="Folder:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Text="{Binding OutputFolderPath}" Width="220" Margin="0,0,12,0" />
+                                    <TextBlock Text="Profile name:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <TextBox Text="{Binding OutputProfileName}" Width="180" />
+                                </WrapPanel>
+                            </Grid>
+                        </ui:Card>
                     </Grid>
                 </TabItem>
             </TabControl>
@@ -416,3 +779,4 @@
         </ui:Card>
     </Grid>
 </UserControl>
+

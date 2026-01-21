@@ -80,3 +80,6 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\QuickColour\QuickColourWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\QuickColour\QuickColourControl.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\QuickColour\QuickColourWindow.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\bin\Debug\net48\Newtonsoft.Json.dll
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\QuickColour\Profiles\QuickColourProfilesPage.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\QuickColour\Profiles\QuickColourProfilesPage.g.cs

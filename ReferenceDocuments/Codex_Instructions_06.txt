@@ -1,0 +1,1118 @@
+Understood — Option C (MicroEng Colour Profile) is the right simplification.
+
+You will end up with a single Quick Colour tool window that has **3 tabs**:
+
+1. **Profiles**
+   A profile library: lists *all* colour profiles created by **Quick Colour** and **Hierarchy Builder**, lets the user **Apply Temporary / Apply Permanent**, and **Export JSON** (and optionally Import/Delete).
+
+2. **Quick Colour**
+   Generates a profile from one property (Category + Property), palette selection, stable colours, etc. It **saves to the MicroEng Colour Profile store**, and can create matching Search Sets / Snapshots.
+
+3. **Hierarchy Builder**
+   Generates profiles from hierarchical mapping (e.g., Category → Type with hue groups). It also **saves to the same MicroEng Colour Profile store**, and can create matching Search Sets / Snapshots.
+
+Below is a single “Codex work order” that should be executable in one pass, plus **copy/paste-ready code** for the new profile store + model + Profiles tab UI.
+
+---
+
+## Codex work order — MicroEng Colour Profile + 3-tab UI
+
+### Goal
+
+Replace the current “Appearance Profile” concept with a **MicroEng Colour Profile** (JSON-backed). Add a **Profiles tab** that acts as the library/launcher for profiles created by Quick Colour / Hierarchy Builder.
+
+### Constraints
+
+* WPF only (no WinForms controls).
+* Styling should match existing MicroEng tools (Data Mapper / Data Scraper look): readable font size, clear DataGrid rows/headers.
+* Do not attempt to write to Navisworks “Appearance Profiler” (built-in) — we store our own profiles and re-apply them.
+
+---
+
+## 1) Add new models for profiles
+
+### Create file: `QuickColour/Profiles/MicroEngColourProfileModels.cs`
+
+Add these models (serializable + minimal fields required for apply/export/listing).
+
+```csharp
+using System;
+using System.Collections.Generic;
+
+namespace MicroEng.Navisworks.QuickColour.Profiles
+{
+    public enum MicroEngColourProfileSource
+    {
+        QuickColour = 0,
+        HierarchyBuilder = 1
+    }
+
+    public enum MicroEngColourApplyMode
+    {
+        Temporary = 0,
+        Permanent = 1
+    }
+
+    public sealed class MicroEngColourProfile
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+        public string Name { get; set; } = "New Profile";
+
+        public MicroEngColourProfileSource Source { get; set; } = MicroEngColourProfileSource.QuickColour;
+
+        public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+        public DateTime ModifiedUtc { get; set; } = DateTime.UtcNow;
+
+        // How this profile was generated
+        public string CategoryName { get; set; } = "";     // e.g. "Element"
+        public string PropertyName { get; set; } = "";     // e.g. "Category"
+        public string PaletteName { get; set; } = "Deep";  // "Deep", "Pastel", "ColourblindSafe", etc.
+        public bool StableColors { get; set; } = true;
+        public string Seed { get; set; } = "";
+
+        // Where it was intended to apply (optional; OK to leave blank for now)
+        public string ScopeKind { get; set; } = "EntireModel"; // later: CurrentSelection, SelectionSet, SearchSet, ModelRoot...
+        public string ScopePath { get; set; } = "";            // e.g. "MicroEng/Quick Colour/SomeSet"
+
+        // Colour mapping rules
+        public List<MicroEngColourRule> Rules { get; set; } = new List<MicroEngColourRule>();
+    }
+
+    public sealed class MicroEngColourRule
+    {
+        public bool Enabled { get; set; } = true;
+
+        // Property value to match, e.g. "Doors"
+        public string Value { get; set; } = "";
+
+        // Hex like "#RRGGBB" or "#AARRGGBB"
+        public string Hex { get; set; } = "#FFFFFF";
+
+        // Optional transparency 0..100 (match your UI convention)
+        public double? TransparencyPercent { get; set; }
+
+        // Optional stats captured when generated
+        public int? Count { get; set; }
+    }
+}
+```
+
+---
+
+## 2) Add JSON store (load/save/list/export/import)
+
+### Create file: `QuickColour/Profiles/MicroEngColourProfileStore.cs`
+
+This is intentionally simple, robust, and easy for Codex to integrate.
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+// Prefer Newtonsoft.Json if your project already uses it.
+// If not referenced, Codex should add Newtonsoft.Json (net48 compatible) OR rewrite to DataContractJsonSerializer.
+using Newtonsoft.Json;
+
+namespace MicroEng.Navisworks.QuickColour.Profiles
+{
+    internal sealed class MicroEngColourProfileStore
+    {
+        private readonly string _profilesFolder;
+
+        public MicroEngColourProfileStore(string profilesFolder)
+        {
+            _profilesFolder = profilesFolder ?? throw new ArgumentNullException(nameof(profilesFolder));
+            Directory.CreateDirectory(_profilesFolder);
+        }
+
+        public static MicroEngColourProfileStore CreateDefault()
+        {
+            // Per-user storage to avoid ProgramData versioning issues.
+            // Export/Import handles sharing.
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "MicroEng",
+                "ColourProfiles");
+
+            return new MicroEngColourProfileStore(root);
+        }
+
+        public IReadOnlyList<MicroEngColourProfile> LoadAll()
+        {
+            Directory.CreateDirectory(_profilesFolder);
+
+            var files = Directory.EnumerateFiles(_profilesFolder, "*.json", SearchOption.TopDirectoryOnly).ToList();
+            var list = new List<MicroEngColourProfile>();
+
+            foreach (var f in files)
+            {
+                try
+                {
+                    var json = File.ReadAllText(f);
+                    var profile = JsonConvert.DeserializeObject<MicroEngColourProfile>(json);
+                    if (profile != null)
+                        list.Add(profile);
+                }
+                catch
+                {
+                    // ignore bad files; do not break the tool
+                }
+            }
+
+            // Most recent first
+            return list
+                .OrderByDescending(p => p.ModifiedUtc)
+                .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        public void Save(MicroEngColourProfile profile)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+
+            Directory.CreateDirectory(_profilesFolder);
+
+            profile.ModifiedUtc = DateTime.UtcNow;
+            if (profile.CreatedUtc == default(DateTime)) profile.CreatedUtc = DateTime.UtcNow;
+
+            var safeName = MakeSafeFileName(profile.Name);
+            var fileName = $"{safeName}_{profile.Id}.json";
+            var path = Path.Combine(_profilesFolder, fileName);
+
+            // Atomic-ish write
+            var tmp = path + ".tmp";
+            var json = JsonConvert.SerializeObject(profile, Formatting.Indented);
+            File.WriteAllText(tmp, json);
+
+            if (File.Exists(path)) File.Delete(path);
+            File.Move(tmp, path);
+        }
+
+        public void Delete(string profileId)
+        {
+            if (string.IsNullOrWhiteSpace(profileId)) return;
+
+            foreach (var f in Directory.EnumerateFiles(_profilesFolder, "*.json"))
+            {
+                if (f.IndexOf(profileId, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    try { File.Delete(f); } catch { /* ignore */ }
+                }
+            }
+        }
+
+        public void ExportTo(MicroEngColourProfile profile, string destinationPath)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentNullException(nameof(destinationPath));
+
+            var json = JsonConvert.SerializeObject(profile, Formatting.Indented);
+            File.WriteAllText(destinationPath, json);
+        }
+
+        public MicroEngColourProfile ImportFrom(string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentNullException(nameof(sourcePath));
+            var json = File.ReadAllText(sourcePath);
+            var profile = JsonConvert.DeserializeObject<MicroEngColourProfile>(json);
+            if (profile == null) throw new InvalidDataException("Invalid profile JSON.");
+
+            // Ensure it won't collide with an existing file name
+            if (string.IsNullOrWhiteSpace(profile.Id))
+                profile.Id = Guid.NewGuid().ToString("N");
+
+            // Re-stamp modified time on import (optional)
+            profile.ModifiedUtc = DateTime.UtcNow;
+            if (profile.CreatedUtc == default(DateTime)) profile.CreatedUtc = DateTime.UtcNow;
+
+            Save(profile);
+            return profile;
+        }
+
+        private static string MakeSafeFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "Profile";
+            var invalid = Path.GetInvalidFileNameChars();
+            var cleaned = new string(name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+            cleaned = cleaned.Trim();
+            return string.IsNullOrWhiteSpace(cleaned) ? "Profile" : cleaned;
+        }
+    }
+}
+```
+
+---
+
+## 3) Add Profiles tab UI (library + apply + export)
+
+### Create file: `QuickColour/Profiles/QuickColourProfilesPage.xaml`
+
+This is a WPF UserControl that your existing Quick Colour Window can host as Tab 1.
+
+```xml
+<UserControl x:Class="MicroEng.Navisworks.QuickColour.Profiles.QuickColourProfilesPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             MinWidth="820">
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="260"/>
+            <RowDefinition Height="12"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Left">
+                <TextBlock Text="Profiles" FontSize="16" FontWeight="SemiBold"/>
+                <TextBlock Text="Saved MicroEng Colour Profiles (from Quick Colour / Hierarchy Builder)."
+                           Opacity="0.75" Margin="0,2,0,0"/>
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                <Button Content="Refresh" Width="90" Margin="0,0,8,0" Click="Refresh_Click"/>
+                <Button Content="Import" Width="90" Margin="0,0,8,0" Click="Import_Click"/>
+                <Button Content="Export" Width="90" Margin="0,0,8,0" Click="Export_Click"/>
+                <Button Content="Delete" Width="90" Click="Delete_Click"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- Profile list -->
+        <DataGrid Grid.Row="1"
+                  ItemsSource="{Binding Profiles}"
+                  SelectedItem="{Binding SelectedProfile, Mode=TwoWay}"
+                  AutoGenerateColumns="False"
+                  CanUserAddRows="False"
+                  IsReadOnly="True"
+                  HeadersVisibility="Column"
+                  RowHeight="28"
+                  FontSize="12">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="2*"/>
+                <DataGridTextColumn Header="Source" Binding="{Binding Source}" Width="140"/>
+                <DataGridTextColumn Header="Category" Binding="{Binding CategoryName}" Width="140"/>
+                <DataGridTextColumn Header="Property" Binding="{Binding PropertyName}" Width="140"/>
+                <DataGridTextColumn Header="Modified" Binding="{Binding ModifiedUtc}" Width="180"/>
+            </DataGrid.Columns>
+        </DataGrid>
+
+        <!-- Mapping preview -->
+        <GroupBox Grid.Row="3" Header="Mapping preview">
+            <Grid Margin="8">
+                <DataGrid ItemsSource="{Binding SelectedProfile.Rules}"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          IsReadOnly="True"
+                          HeadersVisibility="Column"
+                          RowHeight="28"
+                          FontSize="12">
+                    <DataGrid.Columns>
+                        <DataGridCheckBoxColumn Header="On" Binding="{Binding Enabled}" Width="60"/>
+                        <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="2*"/>
+                        <DataGridTextColumn Header="Hex" Binding="{Binding Hex}" Width="140"/>
+                        <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="120"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+        </GroupBox>
+
+        <!-- Actions -->
+        <DockPanel Grid.Row="4" Margin="0,10,0,0">
+            <TextBlock Text="{Binding StatusText}" Opacity="0.8" VerticalAlignment="Center"/>
+
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="Apply Temporary" Width="140" Margin="0,0,8,0"
+                        IsEnabled="{Binding HasSelection}"
+                        Click="ApplyTemporary_Click"/>
+                <Button Content="Apply Permanent" Width="140"
+                        IsEnabled="{Binding HasSelection}"
+                        Click="ApplyPermanent_Click"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</UserControl>
+```
+
+### Create file: `QuickColour/Profiles/QuickColourProfilesPage.xaml.cs`
+
+This implements:
+
+* load/refresh
+* import/export/delete
+* “Apply requested” event so the parent window/control can reuse the existing apply logic.
+
+```csharp
+using System;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Windows;
+using System.Windows.Controls;
+using Microsoft.Win32;
+
+namespace MicroEng.Navisworks.QuickColour.Profiles
+{
+    public partial class QuickColourProfilesPage : UserControl, INotifyPropertyChanged
+    {
+        private readonly MicroEngColourProfileStore _store = MicroEngColourProfileStore.CreateDefault();
+
+        public ObservableCollection<MicroEngColourProfile> Profiles { get; } = new ObservableCollection<MicroEngColourProfile>();
+
+        private MicroEngColourProfile _selectedProfile;
+        public MicroEngColourProfile SelectedProfile
+        {
+            get => _selectedProfile;
+            set
+            {
+                if (!ReferenceEquals(_selectedProfile, value))
+                {
+                    _selectedProfile = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(HasSelection));
+                }
+            }
+        }
+
+        public bool HasSelection => SelectedProfile != null;
+
+        private string _statusText = "Ready.";
+        public string StatusText
+        {
+            get => _statusText;
+            set { _statusText = value; OnPropertyChanged(); }
+        }
+
+        public event Action<MicroEngColourProfile, MicroEngColourApplyMode> ApplyRequested;
+
+        public QuickColourProfilesPage()
+        {
+            InitializeComponent();
+            DataContext = this;
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            Profiles.Clear();
+            foreach (var p in _store.LoadAll())
+                Profiles.Add(p);
+
+            StatusText = $"Loaded {Profiles.Count} profile(s).";
+        }
+
+        private void Refresh_Click(object sender, RoutedEventArgs e) => Refresh();
+
+        private void Delete_Click(object sender, RoutedEventArgs e)
+        {
+            if (SelectedProfile == null) return;
+
+            var name = SelectedProfile.Name ?? "(Unnamed)";
+            if (MessageBox.Show($"Delete profile '{name}'?", "Delete Profile", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
+
+            _store.Delete(SelectedProfile.Id);
+            Refresh();
+            StatusText = $"Deleted '{name}'.";
+        }
+
+        private void Export_Click(object sender, RoutedEventArgs e)
+        {
+            if (SelectedProfile == null) return;
+
+            var sfd = new SaveFileDialog
+            {
+                Title = "Export MicroEng Colour Profile",
+                Filter = "MicroEng Colour Profile (*.json)|*.json|All files (*.*)|*.*",
+                FileName = $"{SelectedProfile.Name}.json"
+            };
+
+            if (sfd.ShowDialog() != true) return;
+
+            _store.ExportTo(SelectedProfile, sfd.FileName);
+            StatusText = $"Exported '{SelectedProfile.Name}'.";
+        }
+
+        private void Import_Click(object sender, RoutedEventArgs e)
+        {
+            var ofd = new OpenFileDialog
+            {
+                Title = "Import MicroEng Colour Profile",
+                Filter = "MicroEng Colour Profile (*.json)|*.json|All files (*.*)|*.*",
+                Multiselect = false
+            };
+
+            if (ofd.ShowDialog() != true) return;
+
+            try
+            {
+                _store.ImportFrom(ofd.FileName);
+                Refresh();
+                StatusText = $"Imported '{Path.GetFileName(ofd.FileName)}'.";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Import failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void ApplyTemporary_Click(object sender, RoutedEventArgs e)
+        {
+            if (SelectedProfile == null) return;
+            ApplyRequested?.Invoke(SelectedProfile, MicroEngColourApplyMode.Temporary);
+        }
+
+        private void ApplyPermanent_Click(object sender, RoutedEventArgs e)
+        {
+            if (SelectedProfile == null) return;
+            ApplyRequested?.Invoke(SelectedProfile, MicroEngColourApplyMode.Permanent);
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+}
+```
+
+---
+
+## 4) Convert Quick Colour window to 3 tabs + wire apply
+
+### Edit your main Quick Colour window/control XAML
+
+Wherever the tool currently shows tabs `Appearance Profile`, `Quick Colour`, `Hierarchy Builder`, do this:
+
+* Rename/replace **Appearance Profile** tab with **Profiles**
+* Embed the `QuickColourProfilesPage` user control in Tab 1.
+
+Example (adjust class names to match your actual window/control):
+
+```xml
+<TabControl>
+  <TabItem Header="Profiles">
+    <profiles:QuickColourProfilesPage x:Name="ProfilesPage"/>
+  </TabItem>
+
+  <TabItem Header="Quick Colour">
+    <!-- existing Quick Colour page/control -->
+  </TabItem>
+
+  <TabItem Header="Hierarchy Builder">
+    <!-- existing Hierarchy Builder page/control -->
+  </TabItem>
+</TabControl>
+```
+
+### Edit code-behind to handle “ApplyRequested”
+
+In the window/control constructor:
+
+```csharp
+public QuickColourWindow()
+{
+    InitializeComponent();
+
+    ProfilesPage.ApplyRequested += OnProfileApplyRequested;
+}
+```
+
+Then implement:
+
+```csharp
+private void OnProfileApplyRequested(MicroEngColourProfile profile, MicroEngColourApplyMode mode)
+{
+    if (profile == null) return;
+
+    // 1) Load profile into the existing Quick Colour state/mapping grid
+    //    (Codex must map these fields to your real VM/properties)
+    QuickColourViewModel.ProfileName = profile.Name;
+    QuickColourViewModel.CategoryName = profile.CategoryName;
+    QuickColourViewModel.PropertyName = profile.PropertyName;
+    QuickColourViewModel.PaletteName = profile.PaletteName;
+    QuickColourViewModel.StableColors = profile.StableColors;
+    QuickColourViewModel.Seed = profile.Seed;
+
+    QuickColourViewModel.Mapping.Clear();
+    foreach (var r in profile.Rules)
+        QuickColourViewModel.Mapping.Add(/* map rule to your existing mapping row model */);
+
+    // 2) Reuse existing apply logic (so you don’t duplicate Navisworks API code)
+    if (mode == MicroEngColourApplyMode.Temporary)
+        ApplyTemporary();   // call your existing handler
+    else
+        ApplyPermanent();   // call your existing handler
+}
+```
+
+**Key instruction to Codex:** do **not** create a second “apply engine” for profiles. Load the profile into the existing mapping grid and invoke the same Apply methods already proven to work.
+
+---
+
+## 5) Ensure Quick Colour + Hierarchy Builder “Save Profile” writes to the store
+
+### Add in both tabs:
+
+* `Save Profile…` button OR reuse existing Save flow to call the store.
+
+Minimum requirement:
+
+* Whenever a user “generates mapping” and clicks Save/Save As, build a `MicroEngColourProfile` and call:
+
+```csharp
+MicroEngColourProfileStore.CreateDefault().Save(profile);
+ProfilesPage.Refresh();
+```
+
+### Building the profile from your current mapping grid
+
+Pseudocode Codex should implement inside Quick Colour and Hierarchy Builder:
+
+```csharp
+var p = new MicroEngColourProfile
+{
+    Name = QuickColourViewModel.ProfileName,
+    Source = MicroEngColourProfileSource.QuickColour, // or HierarchyBuilder
+    CategoryName = QuickColourViewModel.CategoryName,
+    PropertyName = QuickColourViewModel.PropertyName,
+    PaletteName = QuickColourViewModel.PaletteName,
+    StableColors = QuickColourViewModel.StableColors,
+    Seed = QuickColourViewModel.Seed,
+    ScopeKind = QuickColourViewModel.ScopeKind, // optional
+    ScopePath = QuickColourViewModel.ScopePath  // optional
+};
+
+foreach (var row in QuickColourViewModel.Mapping)
+{
+    p.Rules.Add(new MicroEngColourRule
+    {
+        Enabled = row.Enabled,
+        Value = row.Value,
+        Hex = row.Hex,
+        TransparencyPercent = row.TransparencyPercent,
+        Count = row.Count
+    });
+}
+
+_store.Save(p);
+ProfilesPage.Refresh();
+```
+
+---
+
+# Codex prompt to execute (single pass)
+
+Copy/paste this to Codex:
+
+> **Implement Option C: MicroEng Colour Profile, and restructure Quick Colour into 3 tabs: Profiles / Quick Colour / Hierarchy Builder.**
+>
+> **Requirements:**
+>
+> 1. Add JSON-backed MicroEngColourProfile model + store (load/save/list/delete/export/import). Store location: `%AppData%\MicroEng\ColourProfiles`. net48-compatible; prefer Newtonsoft.Json if already referenced.
+> 2. Add a new WPF UserControl `QuickColourProfilesPage` showing a DataGrid of profiles (Name/Source/Category/Property/Modified), a mapping preview grid for selected profile, and buttons: Refresh / Import / Export / Delete / Apply Temporary / Apply Permanent.
+> 3. Replace the old “Appearance Profile” tab with “Profiles”, embed `QuickColourProfilesPage` as tab 1. Keep existing Quick Colour and Hierarchy Builder tabs.
+> 4. Wire `ProfilesPage.ApplyRequested` to reuse the *existing* apply logic: load selected profile into the existing mapping grid/viewmodel and invoke the same Apply Temporary / Apply Permanent code paths. Do not implement a second apply engine.
+> 5. Ensure both Quick Colour and Hierarchy Builder save their generated mapping as a MicroEngColourProfile via the store. After saving, call `ProfilesPage.Refresh()` so the new profile appears immediately.
+> 6. UI: WPF-only. DataGrid font size and row height should match the MicroEng tooling style (readable; e.g., FontSize ~12, RowHeight ~28).
+>
+> **Files to add:**
+>
+> * `QuickColour/Profiles/MicroEngColourProfileModels.cs`
+> * `QuickColour/Profiles/MicroEngColourProfileStore.cs`
+> * `QuickColour/Profiles/QuickColourProfilesPage.xaml`
+> * `QuickColour/Profiles/QuickColourProfilesPage.xaml.cs`
+>
+> **Files to edit:**
+>
+> * Quick Colour main window/control XAML: rename/replace first tab to Profiles and host `QuickColourProfilesPage`.
+> * Quick Colour main window/control code-behind: subscribe to `ApplyRequested` and implement load-profile-then-apply.
+> * Quick Colour tab + Hierarchy Builder tab code: on Save/SaveAs generate `MicroEngColourProfile` from current mapping grid and call store.Save(profile); refresh Profiles tab.
+
+---
+
+If you want, I can also give you a **strict profile JSON schema** (versioned) so you can evolve it safely (e.g., `"schemaVersion": 1`) without breaking older profiles.
+
+
+
+Agreed — if there are **no existing profiles** to preserve, we should “lock in” a clean, versioned **Schema v1** now so:
+
+* profiles are future-proof (migratable),
+* exported JSON is stable and human-readable,
+* Quick Colour + Hierarchy Builder can share the same saved format cleanly.
+
+Below is **Schema v1** (what the JSON must look like), an **example JSON**, and the **exact code edits** to update the profile model + store to enforce/emit the schema.
+
+---
+
+# MicroEng Colour Profile JSON schema v1
+
+## File format
+
+* **UTF‑8 JSON**
+* **Top-level object**
+* **camelCase keys** (canonical)
+* Dates are **ISO‑8601 UTC** strings (e.g. `"2026-01-05T21:12:30Z"`)
+
+## Required fields (v1)
+
+Top level:
+
+| Field           |   Type | Required | Notes                                        |
+| --------------- | -----: | :------: | -------------------------------------------- |
+| `schemaVersion` |    int |    Yes   | Must be `1` for v1                           |
+| `profileId`     | string |    Yes   | GUID-like string (we store it as `N` format) |
+| `name`          | string |    Yes   | Display name in Profiles tab                 |
+| `source`        | string |    Yes   | `"QuickColour"` or `"HierarchyBuilder"`      |
+| `createdUtc`    | string |    Yes   | ISO-8601                                     |
+| `modifiedUtc`   | string |    Yes   | ISO-8601                                     |
+| `generator`     | object |    Yes   | How the mapping was generated                |
+| `rules`         |  array |    Yes   | List of value → colour rules                 |
+
+`generator` object (required):
+
+| Field          |   Type | Required | Notes                                                         |
+| -------------- | -----: | :------: | ------------------------------------------------------------- |
+| `categoryName` | string |    Yes   | e.g. `"Element"`                                              |
+| `propertyName` | string |    Yes   | e.g. `"Category"`                                             |
+| `paletteName`  | string |    Yes   | e.g. `"Deep"`, `"Pastel"`, `"ColourblindSafe"`, `"Greyscale"` |
+| `stableColors` |   bool |    Yes   | Deterministic colour assignment intent                        |
+| `seed`         | string |    No    | Used if stable colours/hashing uses a seed                    |
+| `notes`        | string |    No    | Optional human notes                                          |
+
+Optional top-level `scope` object (recommended to include now, even if “EntireModel” only):
+
+| Field        |   Type | Required | Notes                                                                                 |
+| ------------ | -----: | :------: | ------------------------------------------------------------------------------------- |
+| `scope.kind` | string |    No    | `"EntireModel"`, `"CurrentSelection"`, `"SelectionSet"`, `"SearchSet"`, `"ModelRoot"` |
+| `scope.path` | string |    No    | Path/name when kind is set-based                                                      |
+
+Optional top-level `outputs` object (recommended because users expect “profile apply” to also recreate sets/snapshots):
+
+| Field                      |   Type | Required | Notes                          |
+| -------------------------- | -----: | :------: | ------------------------------ |
+| `outputs.createSearchSets` |   bool |    No    | Default false                  |
+| `outputs.createSnapshots`  |   bool |    No    | Default false                  |
+| `outputs.folderPath`       | string |    No    | e.g. `"MicroEng/Quick Colour"` |
+| `outputs.setNamePrefix`    | string |    No    | e.g. `"Category : "`           |
+
+`rules` array items:
+
+| Field                 |   Type | Required | Notes                                    |
+| --------------------- | -----: | :------: | ---------------------------------------- |
+| `enabled`             |   bool |    Yes   | If false, rule is skipped                |
+| `value`               | string |    Yes   | Property value to match (e.g. `"Doors"`) |
+| `colorHex`            | string |    Yes   | `#RRGGBB` or `#AARRGGBB`                 |
+| `transparencyPercent` | number |    No    | 0..100                                   |
+| `count`               |    int |    No    | Optional snapshot from generation        |
+
+---
+
+# Example profile JSON (v1)
+
+```json
+{
+  "schemaVersion": 1,
+  "profileId": "f1c20c4b7ed84d83921f4c2bb5acb0b7",
+  "name": "MEP Categories - Deep",
+  "source": "QuickColour",
+  "createdUtc": "2026-01-05T21:12:30Z",
+  "modifiedUtc": "2026-01-05T21:12:30Z",
+  "scope": {
+    "kind": "EntireModel",
+    "path": ""
+  },
+  "generator": {
+    "categoryName": "Element",
+    "propertyName": "Category",
+    "paletteName": "Deep",
+    "stableColors": true,
+    "seed": "",
+    "notes": ""
+  },
+  "outputs": {
+    "createSearchSets": true,
+    "createSnapshots": true,
+    "folderPath": "MicroEng/Quick Colour",
+    "setNamePrefix": "Category : "
+  },
+  "rules": [
+    {
+      "enabled": true,
+      "value": "Ducts",
+      "colorHex": "#33E6E6",
+      "transparencyPercent": 0,
+      "count": 181
+    },
+    {
+      "enabled": true,
+      "value": "Pipe Fittings",
+      "colorHex": "#57E633",
+      "transparencyPercent": 0,
+      "count": 2651
+    }
+  ]
+}
+```
+
+---
+
+# Code changes to enforce Schema v1
+
+Below are the **updated versions** of the two files you already created earlier. This keeps your Profiles tab design intact, but upgrades the underlying JSON format.
+
+## 1) Update `MicroEngColourProfileModels.cs`
+
+Replace your previous model with this versioned, nested one (canonical camelCase via attributes).
+
+```csharp
+using System;
+using System.Collections.Generic;
+using Newtonsoft.Json;
+
+namespace MicroEng.Navisworks.QuickColour.Profiles
+{
+    public enum MicroEngColourProfileSource
+    {
+        QuickColour = 0,
+        HierarchyBuilder = 1
+    }
+
+    public enum MicroEngColourApplyMode
+    {
+        Temporary = 0,
+        Permanent = 1
+    }
+
+    public static class MicroEngColourProfileSchema
+    {
+        public const int CurrentSchemaVersion = 1;
+    }
+
+    public sealed class MicroEngColourProfile
+    {
+        [JsonProperty("schemaVersion", Required = Required.Always)]
+        public int SchemaVersion { get; set; } = MicroEngColourProfileSchema.CurrentSchemaVersion;
+
+        [JsonProperty("profileId", Required = Required.Always)]
+        public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+        [JsonProperty("name", Required = Required.Always)]
+        public string Name { get; set; } = "New Profile";
+
+        [JsonProperty("source", Required = Required.Always)]
+        public MicroEngColourProfileSource Source { get; set; } = MicroEngColourProfileSource.QuickColour;
+
+        [JsonProperty("createdUtc", Required = Required.Always)]
+        public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+        [JsonProperty("modifiedUtc", Required = Required.Always)]
+        public DateTime ModifiedUtc { get; set; } = DateTime.UtcNow;
+
+        [JsonProperty("scope", NullValueHandling = NullValueHandling.Include)]
+        public MicroEngColourScope Scope { get; set; } = new MicroEngColourScope();
+
+        [JsonProperty("generator", Required = Required.Always)]
+        public MicroEngColourGenerator Generator { get; set; } = new MicroEngColourGenerator();
+
+        [JsonProperty("outputs", NullValueHandling = NullValueHandling.Ignore)]
+        public MicroEngColourOutputs Outputs { get; set; } = new MicroEngColourOutputs();
+
+        [JsonProperty("rules", Required = Required.Always)]
+        public List<MicroEngColourRule> Rules { get; set; } = new List<MicroEngColourRule>();
+    }
+
+    public sealed class MicroEngColourScope
+    {
+        [JsonProperty("kind")]
+        public string Kind { get; set; } = "EntireModel";
+
+        [JsonProperty("path")]
+        public string Path { get; set; } = "";
+    }
+
+    public sealed class MicroEngColourGenerator
+    {
+        [JsonProperty("categoryName", Required = Required.Always)]
+        public string CategoryName { get; set; } = "";
+
+        [JsonProperty("propertyName", Required = Required.Always)]
+        public string PropertyName { get; set; } = "";
+
+        [JsonProperty("paletteName", Required = Required.Always)]
+        public string PaletteName { get; set; } = "Deep";
+
+        [JsonProperty("stableColors", Required = Required.Always)]
+        public bool StableColors { get; set; } = true;
+
+        [JsonProperty("seed", NullValueHandling = NullValueHandling.Include)]
+        public string Seed { get; set; } = "";
+
+        [JsonProperty("notes", NullValueHandling = NullValueHandling.Include)]
+        public string Notes { get; set; } = "";
+    }
+
+    public sealed class MicroEngColourOutputs
+    {
+        [JsonProperty("createSearchSets")]
+        public bool CreateSearchSets { get; set; } = false;
+
+        [JsonProperty("createSnapshots")]
+        public bool CreateSnapshots { get; set; } = false;
+
+        [JsonProperty("folderPath")]
+        public string FolderPath { get; set; } = "MicroEng/Quick Colour";
+
+        [JsonProperty("setNamePrefix")]
+        public string SetNamePrefix { get; set; } = "";
+    }
+
+    public sealed class MicroEngColourRule
+    {
+        [JsonProperty("enabled", Required = Required.Always)]
+        public bool Enabled { get; set; } = true;
+
+        [JsonProperty("value", Required = Required.Always)]
+        public string Value { get; set; } = "";
+
+        [JsonProperty("colorHex", Required = Required.Always)]
+        public string ColorHex { get; set; } = "#FFFFFF";
+
+        [JsonProperty("transparencyPercent", NullValueHandling = NullValueHandling.Ignore)]
+        public double? TransparencyPercent { get; set; }
+
+        [JsonProperty("count", NullValueHandling = NullValueHandling.Ignore)]
+        public int? Count { get; set; }
+    }
+}
+```
+
+### Notes
+
+* We changed `Hex` → `ColorHex` to make the meaning unambiguous.
+* We promoted generator fields into a `generator {}` object and added `scope {}` and `outputs {}`.
+* This is a clean starting point since you have no old profiles.
+
+---
+
+## 2) Update `MicroEngColourProfileStore.cs` (schema validation + future migration hook)
+
+Replace your prior store implementation with this version, which:
+
+* always writes **schemaVersion=1**
+* checks schema on load
+* includes a `MigrateToCurrent()` hook for v2+ later
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using Newtonsoft.Json;
+
+namespace MicroEng.Navisworks.QuickColour.Profiles
+{
+    internal sealed class MicroEngColourProfileStore
+    {
+        private readonly string _profilesFolder;
+
+        private static readonly JsonSerializerSettings JsonSettings = new JsonSerializerSettings
+        {
+            Formatting = Formatting.Indented,
+            MissingMemberHandling = MissingMemberHandling.Ignore,
+            NullValueHandling = NullValueHandling.Include,
+            DateParseHandling = DateParseHandling.DateTime,
+        };
+
+        public MicroEngColourProfileStore(string profilesFolder)
+        {
+            _profilesFolder = profilesFolder ?? throw new ArgumentNullException(nameof(profilesFolder));
+            Directory.CreateDirectory(_profilesFolder);
+        }
+
+        public static MicroEngColourProfileStore CreateDefault()
+        {
+            var root = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "MicroEng",
+                "ColourProfiles");
+
+            return new MicroEngColourProfileStore(root);
+        }
+
+        public IReadOnlyList<MicroEngColourProfile> LoadAll()
+        {
+            Directory.CreateDirectory(_profilesFolder);
+
+            var files = Directory.EnumerateFiles(_profilesFolder, "*.json", SearchOption.TopDirectoryOnly).ToList();
+            var list = new List<MicroEngColourProfile>();
+
+            foreach (var f in files)
+            {
+                try
+                {
+                    var json = File.ReadAllText(f);
+                    var profile = JsonConvert.DeserializeObject<MicroEngColourProfile>(json, JsonSettings);
+                    if (profile == null)
+                        continue;
+
+                    profile = MigrateToCurrent(profile);
+
+                    // Minimal validation for v1:
+                    if (profile.SchemaVersion != MicroEngColourProfileSchema.CurrentSchemaVersion)
+                        continue;
+                    if (string.IsNullOrWhiteSpace(profile.Id))
+                        continue;
+                    if (profile.Generator == null)
+                        continue;
+                    if (profile.Rules == null)
+                        profile.Rules = new List<MicroEngColourRule>();
+
+                    list.Add(profile);
+                }
+                catch
+                {
+                    // Ignore bad files; do not break the tool
+                }
+            }
+
+            return list
+                .OrderByDescending(p => p.ModifiedUtc)
+                .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        public void Save(MicroEngColourProfile profile)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+
+            Directory.CreateDirectory(_profilesFolder);
+
+            profile.SchemaVersion = MicroEngColourProfileSchema.CurrentSchemaVersion;
+            profile.ModifiedUtc = DateTime.UtcNow;
+            if (profile.CreatedUtc == default(DateTime)) profile.CreatedUtc = DateTime.UtcNow;
+            if (string.IsNullOrWhiteSpace(profile.Id)) profile.Id = Guid.NewGuid().ToString("N");
+            if (profile.Generator == null) profile.Generator = new MicroEngColourGenerator();
+            if (profile.Scope == null) profile.Scope = new MicroEngColourScope();
+            if (profile.Outputs == null) profile.Outputs = new MicroEngColourOutputs();
+            if (profile.Rules == null) profile.Rules = new List<MicroEngColourRule>();
+
+            var safeName = MakeSafeFileName(profile.Name);
+            var fileName = $"{safeName}_{profile.Id}.json";
+            var path = Path.Combine(_profilesFolder, fileName);
+
+            var tmp = path + ".tmp";
+            var json = JsonConvert.SerializeObject(profile, JsonSettings);
+            File.WriteAllText(tmp, json);
+
+            if (File.Exists(path)) File.Delete(path);
+            File.Move(tmp, path);
+        }
+
+        public void Delete(string profileId)
+        {
+            if (string.IsNullOrWhiteSpace(profileId)) return;
+
+            foreach (var f in Directory.EnumerateFiles(_profilesFolder, "*.json"))
+            {
+                if (f.IndexOf(profileId, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    try { File.Delete(f); } catch { /* ignore */ }
+                }
+            }
+        }
+
+        public void ExportTo(MicroEngColourProfile profile, string destinationPath)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentNullException(nameof(destinationPath));
+
+            profile.SchemaVersion = MicroEngColourProfileSchema.CurrentSchemaVersion;
+            var json = JsonConvert.SerializeObject(profile, JsonSettings);
+            File.WriteAllText(destinationPath, json);
+        }
+
+        public MicroEngColourProfile ImportFrom(string sourcePath)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentNullException(nameof(sourcePath));
+
+            var json = File.ReadAllText(sourcePath);
+            var profile = JsonConvert.DeserializeObject<MicroEngColourProfile>(json, JsonSettings);
+            if (profile == null) throw new InvalidDataException("Invalid profile JSON.");
+
+            profile = MigrateToCurrent(profile);
+
+            // Stamp on import
+            if (string.IsNullOrWhiteSpace(profile.Id))
+                profile.Id = Guid.NewGuid().ToString("N");
+            profile.SchemaVersion = MicroEngColourProfileSchema.CurrentSchemaVersion;
+            profile.ModifiedUtc = DateTime.UtcNow;
+            if (profile.CreatedUtc == default(DateTime)) profile.CreatedUtc = DateTime.UtcNow;
+
+            Save(profile);
+            return profile;
+        }
+
+        private static MicroEngColourProfile MigrateToCurrent(MicroEngColourProfile profile)
+        {
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+
+            // Since you have no legacy profiles, this is mostly future-proofing.
+            // If SchemaVersion is missing/0, treat it as v1 (but still normalize).
+            if (profile.SchemaVersion <= 0)
+                profile.SchemaVersion = MicroEngColourProfileSchema.CurrentSchemaVersion;
+
+            // Future:
+            // if (profile.SchemaVersion == 1) return profile;
+            // if (profile.SchemaVersion == 2) { ... } etc.
+
+            return profile;
+        }
+
+        private static string MakeSafeFileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return "Profile";
+            var invalid = Path.GetInvalidFileNameChars();
+            var cleaned = new string(name.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray());
+            cleaned = cleaned.Trim();
+            return string.IsNullOrWhiteSpace(cleaned) ? "Profile" : cleaned;
+        }
+    }
+}
+```
+
+---
+
+# One-pass Codex prompt to apply “Schema v1”
+
+Copy/paste to Codex:
+
+> Update MicroEng Colour Profile storage to a strict **schemaVersion=1** JSON format (fresh start, no backward compatibility required).
+>
+> **Do this:**
+>
+> 1. Replace `MicroEngColourProfileModels.cs` with a versioned schema model using `[JsonProperty]` camelCase keys and nested objects: `scope`, `generator`, `outputs`, and `rules[]` with `colorHex`.
+> 2. Replace `MicroEngColourProfileStore.cs` to:
+>
+>    * always save `schemaVersion=1`
+>    * validate required fields on load (ignore invalid files)
+>    * include a `MigrateToCurrent()` stub for future v2+
+> 3. Update Profiles tab binding columns if needed:
+>
+>    * Category → `SelectedProfile.Generator.CategoryName`
+>    * Property → `SelectedProfile.Generator.PropertyName`
+>    * Palette → `SelectedProfile.Generator.PaletteName` (optional column)
+>    * Rule hex → `ColorHex`
+> 4. Update Quick Colour / Hierarchy Builder “save profile” code to populate the new nested fields and write using the store.
+>
+> Keep everything WPF. Build after changes.
+
+---
+
+If you want an additional safety measure now (since it’s a fresh start), I recommend **writing a `schemaVersion` banner** at the top of the Profiles tab preview (e.g., “Schema v1”) so if you ever bump to v2, users immediately know why an imported file might not load.

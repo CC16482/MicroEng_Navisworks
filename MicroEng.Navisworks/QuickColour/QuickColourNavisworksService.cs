@@ -7,6 +7,103 @@ namespace MicroEng.Navisworks.QuickColour
 {
     public sealed class QuickColourNavisworksService
     {
+        public int ApplyBySingleProperty(
+            Document doc,
+            string category,
+            string property,
+            IEnumerable<QuickColourValueRow> values,
+            QuickColourScope scope,
+            string scopeSelectionSetName,
+            IReadOnlyList<List<string>> scopeModelPaths,
+            string scopeFilterCategory,
+            string scopeFilterProperty,
+            string scopeFilterValue,
+            bool permanent,
+            bool createSearchSets,
+            bool createSnapshots,
+            string folderPath,
+            string profileName,
+            Action<string> log)
+        {
+            if (doc == null) throw new ArgumentNullException(nameof(doc));
+
+            var enabledValues = (values ?? Enumerable.Empty<QuickColourValueRow>())
+                .Where(v => v != null && v.Enabled)
+                .ToList();
+
+            if (enabledValues.Count == 0)
+            {
+                log?.Invoke("QuickColour: no enabled values.");
+                return 0;
+            }
+
+            GroupItem folder = null;
+            if ((createSearchSets || createSnapshots) && !string.IsNullOrWhiteSpace(folderPath))
+            {
+                folder = EnsureFolder(doc, CombinePath(folderPath, profileName));
+            }
+
+            var totalColored = 0;
+
+            foreach (var row in enabledValues)
+            {
+                var search = new Search();
+                ApplyScopeToSearch(doc, search, scope, scopeSelectionSetName, scopeModelPaths, log);
+                var scopeFilter = BuildScopeFilterCondition(scope, scopeFilterCategory, scopeFilterProperty, scopeFilterValue, log);
+                if (scopeFilter != null)
+                {
+                    search.SearchConditions.Add(scopeFilter);
+                }
+                search.SearchConditions.Add(
+                    SearchCondition.HasPropertyByDisplayName(category, property)
+                        .EqualValue(new VariantData(row.Value ?? "")));
+
+                var results = search.FindAll(doc, false);
+
+                if (results == null || results.Count == 0)
+                {
+                    continue;
+                }
+
+                var navisColor = QuickColourPalette.ToNavisworksColor(row.Color);
+                if (permanent)
+                {
+                    doc.Models.OverridePermanentColor(results, navisColor);
+                }
+                else
+                {
+                    doc.Models.OverrideTemporaryColor(results, navisColor);
+                }
+
+                totalColored += results.Count;
+
+                if (folder != null)
+                {
+                    var baseName = SanitizeName($"{property} = {TrimForName(row.Value)}");
+
+                    if (createSearchSets)
+                    {
+                        var ss = new SelectionSet(search)
+                        {
+                            DisplayName = MakeUniqueName(folder, baseName)
+                        };
+                        AddCopySafe(doc, folder, ss, folderPath, log);
+                    }
+
+                    if (createSnapshots)
+                    {
+                        var snap = new SelectionSet(results)
+                        {
+                            DisplayName = MakeUniqueName(folder, baseName + " (Snapshot)")
+                        };
+                        AddCopySafe(doc, folder, snap, folderPath, log);
+                    }
+                }
+            }
+
+            return totalColored;
+        }
+
         public int ApplyByHierarchy(
             Document doc,
             string l1Category,
@@ -15,6 +112,11 @@ namespace MicroEng.Navisworks.QuickColour
             string l2Property,
             IEnumerable<QuickColourHierarchyGroup> groups,
             QuickColourScope scope,
+            string scopeSelectionSetName,
+            IReadOnlyList<List<string>> scopeModelPaths,
+            string scopeFilterCategory,
+            string scopeFilterProperty,
+            string scopeFilterValue,
             bool permanent,
             bool createSearchSets,
             bool createSnapshots,
@@ -35,19 +137,6 @@ namespace MicroEng.Navisworks.QuickColour
                 return 0;
             }
 
-            HashSet<Guid> scopeIds = null;
-            if (scope == QuickColourScope.CurrentSelection)
-            {
-                var sel = doc.CurrentSelection?.SelectedItems;
-                if (sel != null && sel.Count > 0)
-                {
-                    scopeIds = new HashSet<Guid>(
-                        sel.Where(i => i != null)
-                           .Select(i => i.InstanceGuid)
-                           .Where(id => id != Guid.Empty));
-                }
-            }
-
             var totalColored = 0;
 
             foreach (var group in enabledGroups)
@@ -63,7 +152,12 @@ namespace MicroEng.Navisworks.QuickColour
                 foreach (var typeRow in enabledTypes)
                 {
                     var search = new Search();
-                    search.Selection.SelectAll();
+                    ApplyScopeToSearch(doc, search, scope, scopeSelectionSetName, scopeModelPaths, log);
+                    var scopeFilter = BuildScopeFilterCondition(scope, scopeFilterCategory, scopeFilterProperty, scopeFilterValue, log);
+                    if (scopeFilter != null)
+                    {
+                        search.SearchConditions.Add(scopeFilter);
+                    }
                     search.SearchConditions.Add(
                         SearchCondition.HasPropertyByDisplayName(l1Category, l1Property)
                             .EqualValue(new VariantData(group.Value ?? "")));
@@ -72,10 +166,6 @@ namespace MicroEng.Navisworks.QuickColour
                             .EqualValue(new VariantData(typeRow.Value ?? "")));
 
                     var results = search.FindAll(doc, false);
-                    if (scopeIds != null)
-                    {
-                        results = FilterByIds(results, scopeIds);
-                    }
 
                     if (results == null || results.Count == 0)
                     {
@@ -155,23 +245,260 @@ namespace MicroEng.Navisworks.QuickColour
             return EnsureFolder(doc, full);
         }
 
-        private static ModelItemCollection FilterByIds(ModelItemCollection items, HashSet<Guid> allowed)
+        private static void ApplyScopeToSearch(
+            Document doc,
+            Search search,
+            QuickColourScope scope,
+            string selectionSetName,
+            IReadOnlyList<List<string>> modelPaths,
+            Action<string> log)
         {
-            if (items == null || allowed == null || allowed.Count == 0)
+            if (search == null)
             {
-                return items;
+                return;
             }
 
-            var filtered = new ModelItemCollection();
-            foreach (var item in items)
+            if (doc == null || scope == QuickColourScope.EntireModel)
             {
-                var id = item?.InstanceGuid ?? Guid.Empty;
-                if (id != Guid.Empty && allowed.Contains(id))
+                search.Selection.SelectAll();
+                return;
+            }
+
+            if (scope == QuickColourScope.PropertyFilter)
+            {
+                search.Selection.SelectAll();
+                return;
+            }
+
+            if (scope == QuickColourScope.CurrentSelection)
+            {
+                var selection = doc.CurrentSelection?.SelectedItems;
+                if (selection == null || selection.Count == 0)
                 {
-                    filtered.Add(item);
+                    log?.Invoke("Scope uses current selection but it is empty. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                search.Selection.Clear();
+                search.Selection.CopyFrom(selection);
+                return;
+            }
+
+            if (scope == QuickColourScope.SavedSelectionSet)
+            {
+                var name = selectionSetName;
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    log?.Invoke("Scope selection set not specified. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                var items = GetSelectionSetItems(doc, name);
+                if (items == null || items.Count == 0)
+                {
+                    log?.Invoke($"Scope selection set not found or empty: {name}. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                search.Selection.Clear();
+                search.Selection.CopyFrom(items);
+                return;
+            }
+
+            if (scope == QuickColourScope.ModelTree)
+            {
+                var items = ResolveScopeModelItems(doc, modelPaths, log);
+                if (items == null || items.Count == 0)
+                {
+                    log?.Invoke("Scope tree selection could not be resolved. Using entire model.");
+                    search.Selection.SelectAll();
+                    return;
+                }
+
+                search.Selection.Clear();
+                search.Selection.CopyFrom(items);
+                return;
+            }
+
+            search.Selection.SelectAll();
+        }
+
+        private static SearchCondition BuildScopeFilterCondition(
+            QuickColourScope scope,
+            string category,
+            string property,
+            string value,
+            Action<string> log)
+        {
+            if (scope != QuickColourScope.PropertyFilter)
+            {
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(category)
+                || string.IsNullOrWhiteSpace(property)
+                || string.IsNullOrWhiteSpace(value))
+            {
+                log?.Invoke("Scope property filter is incomplete. Using entire model.");
+                return null;
+            }
+
+            return SearchCondition.HasPropertyByDisplayName(category, property)
+                .EqualValue(new VariantData(value ?? ""));
+        }
+
+        private static ModelItemCollection GetSelectionSetItems(Document doc, string name)
+        {
+            try
+            {
+                var root = doc?.SelectionSets?.RootItem;
+                var selectionSet = FindSelectionSetByName(root, name);
+                return selectionSet?.GetSelectedItems(doc);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static SelectionSet FindSelectionSetByName(GroupItem folder, string name)
+        {
+            if (folder == null || string.IsNullOrWhiteSpace(name))
+            {
+                return null;
+            }
+
+            var children = folder.Children;
+            if (children == null)
+            {
+                return null;
+            }
+
+            foreach (SavedItem item in children)
+            {
+                if (item is SelectionSet set)
+                {
+                    if (string.Equals(set.DisplayName, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return set;
+                    }
+                }
+                else if (item is GroupItem group)
+                {
+                    var found = FindSelectionSetByName(group, name);
+                    if (found != null)
+                    {
+                        return found;
+                    }
                 }
             }
-            return filtered;
+
+            return null;
+        }
+
+        private static ModelItemCollection ResolveScopeModelItems(
+            Document doc,
+            IReadOnlyList<List<string>> paths,
+            Action<string> log)
+        {
+            if (doc?.Models?.RootItems == null || paths == null || paths.Count == 0)
+            {
+                return null;
+            }
+
+            var items = new ModelItemCollection();
+            var added = new HashSet<Guid>();
+            foreach (var path in paths)
+            {
+                var resolved = ResolveModelPath(doc.Models.RootItems, path);
+                if (resolved == null)
+                {
+                    log?.Invoke($"Scope path not found: {string.Join(" > ", path ?? new List<string>())}");
+                    continue;
+                }
+
+                var id = resolved.InstanceGuid;
+                if (id == Guid.Empty || added.Add(id))
+                {
+                    items.Add(resolved);
+                }
+            }
+
+            return items;
+        }
+
+        private static ModelItem ResolveModelPath(IEnumerable<ModelItem> roots, IReadOnlyList<string> path)
+        {
+            if (roots == null || path == null || path.Count == 0)
+            {
+                return null;
+            }
+
+            var current = FindRootByLabel(roots, path[0]);
+            if (current == null)
+            {
+                return null;
+            }
+
+            for (var i = 1; i < path.Count; i++)
+            {
+                var segment = path[i];
+                if (string.IsNullOrWhiteSpace(segment))
+                {
+                    return null;
+                }
+
+                var next = FindChildByLabel(current, segment);
+                if (next == null)
+                {
+                    return null;
+                }
+
+                current = next;
+            }
+
+            return current;
+        }
+
+        private static ModelItem FindRootByLabel(IEnumerable<ModelItem> roots, string label)
+        {
+            if (roots == null || string.IsNullOrWhiteSpace(label))
+            {
+                return null;
+            }
+
+            foreach (var root in roots)
+            {
+                var name = root?.DisplayName ?? "";
+                if (string.Equals(name, label, StringComparison.OrdinalIgnoreCase))
+                {
+                    return root;
+                }
+            }
+
+            return null;
+        }
+
+        private static ModelItem FindChildByLabel(ModelItem parent, string label)
+        {
+            if (parent?.Children == null || string.IsNullOrWhiteSpace(label))
+            {
+                return null;
+            }
+
+            foreach (var child in parent.Children)
+            {
+                var name = child?.DisplayName ?? "";
+                if (string.Equals(name, label, StringComparison.OrdinalIgnoreCase))
+                {
+                    return child;
+                }
+            }
+
+            return null;
         }
 
         private static string CombinePath(params string[] parts)

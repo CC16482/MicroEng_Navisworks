@@ -1,13 +1,20 @@
 # MicroEng Handoff
 
 ## Status
-- Last build: `dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj /p:DeployToProgramData=false` (ProgramData deploy locked by Navisworks).
+- Last build: `dotnet clean; dotnet build` failed (QuickColourControl.xaml.cs ambiguous Color); fix applied, build not rerun yet.
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
-- Working tree was clean at last check (no uncommitted changes).
+- Working tree is dirty (build outputs in bin/obj + local .addin changes).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
 - Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
+- Quick Colour profiles saved under `%APPDATA%\MicroEng\ColourProfiles\` (JSON schema v1).
 
 ## Recent changes
+- Quick Colour Profiles tab added (library + Apply Temporary/Permanent + Import/Export/Delete).
+- MicroEng Colour Profile schema v1 stored in AppData; Profiles preview shows color swatches.
+- Quick Colour palette supports Custom Hue (pick base color; Deep hue assignment retained, lightness adjusted).
+- Quick Colour values table swatches are editable with color picker.
+- Quick Colour scope selector mirrors Smart Sets (All model, Current selection, Saved selection set, Tree selection, Property filter) with scope picker + summary.
+- Load Values / Load Hierarchy and Apply now respect scope; scope kind/path persist in profiles.
 - Quick Colour tool implemented (Hierarchy Builder tab + hue groups + auto-assign + preview grid).
 - Quick Colour applies temp/permanent overrides by Category + Type (dual-property AND search).
 - Single-hue mode added with hue pick + category contrast bands; types shade within band.
@@ -52,11 +59,14 @@
 ## Open issues
 - Data Scraper: Selection/Search set scopes are still disabled (set lists are empty).
 - Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
+- Quick Colour: scope filtering + profile scope encoding need verification across selection set/tree/property filter.
+- Build not rerun after latest Quick Colour scope updates.
 
 ## Key files touched
 - `MicroEng.Navisworks/QuickColour/NotifyBase.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourModels.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourPalette.cs`
+- `MicroEng.Navisworks/Colour/ColourPaletteGenerator.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourHierarchyModels.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourHueGroupModels.cs`
 - `MicroEng.Navisworks/QuickColour/HueGroupAutoAssignPreviewModels.cs`
@@ -64,6 +74,13 @@
 - `MicroEng.Navisworks/QuickColour/DisciplineMapMatcherEngine.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourHueGroupAutoAssignService.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourNavisworksService.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourValueBuilder.cs`
+- `MicroEng.Navisworks/QuickColour/QuickColourLegendExporter.cs`
+- `MicroEng.Navisworks/QuickColour/Profiles/MicroEngColourProfileModels.cs`
+- `MicroEng.Navisworks/QuickColour/Profiles/MicroEngColourProfileStore.cs`
+- `MicroEng.Navisworks/QuickColour/Profiles/QuickColourProfilesPage.xaml`
+- `MicroEng.Navisworks/QuickColour/Profiles/QuickColourProfilesPage.xaml.cs`
+- `MicroEng.Navisworks/QuickColour/Profiles/ColorHexToBrushConverter.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourControl.xaml`
 - `MicroEng.Navisworks/QuickColour/QuickColourControl.xaml.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourWindow.xaml`
@@ -114,6 +131,10 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
+- Quick Colour: Profiles tab loads profile list, preview shows color swatches, Apply Temp/Permanent uses profile scope.
+- Quick Colour: Scope options match Smart Sets and Load Values respects Current selection / Saved selection set / Tree selection / Property filter.
+- Quick Colour: Custom Hue palette keeps Deep hue assignment but shifts lightness to the picked base color.
+- Quick Colour: Values table swatches open the color picker and update row hex.
 - Quick Colour: Load hierarchy, edit base hex, Regenerate Type Shades updates type colors.
 - Quick Colour: Single hue mode (lock hue) produces category bands + type subshades.
 - Quick Colour: Hue Groups assigns categories and respects Lock base color.

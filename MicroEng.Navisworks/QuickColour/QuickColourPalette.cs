@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Windows.Media;
 using MediaColor = System.Windows.Media.Color;
 
@@ -22,12 +23,12 @@ namespace MicroEng.Navisworks.QuickColour
                 s = s.Substring(1);
             }
 
-            if (s.Length != 6)
+            if (s.Length != 6 && s.Length != 8)
             {
                 return false;
             }
 
-            if (!int.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var value))
+            if (!uint.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var value))
             {
                 return false;
             }
@@ -110,6 +111,50 @@ namespace MicroEng.Navisworks.QuickColour
             }
 
             return shades;
+        }
+
+        public static void AssignPalette(IList<QuickColourValueRow> rows, QuickColourPaletteStyle style)
+        {
+            if (rows == null || rows.Count == 0)
+            {
+                return;
+            }
+
+            var list = rows.Where(r => r != null).ToList();
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            var palette = GeneratePalette(list.Count, style);
+            for (int i = 0; i < list.Count; i++)
+            {
+                list[i].Color = palette[i];
+            }
+        }
+
+        public static void AssignStableColors(IList<QuickColourValueRow> rows, QuickColourPaletteStyle style, string seed)
+        {
+            if (rows == null || rows.Count == 0)
+            {
+                return;
+            }
+
+            var list = rows.Where(r => r != null).ToList();
+            if (list.Count == 0)
+            {
+                return;
+            }
+
+            var sat = GetRecommendedSaturation(style);
+            var light = style == QuickColourPaletteStyle.Pastel ? 0.78 : 0.55;
+            var seedText = seed ?? "";
+
+            foreach (var row in list)
+            {
+                var h = HashToHue01(row.Value, seedText);
+                row.Color = FromHsl01(h, sat, light);
+            }
         }
 
         public static double GetHue01(MediaColor c)
@@ -244,6 +289,22 @@ namespace MicroEng.Navisworks.QuickColour
                 (byte)Math.Round(r * 255),
                 (byte)Math.Round(g * 255),
                 (byte)Math.Round(b * 255));
+        }
+
+        private static double HashToHue01(string value, string seed)
+        {
+            unchecked
+            {
+                uint hash = 2166136261;
+                var text = (value ?? "") + "|" + (seed ?? "");
+                foreach (var ch in text)
+                {
+                    hash ^= ch;
+                    hash *= 16777619;
+                }
+
+                return (hash % 360u) / 360.0;
+            }
         }
 
         private static double HueToRgb(double p, double q, double t)

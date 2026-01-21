@@ -1,0 +1,450 @@
+Below is a clean, single‑pass implementation plan to upgrade **Quick Colour** palettes to **Default (Deep/Pastel/etc)** *or* **Custom (Hue‑derived)**, where **Custom** uses a single picked base colour and generates the rest by rotating hue (W3Schools‑style “Hue” concept).
+
+I’m writing this as a **Codex work order** plus **drop‑in code**. Codex should be able to apply this in one go.
+
+---
+
+## What you’ll get
+
+### UI / behaviour
+
+* Palette dropdown gains **Custom (Hue)**.
+* When **Custom (Hue)** is selected:
+
+  * show **Base colour** swatch + hex + **Pick…** button
+  * base colour is chosen via a standard **Windows/“Navisworks-like” colour dialog** (works fine in Navisworks add-ins).
+* Clicking **Auto Assign Colors**:
+
+  * Deep/Pastel behave as before
+  * Custom generates colours by **keeping S/L stable and rotating hue around the wheel**, anchored at the base hue
+  * if **Stable colors** is enabled, the hue per value is derived from a **stable hash** of the value string (so it stays consistent across runs, even if the list order changes).
+
+### Persistence
+
+* Profile JSON stores:
+
+  * `PaletteKind`
+  * `CustomBaseColorHex` (only meaningful when Custom)
+
+---
+
+## Codex work order (single pass, file-by-file)
+
+> **Important:** I don’t have your Quick Colour source files in this chat, so I’m naming files logically. Codex should **search your solution** for the classes/fields mentioned (Palette dropdown, Auto Assign Colors handler, profile model) and apply the edits there.
+
+### 1) Add palette enum + profile fields
+
+**Edit:** the colour-profile model file (whatever holds your profile JSON: e.g. `MicroEngColourProfileModels.cs`, `QuickColourModels.cs`, or similar)
+
+* Add:
+
+```csharp
+public enum MicroEngPaletteKind
+{
+    Deep = 0,
+    Pastel = 1,
+    // keep any existing ones you already have (ColourblindSafe, Greyscale, etc)
+    CustomHue = 99
+}
+```
+
+* In your profile model (the thing you Save/Load to JSON), add:
+
+```csharp
+[DataMember(Order = 20)]
+public MicroEngPaletteKind PaletteKind { get; set; } = MicroEngPaletteKind.Deep;
+
+[DataMember(Order = 21)]
+public string CustomBaseColorHex { get; set; } = "#FF6699"; // default “nice” base
+```
+
+If your profile uses strings instead of enums, keep it string-based but still store `CustomBaseColorHex`.
+
+### 2) Add colour utilities + palette generator (new file)
+
+**Add new file:** `Colour/ColourPaletteGenerator.cs` (or similar folder you use)
+
+Paste this entire file:
+
+```csharp
+using System;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Windows.Media;
+
+namespace MicroEng.Navisworks.Colour
+{
+    internal static class ColourPaletteGenerator
+    {
+        public static Color ParseHexOrDefault(string hex, Color fallback)
+        {
+            if (TryParseHex(hex, out var c)) return c;
+            return fallback;
+        }
+
+        public static bool TryParseHex(string hex, out Color color)
+        {
+            color = default;
+
+            if (string.IsNullOrWhiteSpace(hex))
+                return false;
+
+            var s = hex.Trim();
+            if (s.StartsWith("#")) s = s.Substring(1);
+
+            // Support RRGGBB and AARRGGBB
+            if (s.Length == 6)
+            {
+                if (byte.TryParse(s.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r) &&
+                    byte.TryParse(s.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g) &&
+                    byte.TryParse(s.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
+                {
+                    color = Color.FromRgb(r, g, b);
+                    return true;
+                }
+                return false;
+            }
+
+            if (s.Length == 8)
+            {
+                if (byte.TryParse(s.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var a) &&
+                    byte.TryParse(s.Substring(2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var r) &&
+                    byte.TryParse(s.Substring(4, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var g) &&
+                    byte.TryParse(s.Substring(6, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var b))
+                {
+                    color = Color.FromArgb(a, r, g, b);
+                    return true;
+                }
+                return false;
+            }
+
+            return false;
+        }
+
+        public static string ToHexRgb(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+
+        /// <summary>
+        /// Custom Hue palette: keep S/L stable, rotate hue around the wheel.
+        /// If stableColors, hue is derived from a stable hash of the value string (order-independent).
+        /// </summary>
+        public static Color GetCustomHueColor(
+            Color baseColor,
+            string valueKey,
+            int ordinalIndex,
+            int totalCount,
+            bool stableColors,
+            string seed)
+        {
+            RgbToHsl(baseColor, out var baseH, out var baseS, out var baseL);
+
+            // Clamp a bit to avoid unusable extremes; still respects the user's chosen colour.
+            baseS = Clamp(baseS, 0.35, 0.95);
+            baseL = Clamp(baseL, 0.25, 0.85);
+
+            double hue;
+            if (stableColors)
+            {
+                // Stable mapping per value string
+                var h = StableHashInt($"{seed}|{valueKey}");
+                hue = (baseH + (h % 360)) % 360.0;
+            }
+            else
+            {
+                // Even distribution across the current list
+                var step = 360.0 / Math.Max(1, totalCount);
+                hue = (baseH + (ordinalIndex * step)) % 360.0;
+            }
+
+            return HslToRgb(hue, baseS, baseL);
+        }
+
+        private static int StableHashInt(string s)
+        {
+            // MD5 is fine here (non-security usage): stable across runs/machines.
+            using (var md5 = MD5.Create())
+            {
+                var bytes = md5.ComputeHash(Encoding.UTF8.GetBytes(s ?? ""));
+                // Take 4 bytes into a positive int
+                var v = BitConverter.ToInt32(bytes, 0);
+                return v == int.MinValue ? int.MaxValue : Math.Abs(v);
+            }
+        }
+
+        private static double Clamp(double v, double min, double max) => v < min ? min : (v > max ? max : v);
+
+        // --- HSL conversion ---
+        // h: [0..360), s/l: [0..1]
+        public static void RgbToHsl(Color c, out double h, out double s, out double l)
+        {
+            var r = c.R / 255.0;
+            var g = c.G / 255.0;
+            var b = c.B / 255.0;
+
+            var max = Math.Max(r, Math.Max(g, b));
+            var min = Math.Min(r, Math.Min(g, b));
+            var delta = max - min;
+
+            l = (max + min) / 2.0;
+
+            if (delta < 1e-9)
+            {
+                h = 0;
+                s = 0;
+                return;
+            }
+
+            s = delta / (1.0 - Math.Abs(2.0 * l - 1.0));
+
+            if (Math.Abs(max - r) < 1e-9)
+                h = 60.0 * (((g - b) / delta) % 6.0);
+            else if (Math.Abs(max - g) < 1e-9)
+                h = 60.0 * (((b - r) / delta) + 2.0);
+            else
+                h = 60.0 * (((r - g) / delta) + 4.0);
+
+            if (h < 0) h += 360.0;
+        }
+
+        public static Color HslToRgb(double h, double s, double l)
+        {
+            h = ((h % 360.0) + 360.0) % 360.0;
+            s = Clamp(s, 0, 1);
+            l = Clamp(l, 0, 1);
+
+            var c = (1.0 - Math.Abs(2.0 * l - 1.0)) * s;
+            var x = c * (1.0 - Math.Abs(((h / 60.0) % 2.0) - 1.0));
+            var m = l - c / 2.0;
+
+            double rp, gp, bp;
+            if (h < 60) { rp = c; gp = x; bp = 0; }
+            else if (h < 120) { rp = x; gp = c; bp = 0; }
+            else if (h < 180) { rp = 0; gp = c; bp = x; }
+            else if (h < 240) { rp = 0; gp = x; bp = c; }
+            else if (h < 300) { rp = x; gp = 0; bp = c; }
+            else { rp = c; gp = 0; bp = x; }
+
+            var r = (byte)Math.Round((rp + m) * 255.0);
+            var g = (byte)Math.Round((gp + m) * 255.0);
+            var b = (byte)Math.Round((bp + m) * 255.0);
+
+            return Color.FromRgb(r, g, b);
+        }
+    }
+}
+```
+
+### 3) UI: add “Custom (Hue)” + base colour picker controls
+
+**Edit:** the Quick Colour page XAML (where palette dropdown is)
+
+* Add “Custom (Hue)” to the palette dropdown items (or palette options source).
+* Add a small **Base colour** row that is only visible when palette is Custom.
+
+Example XAML block (adapt to your layout/styles):
+
+```xml
+<!-- Palette row -->
+<StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+    <TextBlock Text="Palette:" Width="70" VerticalAlignment="Center"/>
+    <ComboBox Width="160"
+              ItemsSource="{Binding PaletteOptions}"
+              SelectedItem="{Binding SelectedPaletteOption, Mode=TwoWay}" />
+
+    <!-- Only show for Custom -->
+    <StackPanel Orientation="Horizontal" Margin="12,0,0,0"
+                Visibility="{Binding IsCustomPalette, Converter={StaticResource BoolToVisibility}}">
+        <TextBlock Text="Base:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+        <Border Width="18" Height="18" CornerRadius="2"
+                Background="{Binding CustomBaseColorBrush}"
+                BorderThickness="1" BorderBrush="#333"
+                Margin="0,0,6,0"/>
+        <TextBlock Text="{Binding CustomBaseColorHex}" VerticalAlignment="Center" Width="78"/>
+        <Button Content="Pick…" Padding="10,4"
+                Click="PickCustomBaseColor_Click"
+                Margin="6,0,0,0"/>
+    </StackPanel>
+</StackPanel>
+```
+
+If you don’t have `BoolToVisibility`, reuse whatever converters you already use in the project; otherwise add a standard one.
+
+### 4) Code-behind / ViewModel: wire up IsCustomPalette + pick dialog
+
+**Edit:** the Quick Colour page `.xaml.cs` (or its viewmodel)
+
+Add properties:
+
+```csharp
+public bool IsCustomPalette => SelectedProfile?.PaletteKind == MicroEngPaletteKind.CustomHue;
+
+public string CustomBaseColorHex
+{
+    get => SelectedProfile?.CustomBaseColorHex ?? "#FF6699";
+    set
+    {
+        if (SelectedProfile == null) return;
+        SelectedProfile.CustomBaseColorHex = value ?? "#FF6699";
+        OnPropertyChanged(nameof(CustomBaseColorHex));
+        OnPropertyChanged(nameof(CustomBaseColorBrush));
+    }
+}
+
+public System.Windows.Media.Brush CustomBaseColorBrush
+{
+    get
+    {
+        var c = MicroEng.Navisworks.Colour.ColourPaletteGenerator.ParseHexOrDefault(CustomBaseColorHex, Colors.HotPink);
+        return new SolidColorBrush(c);
+    }
+}
+```
+
+Then implement the click handler:
+
+```csharp
+private void PickCustomBaseColor_Click(object sender, RoutedEventArgs e)
+{
+    if (SelectedProfile == null) return;
+
+    var dlg = new System.Windows.Forms.ColorDialog
+    {
+        FullOpen = true,
+        AnyColor = true
+    };
+
+    var current = MicroEng.Navisworks.Colour.ColourPaletteGenerator.ParseHexOrDefault(
+        SelectedProfile.CustomBaseColorHex, System.Windows.Media.Colors.HotPink);
+
+    dlg.Color = System.Drawing.Color.FromArgb(current.R, current.G, current.B);
+
+    if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+    {
+        SelectedProfile.CustomBaseColorHex = $"#{dlg.Color.R:X2}{dlg.Color.G:X2}{dlg.Color.B:X2}";
+        OnPropertyChanged(nameof(CustomBaseColorHex));
+        OnPropertyChanged(nameof(CustomBaseColorBrush));
+    }
+}
+```
+
+Also ensure when palette changes you raise:
+
+```csharp
+OnPropertyChanged(nameof(IsCustomPalette));
+OnPropertyChanged(nameof(CustomBaseColorHex));
+OnPropertyChanged(nameof(CustomBaseColorBrush));
+```
+
+### 5) Update “Auto Assign Colors” to support CustomHue
+
+**Edit:** wherever your **Auto Assign Colors** button logic lives.
+
+Pseudo-logic you must implement:
+
+* Determine palette kind.
+* If CustomHue:
+
+  * parse base colour from profile hex
+  * for each mapping row, compute colour via `GetCustomHueColor(...)`
+  * set row’s `Hex` (and whatever backing brush/colour you use)
+
+Example:
+
+```csharp
+private void AutoAssignColors()
+{
+    if (SelectedProfile == null || ValueRows == null) return;
+
+    var stable = SelectedProfile.StableColors;   // or however you store it
+    var seed = SelectedProfile.Seed ?? "";
+
+    if (SelectedProfile.PaletteKind == MicroEngPaletteKind.CustomHue)
+    {
+        var baseColor = MicroEng.Navisworks.Colour.ColourPaletteGenerator.ParseHexOrDefault(
+            SelectedProfile.CustomBaseColorHex, System.Windows.Media.Colors.HotPink);
+
+        for (int i = 0; i < ValueRows.Count; i++)
+        {
+            var row = ValueRows[i];
+            var key = row?.Value ?? ""; // value string
+            var c = MicroEng.Navisworks.Colour.ColourPaletteGenerator.GetCustomHueColor(
+                baseColor,
+                valueKey: key,
+                ordinalIndex: i,
+                totalCount: ValueRows.Count,
+                stableColors: stable,
+                seed: seed);
+
+            row.Hex = MicroEng.Navisworks.Colour.ColourPaletteGenerator.ToHexRgb(c);
+            // If you also store Brush/Color, update it here too.
+        }
+
+        return;
+    }
+
+    // Otherwise run your existing Deep/Pastel palette logic unchanged.
+    AutoAssignColors_DefaultPalettes();
+}
+```
+
+### 6) Ensure Save/Load + “Profiles tab” includes new fields
+
+If you store/load profiles to JSON already:
+
+* No special action if `[DataMember]` is used.
+* If you do manual serialization, add `PaletteKind` and `CustomBaseColorHex`.
+
+### 7) QA checklist (Codex must run mentally, you run in Navisworks)
+
+* Switch Palette to **Custom (Hue)** → Base colour controls appear
+* Click Pick… → choose colour → Base swatch updates
+* Click Auto Assign Colors → mapping Hex values change
+* Apply Temporary → see changes in model
+* Toggle Stable colors → Auto Assign Colors → colors change deterministically and remain consistent across re-ordering
+* Save Profile → close tool → reopen → Custom palette + base hex preserved
+
+---
+
+## Codex prompt (copy/paste)
+
+Use this exactly to prevent wandering:
+
+> **Codex Work Order: Custom hue-derived palette for Quick Colour**
+>
+> Implement a new palette option “Custom (Hue)” in the MicroEng Colour Profile / Quick Colour tool.
+>
+> Requirements:
+>
+> 1. Add MicroEngPaletteKind.CustomHue and add profile fields PaletteKind + CustomBaseColorHex (default #FF6699) to the persisted profile JSON model.
+> 2. Add a new shared utility file `ColourPaletteGenerator.cs` (namespace MicroEng.Navisworks.Colour) providing:
+>
+>    * Hex parsing/formatting
+>    * RGB<->HSL conversion
+>    * `GetCustomHueColor(baseColor, valueKey, ordinalIndex, totalCount, stableColors, seed)` that keeps S/L stable and rotates hue; stableColors must use a stable hash of valueKey+seed (order-independent).
+> 3. Update the Quick Colour UI:
+>
+>    * Palette dropdown includes “Custom (Hue)”
+>    * When Custom is selected, show Base colour swatch + hex + “Pick…” button.
+>    * The pick button uses `System.Windows.Forms.ColorDialog` and stores selected colour into CustomBaseColorHex.
+> 4. Update Auto Assign Colors:
+>
+>    * If palette is CustomHue: assign each value row’s Hex using GetCustomHueColor (using StableColors/Seed if enabled).
+>    * Otherwise keep existing palette behaviour unchanged.
+> 5. Ensure property change notifications update the UI (IsCustomPalette, CustomBaseColorBrush, CustomBaseColorHex).
+> 6. Keep WPF styling consistent with the rest of the tool; no WinForms UI controls embedded (only ColorDialog modal is fine).
+>
+> Deliverables:
+>
+> * All code compiles net48
+> * Custom palette persists in profiles and reopens correctly
+> * Auto Assign Colors updates mapping grid hex + swatches.
+
+---
+
+## Note on “Navisworks colour picker”
+
+Navisworks doesn’t expose a clean public “Navisworks colour picker dialog” API that you can reuse in WPF. In practice, Navisworks uses standard Windows colour dialogs internally, so `System.Windows.Forms.ColorDialog` is the correct pragmatic choice for an add-in.
+
+---
+
+If you paste (or upload) the actual Quick Colour source files (the window/page XAML + code-behind + profile model), I can give you **exact edit hunks** matched to your class names and bindings rather than the “search and apply” style above.

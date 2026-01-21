@@ -1,0 +1,319 @@
+Understood. Codex is correct that `ReferenceDocuments\Codex_Instructions_03.txt` (as described) covers **Hierarchy Builder + Hue Groups/Auto‑assign/Preview**, but does **not** fully define the other two tabs. You can safely unblock Codex by giving it an explicit spec and letting it implement the missing parts as **Phase 1 (must-have)** plus **Phase 2 hooks (optional)**.
+
+Below is the exact spec to answer Codex’s questions, followed by a single **Codex work order** (sequenced, file-by-file) so it can implement “Quick Colour” + “Appearance Profiles” in one pass without wandering.
+
+---
+
+## Confirmed intended behaviour
+
+### A) Quick Colour tab
+
+Yes: **Quick Colour is a single-property colourizer**, driven by the **Data Scraper cache**.
+
+**User workflow**
+
+1. Choose **Data Scraper Profile** (required).
+2. Choose a property (Category + Property) from cached catalog (dropdowns).
+3. Tool shows a **distinct value list** with counts (from cached raw entries), each with a colour swatch and hex.
+4. User chooses palette mode and assigns colours automatically, then optionally tweaks individual colours.
+5. Apply either:
+
+   * **Temporary override** (visual-only, fast)
+   * **Permanent override** (saved into NWF)
+6. Optional output artifacts (to mimic Appearance Profiler workflows):
+
+   * Create **Search Sets** (search-based)
+   * Create **Selection Set snapshots** (fixed results)
+   * Put them into a folder structure in Selection Sets tree
+7. Optional export:
+
+   * Legend CSV/HTML/JSON (for Overwatch later)
+
+**Colour modes (Phase 1)**
+
+* **Categorical (default):** one colour per distinct string value
+* **Stable colour assignment toggle:** value string → deterministic colour (hash-based) so “Level 01” stays same across runs
+
+**Colour modes (Phase 2 hooks, optional but recommended)**
+
+* **Numeric gradient mode** when values parse as numeric:
+
+  * min/max auto (from cache), linear/log scale, gradient palette
+  * “bucketed” (e.g., 32/64 bands) so it’s still groupable/legendable
+
+**Scope (Phase 1)**
+
+* Entire model
+* Current selection (filter result set by current selection GUIDs)
+
+**Scope (Phase 2)**
+
+* Find Items parity “Search in” tree (model roots/selection sets/etc.). You already want this for Smart Sets; Quick Colour can share that component later.
+
+**Important constraint**
+
+* **No hard dependency on Navisworks built-in Appearance Profiler UI** in Phase 1. Instead:
+
+  * Quick Colour will generate **Search Sets + Apply overrides** so users get the same functional result (coloured model + reusable sets).
+  * If later you discover a stable API for writing directly into Appearance Profiler definitions, you can add an “Export to Appearance Profiler (experimental)” button.
+
+---
+
+### B) Appearance Profile tab
+
+Yes: **Appearance Profile is MicroEng-managed profile save/load**, not the built-in Navisworks Appearance Profiler editor.
+
+**What it is**
+
+* A library of saved “colouring recipes” that can be applied later:
+
+  * Property definition (Category + Property)
+  * Mode (categorical vs numeric gradient)
+  * Palette settings (deep/pastel/colourblind-safe later)
+  * Stable hash seed / stable mode
+  * Value→Colour mapping
+  * Optional output settings (create sets/snapshots folder path)
+
+**Where profiles live**
+
+* Default: **per-user** under:
+
+  * `%APPDATA%\MicroEng\Navisworks\QuickColour\Profiles\`
+* Add Export/Import so teams can share profiles via repo/Overwatch later (no ProgramData writes needed).
+
+**What metadata to store**
+
+* `schemaVersion`
+* profile name
+* created/updated UTC timestamp
+* source model name (optional)
+* Data Scraper profile name (optional)
+* property (category/property)
+* mode (categorical/gradient)
+* palette config (pack/style)
+* stableColours flag + seed
+* mapping list: `{ value, colorHex, enabled }`
+* optional: “unknown value behaviour” (ignore / auto-assign from palette)
+
+---
+
+## Direct response to Codex (you can paste this into Codex chat)
+
+> Proceed with:
+>
+> * Quick Colour = single-property colourizer (Data Scraper-driven). Categorical + stable colour mode in Phase 1; numeric gradient optional as Phase 2.
+> * Appearance Profile = MicroEng JSON save/load/apply of those mappings. Profiles stored in `%APPDATA%\MicroEng\Navisworks\QuickColour\Profiles\`. Include metadata and mapping table. Applying a profile re-runs searches and applies temp/permanent overrides and optionally creates Search Sets/Snapshots.
+>   Do **not** attempt to write directly to Navisworks built-in Appearance Profiler definitions in Phase 1; instead create Search Sets + apply overrides (equivalent user outcome).
+
+---
+
+## Codex work order: build Quick Colour + Appearance Profiles end-to-end
+
+Paste this as a single “execute in one pass” instruction to Codex.
+
+### 0) Guardrails
+
+* All UI must follow Data Scraper/Data Mapper sizing:
+
+  * DataGrid `FontSize=12`, `RowHeight≈26`, no huge padding
+* Use standard WPF controls where WPF-UI lacks tags (ComboBox, TabControl, DataGrid are standard WPF)
+* Keep Navisworks API calls on UI thread; heavy list building can happen off-thread but must not touch Navisworks objects.
+
+---
+
+### 1) Create the Quick Colour tool shell (dock pane)
+
+**Files**
+
+* `QuickColour/QuickColourControl.xaml` + `.xaml.cs`
+* `QuickColour/QuickColourPlugins.cs` (dock pane registration)
+* Update `MicroEngPlugins.cs` + `MicroEngPanelControl.xaml(.cs)` to launch it
+
+**UI**
+Tabs:
+
+1. Quick Colour
+2. Appearance Profiles
+3. Hierarchy Builder (already implemented per Codex_Instructions_03; keep as-is)
+
+---
+
+### 2) Implement Quick Colour models
+
+**Files**
+
+* `QuickColour/QuickColourModels.cs`
+
+**Models**
+
+* `QuickColourValueRow`:
+
+  * Enabled, Value (string), Count (int), ColorHex, Color (WPF), SwatchBrush
+* `QuickColourSessionState`:
+
+  * SelectedScraperProfile
+  * SelectedCategory, SelectedProperty
+  * Mode: Categorical / NumericGradient (optional)
+  * PalettePack (Deep/Pastel)
+  * StableColors bool + Seed string/int
+  * Scope: EntireModel / CurrentSelection
+  * Output toggles: CreateSearchSets / CreateSnapshots, FolderPath, ProfileName
+
+---
+
+### 3) Implement Quick Colour data building from Data Scraper cache
+
+**Files**
+
+* `QuickColour/QuickColourValueBuilder.cs`
+
+**Logic**
+
+* Given DataScraperCache.LastSession (or selected profile’s latest session):
+
+  * Extract distinct values for selected property:
+
+    * Use RawEntries filtered by Category+Property
+    * Normalize value to string (`""` for null)
+  * Count occurrences
+  * Return ordered list (Count desc, then Value)
+
+**UX**
+
+* If no scrape session selected: show a warning chip “Run Data Scraper first” + button to open Data Scraper.
+
+---
+
+### 4) Implement colour assignment (palette + stable hash)
+
+**Files**
+
+* Reuse `QuickColourPalette.cs` you already have from Hierarchy work, or create it if missing.
+* Add:
+
+  * `AssignPalette(List<QuickColourValueRow> rows, paletteStyle)`
+  * `AssignStableColors(rows, paletteStyle, seed)` (hash-based hue mapping)
+  * (Optional) `AssignNumericGradient(rows, min/max, bands, scale)` later
+
+---
+
+### 5) Implement apply engine (temp/permanent) + set creation
+
+**Files**
+
+* `QuickColour/QuickColourNavisworksService.cs`
+
+**Capabilities**
+
+* `ApplyBySingleProperty(...)`:
+
+  * For each enabled value row:
+
+    * Build `Search` condition: HasPropertyByDisplayName(selectedCategory, selectedProperty) == value
+    * Find results
+    * Filter by scope:
+
+      * Entire model: no filter
+      * Current selection: intersect by InstanceGuid
+    * Apply overrides:
+
+      * Temporary: `doc.Models.OverrideTemporaryColor(results, color)`
+      * Permanent: `doc.Models.OverridePermanentColor(results, color)`
+    * Optional: create Search Set and/or Snapshot under `FolderPath/ProfileName`
+* Add `ClearTemporary()` and `ResetPermanent()` actions.
+
+**Outcome**
+
+* This gives users the same practical outcome as Appearance Profiler: repeatable rule-based colouring + sets.
+
+---
+
+### 6) Implement Appearance Profiles (save/load/apply)
+
+**Files**
+
+* `QuickColour/QuickColourProfileModels.cs`
+* `QuickColour/QuickColourProfileStore.cs`
+
+**Storage**
+
+* `%APPDATA%\MicroEng\Navisworks\QuickColour\Profiles\*.json`
+
+**Profile schema**
+
+* `schemaVersion`
+* `profileName`
+* `createdUtc`, `updatedUtc`
+* `propertyCategory`, `propertyName`
+* `scraperProfileName` (optional)
+* `mode`, `paletteStyle`, `stableColors`, `seed`
+* `values[]`: `{ value, enabled, colorHex }`
+
+**UI tab**
+
+* Left list: profiles
+* Right: profile details + preview of mapping grid
+* Buttons:
+
+  * Save current as profile
+  * Save changes
+  * Delete
+  * Apply Temporary
+  * Apply Permanent
+  * Export/Import JSON
+
+**Apply**
+
+* Loading a profile should populate Quick Colour UI (category/property + value grid + colours), then allow Apply.
+* Applying should call the same `ApplyBySingleProperty`.
+
+---
+
+### 7) Legend export (Phase 1 minimal)
+
+**Files**
+
+* `QuickColour/QuickColourLegendExporter.cs`
+
+**Exports**
+
+* CSV and JSON at minimum (HTML later)
+* Include:
+
+  * Profile name
+  * Category/Property
+  * Timestamp
+  * Scope
+  * Rows: value, hex, count
+
+---
+
+### 8) Testing / acceptance criteria
+
+* Build succeeds `net48`
+* Quick Colour tab:
+
+  * Loads values from selected Data Scraper session
+  * Assigns palette + stable mode
+  * Applies temp/permanent overrides correctly
+  * Can create Search Sets and Snapshots
+* Appearance Profiles tab:
+
+  * Saves profile to AppData
+  * Loads profile, repopulates grid
+  * Applies profile correctly
+* UI readable (Data Scraper-style grid sizing)
+
+---
+
+## Additional notes for your specific environment
+
+* You already hit WPF-UI tag limitations (`ui:ComboBox`, `ui:TabControl`). For Quick Colour:
+
+  * Use standard WPF `ComboBox`, `TabControl`, `DataGrid`
+  * Let your `MicroEngWpfUiTheme.ApplyTo(root)` provide implicit styling
+* Do not rely on “Navisworks Appearance Profiler internal structures” unless you have a known API surface; Search Sets + overrides is the safe MVP and achieves the same result for users.
+
+---
+
+If you want, I can also rewrite the above into a **single “Codex change request” message** that contains no explanation—only checklist commands—so Codex executes it more deterministically.

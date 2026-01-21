@@ -110,6 +110,10 @@
         "net48": {
           "targetAlias": "net48",
           "dependencies": {
+            "Newtonsoft.Json": {
+              "target": "Package",
+              "version": "[13.0.3, )"
+            },
             "SharpDX": {
               "target": "Package",
               "version": "[4.2.0, )"

@@ -10,6 +10,7 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.exe.config
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.exe
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\MicroEng.DesignHost.pdb
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\Newtonsoft.Json.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\SharpDX.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\SharpDX.D3DCompiler.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.DesignHost\bin\Debug\net48\SharpDX.Direct3D11.dll

@@ -202,8 +202,10 @@
                                 <WrapPanel Grid.Row="4" Margin="0,8,0,0">
                                     <TextBlock Text="Palette:" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <ComboBox ItemsSource="{Binding QuickColourPaletteOptions}"
-                                              SelectedItem="{Binding QuickColourPaletteKind}"
-                                              Width="140"
+                                              SelectedValue="{Binding QuickColourPaletteKind}"
+                                              SelectedValuePath="Value"
+                                              DisplayMemberPath="Label"
+                                              Width="170"
                                               Margin="0,0,12,0" />
                                     <StackPanel Orientation="Horizontal"
                                                 Margin="0,0,12,0"
@@ -319,7 +321,6 @@
                 <TabItem Header="Hierarchy Builder">
                     <Grid Margin="12">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
@@ -480,6 +481,7 @@
                                             IsSnapToTickEnabled="True"
                                             TickPlacement="Both"
                                             Value="{Binding HierarchyShadeSpreadPct, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            IsEnabled="{Binding HierarchyShadeHueGroups}"
                                             Margin="0,0,12,0" />
                                     <TextBlock Text="Sort types:" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <ComboBox ItemsSource="{Binding TypeSortOptions}"
@@ -536,122 +538,14 @@
                                             Margin="0,0,14,0" />
                                 </WrapPanel>
                                 <WrapPanel Grid.Row="2" Margin="0,6,0,0">
-                                    <CheckBox Content="Use Hue Groups"
-                                              IsChecked="{Binding HierarchyUseHueGroups, Mode=TwoWay}"
-                                              Margin="0,0,12,0" />
-                                    <CheckBox Content="Create folders by Hue Group"
-                                              IsChecked="{Binding CreateFoldersByHueGroup, Mode=TwoWay}"
-                                              IsEnabled="{Binding HierarchyUseHueGroups}"
+                                    <CheckBox Content="Shade Groups"
+                                              IsChecked="{Binding HierarchyShadeHueGroups, Mode=TwoWay}"
                                               Margin="0,0,12,0" />
                                 </WrapPanel>
                             </Grid>
                         </ui:Card>
 
                         <ui:Card Grid.Row="4"
-                                 Padding="10"
-                                 Margin="0,0,0,8"
-                                 Visibility="{Binding HierarchyUseHueGroups, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <Expander Header="Hue Groups"
-                                      IsExpanded="False">
-                            <StackPanel>
-                                <ui:DataGrid ItemsSource="{Binding HueGroups}"
-                                             SelectedItem="{Binding SelectedHueGroup}"
-                                             AutoGenerateColumns="False"
-                                             CanUserAddRows="False"
-                                             RowHeight="26"
-                                             FontSize="12"
-                                             GridLinesVisibility="All"
-                                             HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                                             VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}">
-                                    <ui:DataGrid.Columns>
-                                        <DataGridCheckBoxColumn Header="On" Binding="{Binding Enabled}" Width="42" />
-                                        <DataGridTemplateColumn Header="Hue" Width="70">
-                                            <DataGridTemplateColumn.CellTemplate>
-                                                <DataTemplate>
-                                                    <Border Background="{Binding SwatchBrush}"
-                                                            BorderBrush="Gray" BorderThickness="1"
-                                                            Height="16" Width="52" CornerRadius="2" />
-                                                </DataTemplate>
-                                            </DataGridTemplateColumn.CellTemplate>
-                                        </DataGridTemplateColumn>
-                                        <DataGridTextColumn Header="Group" Binding="{Binding Name}" Width="160" />
-                                        <DataGridTextColumn Header="Hex" Binding="{Binding HueHex, UpdateSourceTrigger=PropertyChanged}" Width="110" />
-                                    </ui:DataGrid.Columns>
-                                </ui:DataGrid>
-
-                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <ui:Button Content="Add Group" Width="110" Margin="0,0,8,0" Click="AddHueGroup_Click" />
-                                    <ui:Button Content="Remove Selected" Width="140" Margin="0,0,8,0" Click="RemoveHueGroup_Click" />
-                                    <ui:Button Content="Reset Defaults" Width="130" Click="ResetHueGroups_Click" />
-                                </StackPanel>
-
-                                <TextBlock Text="Auto Assignment" FontWeight="SemiBold" Margin="0,12,0,4" />
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Text="{Binding DisciplineMapPath}" IsReadOnly="True" Margin="0,0,8,0" />
-                                    <ui:Button Grid.Column="1" Content="Open" Width="80" Margin="0,0,6,0" Click="OpenDisciplineMap_Click" />
-                                    <ui:Button Grid.Column="2" Content="Reload" Width="80" Margin="0,0,6,0" Click="ReloadDisciplineMap_Click" />
-                                    <ui:Button Grid.Column="3" Content="Auto Assign" Width="110" Click="AutoAssignHueGroups_Click" />
-                                </Grid>
-                                <WrapPanel Margin="0,6,0,0">
-                                    <CheckBox Content="Only assign categories currently set to Other"
-                                              IsChecked="{Binding AutoAssignOnlyFallback}"
-                                              Margin="0,0,12,0" />
-                                    <CheckBox Content="Skip locked categories"
-                                              IsChecked="{Binding AutoAssignSkipLocked}"
-                                              Margin="0,0,12,0" />
-                                    <CheckBox Content="Auto-create missing Hue Groups"
-                                              IsChecked="{Binding AutoAssignCreateMissingGroups}" />
-                                </WrapPanel>
-
-                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                    <ui:Button Content="Preview" Width="90" Margin="0,0,8,0" Click="PreviewHueMap_Click" />
-                                    <ui:Button Content="Apply" Width="90" Margin="0,0,8,0" Click="AutoAssignHueGroups_Click" />
-                                    <CheckBox Content="Show changes only"
-                                              IsChecked="{Binding PreviewShowChangesOnly, Mode=TwoWay}"
-                                              VerticalAlignment="Center" />
-                                </StackPanel>
-
-                                <TextBlock Text="{Binding AutoAssignPreviewSummary}"
-                                           Margin="0,6,0,6"
-                                           FontSize="12"
-                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-
-                                <ui:DataGrid ItemsSource="{Binding AutoAssignPreviewRows}"
-                                             AutoGenerateColumns="False"
-                                             CanUserAddRows="False"
-                                             CanUserReorderColumns="True"
-                                             IsReadOnly="True"
-                                             GridLinesVisibility="All"
-                                             RowHeight="26"
-                                             FontSize="12"
-                                             Margin="0,0,0,8"
-                                             HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                                             VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}">
-                                    <ui:DataGrid.Columns>
-                                        <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="220" />
-                                        <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="70" />
-                                        <DataGridTextColumn Header="Types" Binding="{Binding TypeCount}" Width="60" />
-                                        <DataGridCheckBoxColumn Header="Lock" Binding="{Binding Locked}" Width="55" />
-                                        <DataGridTextColumn Header="Current" Binding="{Binding CurrentGroup}" Width="140" />
-                                        <DataGridTextColumn Header="Proposed" Binding="{Binding ProposedGroup}" Width="140" />
-                                        <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="170" />
-                                        <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="260" />
-                                        <DataGridTextColumn Header="Matched Group" Binding="{Binding MatchedRuleGroup}" Width="140" />
-                                        <DataGridTextColumn Header="Match Type" Binding="{Binding MatchedMatcherType}" Width="90" />
-                                        <DataGridTextColumn Header="Pattern" Binding="{Binding MatchedMatcherValue}" Width="220" />
-                                    </ui:DataGrid.Columns>
-                                </ui:DataGrid>
-                            </StackPanel>
-                            </Expander>
-                        </ui:Card>
-
-                        <ui:Card Grid.Row="5"
                                  Padding="10"
                                  Margin="0,0,0,8"
                                  HorizontalContentAlignment="Stretch"
@@ -688,16 +582,6 @@
                                 <DataGridTextColumn Header="Category" Binding="{Binding Value}" Width="220" />
                                 <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="80" />
                                 <DataGridTextColumn Header="Types" Binding="{Binding TypeCount}" Width="70" />
-                                <DataGridTemplateColumn Header="Hue Group" Width="160">
-                                    <DataGridTemplateColumn.CellTemplate>
-                                        <DataTemplate>
-                                            <ComboBox ItemsSource="{Binding DataContext.HueGroupOptions, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                      SelectedItem="{Binding HueGroupName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                      IsEnabled="{Binding DataContext.HierarchyUseHueGroups, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                      MinWidth="140" />
-                                        </DataTemplate>
-                                    </DataGridTemplateColumn.CellTemplate>
-                                </DataGridTemplateColumn>
                                 <DataGridCheckBoxColumn Header="Lock" Binding="{Binding UseCustomBaseColor}" Width="52" />
                             </ui:DataGrid.Columns>
                             <ui:DataGrid.RowDetailsTemplate>
@@ -732,7 +616,7 @@
                             </Grid>
                         </ui:Card>
 
-                        <ui:Card Grid.Row="6" Padding="10">
+                        <ui:Card Grid.Row="5" Padding="10">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />

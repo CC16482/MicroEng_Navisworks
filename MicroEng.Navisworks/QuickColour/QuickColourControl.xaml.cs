@@ -48,6 +48,18 @@ namespace MicroEng.Navisworks.QuickColour
             }
         }
 
+        public sealed class PaletteOption
+        {
+            public MicroEngPaletteKind Value { get; }
+            public string Label { get; }
+
+            public PaletteOption(MicroEngPaletteKind value, string label)
+            {
+                Value = value;
+                Label = label ?? value.ToString();
+            }
+        }
+
         private const string DefaultCategoryDisciplineMapJson = @"{
   ""version"": 1,
   ""fallbackGroup"": ""Other"",
@@ -100,8 +112,8 @@ namespace MicroEng.Navisworks.QuickColour
         public ObservableCollection<ScraperProfileOption> ScraperProfiles { get; } =
             new ObservableCollection<ScraperProfileOption>();
 
-        public ObservableCollection<MicroEngPaletteKind> QuickColourPaletteOptions { get; } =
-            new ObservableCollection<MicroEngPaletteKind>();
+        public ObservableCollection<PaletteOption> QuickColourPaletteOptions { get; } =
+            new ObservableCollection<PaletteOption>();
 
         public ObservableCollection<string> QuickColourCategoryOptions { get; } =
             new ObservableCollection<string>();
@@ -220,7 +232,9 @@ namespace MicroEng.Navisworks.QuickColour
         public Brush QuickColourCustomBaseColorBrush
             => new SolidColorBrush(ColourPaletteGenerator.ParseHexOrDefault(QuickColourCustomBaseColorHex, Colors.HotPink));
 
-        public bool IsQuickColourCustomPalette => QuickColourPaletteKind == MicroEngPaletteKind.CustomHue;
+        public bool IsQuickColourCustomPalette =>
+            QuickColourPaletteKind == MicroEngPaletteKind.CustomHue
+            || QuickColourPaletteKind == MicroEngPaletteKind.Shades;
 
         private bool _quickColourStableColors;
         public bool QuickColourStableColors
@@ -568,6 +582,19 @@ namespace MicroEng.Navisworks.QuickColour
             }
         }
 
+        private bool _hierarchyShadeHueGroups = true;
+        public bool HierarchyShadeHueGroups
+        {
+            get => _hierarchyShadeHueGroups;
+            set
+            {
+                if (SetField(ref _hierarchyShadeHueGroups, value))
+                {
+                    ApplyHierarchyColours();
+                }
+            }
+        }
+
         private bool _createFoldersByHueGroup;
         public bool CreateFoldersByHueGroup
         {
@@ -776,9 +803,9 @@ namespace MicroEng.Navisworks.QuickColour
             HierarchyGroups.CollectionChanged += OnHierarchyGroupsChanged;
             HueGroups.CollectionChanged += OnHueGroupsChanged;
 
-            foreach (MicroEngPaletteKind kind in Enum.GetValues(typeof(MicroEngPaletteKind)))
+            foreach (var option in BuildPaletteOptions())
             {
-                QuickColourPaletteOptions.Add(kind);
+                QuickColourPaletteOptions.Add(option);
             }
 
             foreach (QuickColourPaletteStyle style in Enum.GetValues(typeof(QuickColourPaletteStyle)))
@@ -1224,6 +1251,19 @@ namespace MicroEng.Navisworks.QuickColour
                 return;
             }
 
+            if (QuickColourPaletteKind == MicroEngPaletteKind.Shades)
+            {
+                var baseColor = ColourPaletteGenerator.ParseHexOrDefault(
+                    QuickColourCustomBaseColorHex,
+                    Colors.HotPink);
+                QuickColourPalette.AssignShades(
+                    QuickColourValues,
+                    baseColor,
+                    QuickColourStableColors,
+                    QuickColourStableSeed);
+                return;
+            }
+
             if (QuickColourPaletteKind == MicroEngPaletteKind.CustomHue)
             {
                 var baseStyle = QuickColourPaletteStyle.Deep;
@@ -1269,18 +1309,21 @@ namespace MicroEng.Navisworks.QuickColour
                 return;
             }
 
-            var style = QuickColourPaletteKind == MicroEngPaletteKind.Pastel
-                ? QuickColourPaletteStyle.Pastel
-                : QuickColourPaletteStyle.Deep;
+            if (QuickColourPaletteKind == MicroEngPaletteKind.Deep && QuickColourStableColors)
+            {
+                QuickColourPalette.AssignStableColors(
+                    QuickColourValues,
+                    QuickColourPaletteStyle.Deep,
+                    QuickColourStableSeed);
+                return;
+            }
 
-            if (QuickColourStableColors)
-            {
-                QuickColourPalette.AssignStableColors(QuickColourValues, style, QuickColourStableSeed);
-            }
-            else
-            {
-                QuickColourPalette.AssignPalette(QuickColourValues, style);
-            }
+            var palette = QuickColourPalette.GeneratePalette(QuickColourValues.Count, QuickColourPaletteKind);
+            QuickColourPalette.AssignPalette(
+                QuickColourValues,
+                palette,
+                QuickColourStableColors,
+                QuickColourStableSeed);
         }
 
         private void ApplyQuickColourTemporary_Click(object sender, RoutedEventArgs e)
@@ -1513,19 +1556,62 @@ namespace MicroEng.Navisworks.QuickColour
 
         private static MicroEngPaletteKind ParsePaletteKind(string name, MicroEngPaletteKind fallback)
         {
-            if (string.Equals(name, "Custom (Hue)", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(name, "Custom Hue", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return fallback;
+            }
+
+            var trimmed = name.Trim();
+
+            if (string.Equals(trimmed, "Default", StringComparison.OrdinalIgnoreCase))
+            {
+                return MicroEngPaletteKind.Deep;
+            }
+
+            if (string.Equals(trimmed, "Custom", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(trimmed, "Custom (Hue)", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(trimmed, "Custom Hue", StringComparison.OrdinalIgnoreCase))
             {
                 return MicroEngPaletteKind.CustomHue;
             }
 
-            if (!string.IsNullOrWhiteSpace(name)
-                && Enum.TryParse(name, true, out MicroEngPaletteKind parsed))
+            if (Enum.TryParse(trimmed, true, out MicroEngPaletteKind directParsed))
+            {
+                return directParsed;
+            }
+
+            var normalized = new string(trimmed.Where(char.IsLetterOrDigit).ToArray());
+            if (!string.IsNullOrWhiteSpace(normalized)
+                && Enum.TryParse(normalized, true, out MicroEngPaletteKind parsed))
             {
                 return parsed;
             }
 
             return fallback;
+        }
+
+        private static PaletteOption[] BuildPaletteOptions()
+        {
+            return new[]
+            {
+                new PaletteOption(MicroEngPaletteKind.Deep, "Default"),
+                new PaletteOption(MicroEngPaletteKind.CustomHue, "Custom"),
+                new PaletteOption(MicroEngPaletteKind.Shades, "Shades"),
+                new PaletteOption(MicroEngPaletteKind.Beach, "Beach"),
+                new PaletteOption(MicroEngPaletteKind.OceanBreeze, "Ocean Breeze"),
+                new PaletteOption(MicroEngPaletteKind.Vibrant, "Vibrant"),
+                new PaletteOption(MicroEngPaletteKind.Pastel, "Pastel"),
+                new PaletteOption(MicroEngPaletteKind.Autumn, "Autumn"),
+                new PaletteOption(MicroEngPaletteKind.RedSunset, "Red Sunset"),
+                new PaletteOption(MicroEngPaletteKind.ForestHues, "Forest Hues"),
+                new PaletteOption(MicroEngPaletteKind.PurpleRaindrops, "Purple Raindrops"),
+                new PaletteOption(MicroEngPaletteKind.LightSteel, "Light Steel"),
+                new PaletteOption(MicroEngPaletteKind.EarthyBrown, "Earthy Brown"),
+                new PaletteOption(MicroEngPaletteKind.EarthyGreen, "Earthy Green"),
+                new PaletteOption(MicroEngPaletteKind.WarmNeutrals1, "Warm Neutrals 1"),
+                new PaletteOption(MicroEngPaletteKind.WarmNeutrals2, "Warm Neutrals 2"),
+                new PaletteOption(MicroEngPaletteKind.CandyPop, "Candy Pop")
+            };
         }
 
         private static ScopeOption[] BuildScopeOptions()
@@ -2781,12 +2867,6 @@ namespace MicroEng.Navisworks.QuickColour
             _isApplyingHierarchyColours = true;
             try
             {
-                if (HierarchyUseHueGroups)
-                {
-                    ApplyHueGroupsColours();
-                    return;
-                }
-
                 if (HierarchySingleHueMode)
                 {
                     ApplySingleHueColours();
@@ -2811,6 +2891,15 @@ namespace MicroEng.Navisworks.QuickColour
                 var types = GetSortedTypes(group);
                 if (types.Count == 0)
                 {
+                    continue;
+                }
+
+                if (!HierarchyShadeHueGroups)
+                {
+                    foreach (var type in types)
+                    {
+                        type.Color = group.BaseColor;
+                    }
                     continue;
                 }
 
@@ -2870,6 +2959,15 @@ namespace MicroEng.Navisworks.QuickColour
                 var types = GetSortedTypes(group);
                 if (types.Count == 0)
                 {
+                    continue;
+                }
+
+                if (!HierarchyShadeHueGroups)
+                {
+                    foreach (var type in types)
+                    {
+                        type.Color = group.BaseColor;
+                    }
                     continue;
                 }
 

@@ -2,6 +2,7 @@
 
 ## Human Notes (Start Here)
 - Build: `dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj /p:NavisApiDir="C:\Program Files\Autodesk\Navisworks Manage 2025"` (default deploy goes to `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\` and writes `MicroEng.Navisworks.addin` to the **Plugins root**).
+- If ProgramData deploy is locked, close Navisworks or add `/p:DeployToProgramData=false` to the build.
 - Runtime: launch Navisworks and use Add-Ins tab (MicroEng Panel opens the launcher/log; Data Scraper/Mapper/Matrix/Space Mapper are separate windows/panes).
 - WPF-UI is active (4.1.0). Theme is per-root only (no global App.xaml). Defaults: Dark theme, Black/White accent, DataGrid gridlines #C0C0C0.
 - WPF-UI is the primary UI system. If something looks off, fix WPF-UI usage/styles first instead of falling back to non-WPF-UI controls.
@@ -26,12 +27,13 @@
 - `MicroEngUiKit.xaml` provides shared spacing/typography/card/button styles but should not override WPF-UI implicit styles for `ComboBox`, `CheckBox`, `RadioButton`, etc.
 - `MicroEngWpfUiTheme.cs` handles theme/accents/gridlines and broadcasts changes to registered roots; uses `TextFillColor*` resources to fix dark-mode text.
 - Primary UI files: `MicroEngPanelControl.xaml`, `DataScraperWindow.xaml`, `AppendIntegrateDialog.xaml`, `DataMatrixControl.xaml`, `SpaceMapperControl.xaml`.
+- Quick Colour UI files: `QuickColour/QuickColourControl.xaml`, `QuickColour/QuickColourWindow.xaml`, `QuickColour/Profiles/QuickColourProfilesPage.xaml`.
 - Smart Set UI files: `SmartSets/SmartSetGeneratorControl.xaml(.cs)` and `SmartSets/PropertyPickerWindow.xaml(.cs)`.
 
 ## Overview
 - Navisworks 2025 automation toolkit written in C# targeting .NET Framework 4.8 (`net48`).
 - Main assembly: `MicroEng.Navisworks.dll` with WPF UI (`UseWPF` + `UseWindowsForms` for ElementHost).
-- Dockable MicroEng panel (`MicroEng.DockPane`) hosts buttons for Data Scraper, Data Mapper (Append Data), Data Matrix, Smart Set Generator, Space Mapper, and 4D Sequence. Reconstruct / Zone Finder remain add-in stubs only.
+- Dockable MicroEng panel (`MicroEng.DockPane`) hosts buttons for Data Scraper, Data Mapper (Append Data), Data Matrix, Quick Colour, Smart Set Generator, Space Mapper, and 4D Sequence. Reconstruct / Zone Finder remain add-in stubs only.
 - Data Matrix, Smart Set Generator, and Space Mapper are WPF dock panes; Data Scraper opens its own window; the panel log captures messages raised via `MicroEngActions.Log`.
 - Branding/colours come from `MICROENG_THEME_GUIDE.md` and the `Logos` folder (`microeng_logotray.png`, `microeng-logo2.png`).
 
@@ -42,6 +44,7 @@ MicroEng_Navisworks/
   - MicroEng.Navisworks.csproj     # net48, UseWPF, Navisworks refs
   - MicroEngPlugins.cs             # Plugin registrations, shared actions
   - MicroEngPanelControl.xaml(.cs) # Docked launcher + log
+  - QuickColour/                   # Quick Colour window, palettes, profiles
   - SmartSets/                     # Smart Set Generator (dock pane + services)
   - DataMatrixControl.xaml(.cs)    # WPF Data Matrix dock pane
   - SpaceMapperControl.xaml(.cs)   # WPF Space Mapper dock pane
@@ -79,6 +82,7 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 3. Add-Ins tab shows:
    - MicroEng Data Mapper (Append Data)
    - MicroEng Data Matrix (dockable)
+   - MicroEng Quick Colour (window)
    - MicroEng Smart Set Generator (dockable)
    - MicroEng Space Mapper (dockable)
    - MicroEng 4D Sequence (dockable)
@@ -90,9 +94,9 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 - **Data Mapper (`MicroEng.AppendData`)**: Opens the Data Mapper UI (`AppendIntegrateDialog`). Uses Data Scraper cache for property pickers/type hints; no auto-tagging logic remains.
 - **Data Scraper**: Scans model properties into `DataScraperCache` (profiles, distinct properties, raw entries). Source of truth for Data Matrix/Space Mapper metadata.
 - **Data Matrix** (dock pane `MicroEng.DataMatrix.DockPane`): WPF grid built from the latest ScrapeSession. Supports column chooser (toggle properties on/off), presets per profile, selection sync back to Navisworks, and CSV export (filtered/all).
-- **Quick Colour** (window): Three tabs (Profiles, Quick Colour, Hierarchy Builder). Profiles tab applies saved MicroEng Colour Profiles (JSON in AppData). Quick Colour builds a profile from Category+Property using Data Scraper cache, palette selection (Deep/Pastel/Custom Hue), stable colors, and scope options that mirror Smart Sets. Hierarchy Builder generates base+type colors with hue groups, single-hue mode, and type shade controls. Values table supports per-row color picking.
+- **Quick Colour** (window): Three tabs (Profiles, Quick Colour, Hierarchy Builder). Profiles tab applies saved MicroEng Colour Profiles (JSON in AppData). Quick Colour builds a profile from Category+Property using Data Scraper cache, palette selection (Deep/Pastel/Custom Hue), stable colors, and scope options that mirror Smart Sets; auto-assign uses the discipline map in AppData. Hierarchy Builder generates base+type colors with hue groups, single-hue mode, and type shade controls. Apply supports temp/permanent overrides by Category + Type (dual-property AND search). Values table supports per-row color picking.
 - **Smart Set Generator** (dock pane `MicroEng.SmartSetGenerator.DockPane`): Quick Builder rules, smart grouping, selection-driven suggestions, and pack presets. Property picker and fast preview use Data Scraper cache; recipes persist to ProgramData.
-- **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata and CPU engine (GPU stubs remain). Presets Fast/Normal/Accurate; Fast uses origin-point containment (bbox center in zone AABB). Advanced Performance includes Fast Traversal (Auto/Zone-major/Target-major). Step 3 includes Benchmark & Testing (compute/simulate/full), writeback strategy, skip-unchanged signature, packed writeback option, and optional pane-closing during runs.
+- **Space Mapper** (dock pane `MicroEng.SpaceMapper.DockPane`): WPF UI per `ReferenceDocuments/Space_Mapper_Instructions.txt` with zones/targets, processing settings, attribute mapping, and results. Uses Data Scraper metadata with CPU + GPU backends (D3D11/CUDA) and a GPU sampling option; falls back to CPU when GPU is unavailable. Presets Fast/Normal/Accurate; Fast uses origin-point containment (bbox center in zone AABB). Advanced Performance includes Fast Traversal (Auto/Zone-major/Target-major). Step 3 includes Benchmark & Testing (compute/simulate/full), writeback strategy, skip-unchanged signature, packed writeback option, and optional pane-closing during runs.
 - **4D Sequence** (dock pane `MicroEng.Sequence4D.DockPane`): WPF UI that captures selection, orders targets, and generates Timeliner task sequences; includes delete-by-name for regeneration.
 - **MicroEng Panel**: WPF launcher with branding/logo and log textbox that listens to `MicroEngActions.LogMessage`.
 
@@ -104,7 +108,9 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 ## Known issues / tips
 - Space Mapper UI clipping: keep `SpaceMapperControl.xaml` rooted in a simple Grid (header row + content row) and ensure the dock pane is `[DockPanePlugin(..., FixedSize=false, AutoScroll=true)]` with `ElementHost` docked fill. If the pane looks truncated, delete old plugin copies from `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\` (and any AppData bundle), rebuild, redeploy, then dock the pane before resizing.
 - Target-major traversal only applies when partial options are off (Fast origin-point mode). When partial tagging is enabled, Fast traversal falls back to Zone-major.
-- Smart Set Generator: Condition column dropdown may render blank in the rules grid; verify the DataGridComboBoxColumn binding or switch to a template-based ComboBox if needed.
+- Data Scraper: Selection/Search set scopes are still disabled (set lists are empty).
+- Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
+- Quick Colour: scope filtering + profile scope encoding need verification across selection set/tree/property filter.
 
 ## Working with Codex
 - Primary entry points live in `MicroEngPlugins.cs`.
@@ -112,12 +118,15 @@ dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj `
 - Do not rename plugin IDs/classes (`MicroEng.AppendData`, `MicroEng.DockPane`, `MicroEng.DataMatrix.DockPane`, `MicroEng.SpaceMapper.DockPane`, etc.).
 
 ## Codex Handoff (Smart Set Generator)
-- Stage 1/1.5 scope + rules grid fixes from `ReferenceDocuments/Codex_Instructions_02.txt` are implemented: scope UI (Search in + Scope mode + saved selection set + use current selection + clear), scope applied in search creation, fast preview disabled when scope constrained, rules grid combo columns with single-click open, and Value disabled for Defined/Undefined.
-- Search in modes are currently UI-only; there is no scope picker window or tree (Stage 2 not implemented).
-- Last build error fixed by replacing `search.Selection.AddRange(...)` with `search.Selection.CopyFrom(...)` in `SmartSets/SmartSetGeneratorNavisworksService.cs`. Build not rerun after this change.
+- Scope + rules grid fixes from `ReferenceDocuments/Codex_Instructions_02.txt` are implemented: scope UI (Search in + Scope mode + saved selection set + use current selection + clear), scope applied in search creation, fast preview disabled when scope constrained, rules grid combo columns with single-click open, and Value disabled for Defined/Undefined.
+- Scope picker window is implemented with WPF-UI styling; model-tree scopes use tri-state checkbox tree selection with a scope summary.
+- Smart Grouping has its own output/scope settings and uses WPF-UI dropdowns; Include Blanks toggles empty-set generation for Quick Builder + Smart Grouping.
+- Property picker dialog is implemented (category/property search + samples); fast preview uses Data Scraper cache.
+- Recipe save/load persists JSON to `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 
 ## Codex Handoff (Quick Colour)
 - Profiles tab uses MicroEng Colour Profiles (schema v1) saved under `%APPDATA%\MicroEng\ColourProfiles\` and supports Apply Temporary/Permanent, Import/Export/Delete.
+- Quick Colour tool includes Hierarchy Builder (hue groups, single-hue mode, type shade controls) plus auto-assign discipline mapping at `%APPDATA%\MicroEng\Navisworks\QuickColour\CategoryDisciplineMap.json`.
 - Quick Colour values table supports per-row color picking; Profiles preview shows color swatches.
 - Custom Hue palette keeps the Deep hue assignment but shifts lightness toward the picked base color.
 - Scope options mirror Smart Sets (All model, Current selection, Saved selection set, Tree selection, Property filter); Load Values/Hierarchy and Apply respect scope; scope kind/path persist in profiles.

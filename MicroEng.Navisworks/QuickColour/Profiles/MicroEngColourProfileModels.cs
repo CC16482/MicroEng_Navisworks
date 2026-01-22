@@ -20,6 +20,20 @@ namespace MicroEng.Navisworks.QuickColour.Profiles
     {
         Deep = 0,
         Pastel = 1,
+        Shades = 2,
+        Beach = 3,
+        OceanBreeze = 4,
+        Vibrant = 5,
+        Autumn = 6,
+        RedSunset = 7,
+        ForestHues = 8,
+        PurpleRaindrops = 9,
+        LightSteel = 10,
+        EarthyBrown = 11,
+        EarthyGreen = 12,
+        WarmNeutrals1 = 13,
+        WarmNeutrals2 = 14,
+        CandyPop = 15,
         CustomHue = 99
     }
 

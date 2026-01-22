@@ -132,6 +132,18 @@
         </StackPanel>
       </ui:CardAction>
 
+      <ui:CardAction x:Name="ViewpointsGeneratorButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Click="ViewpointsGenerator_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="Camera24" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="Viewpoints Generator" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Batch-create Saved Viewpoints." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+
       <ui:CardAction x:Name="QuickColourButton"
                      Style="{StaticResource ToolCardActionStyle}"
                      Click="QuickColour_Click">

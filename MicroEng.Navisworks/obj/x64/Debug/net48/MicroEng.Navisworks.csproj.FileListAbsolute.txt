@@ -48,6 +48,8 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepResultsPage.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepSetupPage.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepZonesTargetsPage.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\GeneratedInternalTypeHelper.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks_MarkupCompile.cache
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks_MarkupCompile.lref
@@ -74,6 +76,8 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepResultsPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepSetupPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SpaceMapperStepZonesTargetsPage.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.g.resources
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.GeneratedMSBuildEditorConfig.editorconfig
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks.AssemblyInfoInputs.cache

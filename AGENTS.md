@@ -1,14 +1,18 @@
 # MicroEng Handoff
 
 ## Status
-- Last build: not rerun after Quick Colour palette updates and Hierarchy Shade Groups changes (previous ambiguous Color fix applied).
+- Last build: failed (ViewpointsGeneratorNavisworksService used SavedItemCollection.AddCopy). Fix applied; rerun `dotnet build` to confirm.
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
-- Working tree is dirty (build outputs in bin/obj + local .addin changes).
+- Working tree is dirty (build outputs in bin/obj + new ViewpointsGenerator files + panel changes).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
 - Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 - Quick Colour profiles saved under `%APPDATA%\MicroEng\ColourProfiles\` (JSON schema v1).
 
 ## Recent changes
+- Viewpoints Generator tool added (dock pane + command) with Smart Sets-style theming.
+- Viewpoints Generator UI added: source mode, output folder, view direction, projection, selection/search set picker, preview plan, generate.
+- Viewpoints Generator service: load selection/search sets, build plan, fit camera to bounds, create Saved Viewpoints under folder path.
+- MicroEng panel now includes Viewpoints Generator card button (Camera24 icon) and state tracking.
 - Quick Colour Profiles tab added (library + Apply Temporary/Permanent + Import/Export/Delete).
 - MicroEng Colour Profile schema v1 stored in AppData; Profiles preview shows color swatches.
 - Quick Colour palettes updated: Deep renamed to Default (top of list), Custom second, Shades added, and fixed palettes added (Beach, Ocean Breeze, Vibrant, Pastel, Autumn, Red Sunset, Forest Hues, Purple Raindrops, Light Steel, Earthy Brown, Earthy Green, Warm Neutrals 1/2, Candy Pop). Fixed palettes scale using light/dark variants when more values are needed.
@@ -61,9 +65,17 @@
 - Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
 - Quick Colour: scope filtering + profile scope encoding need verification across selection set/tree/property filter.
 - Quick Colour: verify palette ordering/labels, shade expansion, and Default stable colors behavior.
-- Build not rerun after latest Quick Colour updates.
+- Viewpoints Generator: PropertyGroups mode is a placeholder (plan empty).
+- Build not rerun after latest Viewpoints Generator fixes.
 
 ## Key files touched
+- `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorModels.cs`
+- `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorNavisworksService.cs`
+- `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorControl.xaml`
+- `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorControl.xaml.cs`
+- `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorWindow.xaml`
+- `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorWindow.xaml.cs`
+- `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorPlugins.cs`
 - `MicroEng.Navisworks/QuickColour/NotifyBase.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourModels.cs`
 - `MicroEng.Navisworks/QuickColour/QuickColourPalette.cs`
@@ -91,8 +103,6 @@
 - `MicroEng.Navisworks/MicroEngPanelControl.xaml`
 - `MicroEng.Navisworks/MicroEngPanelControl.xaml.cs`
 - `MicroEng.Navisworks/MicroEng.Navisworks.addin`
-- `MicroEng.Navisworks/MicroEngPanelControl.xaml`
-- `MicroEng.Navisworks/MicroEngPanelControl.xaml.cs`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorControl.xaml`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorControl.xaml.cs`
 - `MicroEng.Navisworks/SmartSets/SmartSetGeneratorQuickBuilderPage.xaml`
@@ -132,6 +142,8 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
+- Viewpoints Generator: Refresh loads selection/search sets; Preview shows plan rows + counts.
+- Viewpoints Generator: Generate writes Saved Viewpoints under `MicroEng/Viewpoints Generator` using chosen direction/projection.
 - Quick Colour: Profiles tab loads profile list, preview shows color swatches, Apply Temp/Permanent uses profile scope.
 - Quick Colour: Scope options match Smart Sets and Load Values respects Current selection / Saved selection set / Tree selection / Property filter.
 - Quick Colour: Custom Hue palette keeps Deep hue assignment but shifts lightness to the picked base color.

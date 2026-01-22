@@ -241,6 +241,28 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private void ViewpointsGenerator_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (IsDockPaneVisible("MicroEng.ViewpointsGenerator.DockPane.MENG"))
+                {
+                    UpdateToolButtonStates();
+                    return;
+                }
+
+                MicroEngActions.ViewpointsGenerator();
+                UpdateToolButtonStates();
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"[Viewpoints Generator] failed to open: {ex}");
+                LogToPanel($"[Viewpoints Generator] failed to open: {ex.Message}");
+                System.Windows.MessageBox.Show($"Viewpoints Generator failed to open: {ex.Message}", "MicroEng",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void SpaceMapper_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -384,6 +406,7 @@ namespace MicroEng.Navisworks
             var dataMapperOpen = MicroEngActions.IsDataMapperOpen;
             var dataMatrixOpen = IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG");
             var smartSetsOpen = MicroEngActions.IsSmartSetGeneratorOpen;
+            var viewpointsOpen = IsDockPaneVisible("MicroEng.ViewpointsGenerator.DockPane.MENG");
             var quickColourOpen = MicroEngActions.IsQuickColourOpen;
             var spaceMapperOpen = IsDockPaneVisible("MicroEng.SpaceMapper.DockPane.MENG");
             var sequence4dOpen = IsDockPaneVisible("MicroEng.Sequence4D.DockPane.MENG");
@@ -392,6 +415,7 @@ namespace MicroEng.Navisworks
             SetCardActive(DataMapperButton, dataMapperOpen);
             SetCardActive(DataMatrixButton, dataMatrixOpen);
             SetCardActive(SmartSetsButton, smartSetsOpen);
+            SetCardActive(ViewpointsGeneratorButton, viewpointsOpen);
             SetCardActive(QuickColourButton, quickColourOpen);
             SetCardActive(SpaceMapperButton, spaceMapperOpen);
             SetCardActive(Sequence4DButton, sequence4dOpen);

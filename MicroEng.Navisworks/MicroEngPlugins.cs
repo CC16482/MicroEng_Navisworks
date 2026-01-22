@@ -487,6 +487,31 @@ namespace MicroEng.Navisworks
             }
         }
 
+        public static void ViewpointsGenerator()
+        {
+            const string dockPanePluginId = "MicroEng.ViewpointsGenerator.DockPane.MENG";
+            Log("ViewpointsGenerator: locating plugin record");
+            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find Viewpoints Generator dock pane plugin '{dockPanePluginId}'.",
+                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!record.IsLoaded)
+            {
+                Log("ViewpointsGenerator: loading plugin");
+                record.LoadPlugin();
+            }
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+            {
+                Log("ViewpointsGenerator: setting pane visible");
+                pane.Visible = true;
+            }
+        }
+
         public static void SpaceMapper()
         {
             const string dockPanePluginId = "MicroEng.SpaceMapper.DockPane.MENG";

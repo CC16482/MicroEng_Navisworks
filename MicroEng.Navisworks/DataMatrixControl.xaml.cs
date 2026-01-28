@@ -5,9 +5,11 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using Autodesk.Navisworks.Api;
 using Microsoft.Win32;
 using NavisApp = Autodesk.Navisworks.Api.Application;
+using WpfUiControls = Wpf.Ui.Controls;
 
 namespace MicroEng.Navisworks
 {
@@ -343,7 +345,21 @@ namespace MicroEng.Navisworks
                 .ToList();
 
             var session = DataScraperCache.LastSession ?? DataScraperCache.AllSessions.FirstOrDefault();
-            _exporter.ExportCsv(dlg.FileName, columns, rows, session, _currentPreset);
+            try
+            {
+                _exporter.ExportCsv(dlg.FileName, columns, rows, session, _currentPreset);
+                ShowSnackbar("Export complete",
+                    $"Wrote {rows.Count} row(s).",
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+            }
+            catch (Exception ex)
+            {
+                ShowSnackbar("Export failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
+            }
         }
 
         private static string PromptText(string caption, string title)
@@ -383,6 +399,32 @@ namespace MicroEng.Navisworks
 
             window.Content = panel;
             return window.ShowDialog() == true ? box.Text : null;
+        }
+
+        private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
+        {
+            if (SnackbarPresenter == null)
+            {
+                return;
+            }
+
+            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
+            {
+                Title = title,
+                Content = message,
+                Appearance = appearance,
+                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
+                {
+                    Filled = true,
+                    FontSize = 25
+                },
+                Foreground = System.Windows.Media.Brushes.Black,
+                ContentForeground = System.Windows.Media.Brushes.Black,
+                Timeout = TimeSpan.FromSeconds(4),
+                IsCloseButtonEnabled = false
+            };
+
+            snackbar.Show();
         }
 
         private class ColumnsDialog : Window

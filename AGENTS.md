@@ -1,7 +1,7 @@
 # MicroEng Handoff
 
 ## Status
-- Last build: failed (ViewpointsGeneratorNavisworksService used SavedItemCollection.AddCopy). Fix applied; rerun `dotnet build` to confirm.
+- Last build: not rerun after Data Scraper UI overhaul + Quick Colour hierarchy palette/apply fixes; rerun `dotnet build` to confirm.
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
 - Working tree is dirty (build outputs in bin/obj + new ViewpointsGenerator files + panel changes).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
@@ -9,6 +9,16 @@
 - Quick Colour profiles saved under `%APPDATA%\MicroEng\ColourProfiles\` (JSON schema v1).
 
 ## Recent changes
+- Data Scraper UI rebuilt into step cards (Profile, Scope, History, Data View, Export) with WPF-UI styling, scroll, and tighter spacing.
+- Data Scraper: Run Scrape/Export Now now use ArrowSync icon during processing; status shows “Processing - Please Wait” in orange while running.
+- Data Scraper: Export requires Output path to be set before enabling; Export Now restores scroll position after completion.
+- Data Scraper: Keep raw rows in memory defaulted on (so downstream tools work immediately).
+- Data Scraper: Data View tab content now uses cards (no white border).
+- Snackbars added across tools (success/error) with larger PresenceAvailable icon, centered, black text, no close X.
+- Quick Colour: hierarchy value matching switched to ItemKey (fixes missing types).
+- Quick Colour: Hierarchy Builder palette dropdown now matches Quick Colour palettes (Default/Custom/Shades + fixed palettes), with hue picker enabled for Custom/Shades.
+- Quick Colour: Apply now normalizes value prefixes and uses typed VariantData (int/bool/double) to match properties.
+- Quick Colour: Apply debug logging added (per-value/per-pair hits + expected vs actual counts).
 - Viewpoints Generator tool added (dock pane + command) with Smart Sets-style theming.
 - Viewpoints Generator UI added: source mode, output folder, view direction, projection, selection/search set picker, preview plan, generate.
 - Viewpoints Generator service: load selection/search sets, build plan, fit camera to bounds, create Saved Viewpoints under folder path.
@@ -65,8 +75,9 @@
 - Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
 - Quick Colour: scope filtering + profile scope encoding need verification across selection set/tree/property filter.
 - Quick Colour: verify palette ordering/labels, shade expansion, and Default stable colors behavior.
+- Quick Colour: some hierarchy/quick-colour applies still miss low-count types when Max types is small; decide default for Max types and add UI hint.
 - Viewpoints Generator: PropertyGroups mode is a placeholder (plan empty).
-- Build not rerun after latest Viewpoints Generator fixes.
+- Build not rerun after latest Quick Colour + Data Scraper changes.
 
 ## Key files touched
 - `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorModels.cs`
@@ -142,6 +153,9 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
+- Data Scraper: status flips to “Processing - Please Wait” in orange while running; returns to Ready after.
+- Data Scraper: Export Now disabled until Output path set; Export Now keeps scroll position.
+- Data Scraper: ArrowSync icons show during Run/Export; snackbars appear on success/error.
 - Viewpoints Generator: Refresh loads selection/search sets; Preview shows plan rows + counts.
 - Viewpoints Generator: Generate writes Saved Viewpoints under `MicroEng/Viewpoints Generator` using chosen direction/projection.
 - Quick Colour: Profiles tab loads profile list, preview shows color swatches, Apply Temp/Permanent uses profile scope.

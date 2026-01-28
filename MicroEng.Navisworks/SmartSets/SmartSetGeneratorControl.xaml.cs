@@ -13,9 +13,11 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Autodesk.Navisworks.Api;
 using NavisApp = Autodesk.Navisworks.Api.Application;
 using MicroEng.Navisworks;
+using WpfUiControls = Wpf.Ui.Controls;
 
 namespace MicroEng.Navisworks.SmartSets
 {
@@ -1461,6 +1463,11 @@ namespace MicroEng.Navisworks.SmartSets
                     var created = _navisworksService.GenerateSplitSearchSets(doc, CurrentRecipe, session, msg => MicroEngActions.Log(msg));
                     MicroEngActions.Log($"SmartSets: generated {created} sets for recipe: {CurrentRecipe.Name}");
                     PreviewStatusText = created > 0 ? "Generated sets." : "No sets generated.";
+                    ShowSnackbar("Smart Sets generated",
+                        created > 0 ? $"Created {created} sets." : "No sets were created.",
+                        created > 0 ? WpfUiControls.ControlAppearance.Success : WpfUiControls.ControlAppearance.Caution,
+                        created > 0 ? WpfUiControls.SymbolRegular.CheckmarkCircle24 : WpfUiControls.SymbolRegular.Info24);
+                    FlashSuccess(sender as System.Windows.Controls.Button);
                     return;
                 }
                 if (mode == SmartSetSearchSetMode.ExpandValuesSingleSet)
@@ -1497,16 +1504,30 @@ namespace MicroEng.Navisworks.SmartSets
                     var created = _navisworksService.GenerateExpandedSearchSet(doc, CurrentRecipe, session, msg => MicroEngActions.Log(msg));
                     MicroEngActions.Log($"SmartSets: generated {created} sets for recipe: {CurrentRecipe.Name}");
                     PreviewStatusText = created > 0 ? "Generated sets." : "No sets generated.";
+                    ShowSnackbar("Smart Sets generated",
+                        created > 0 ? $"Created {created} sets." : "No sets were created.",
+                        created > 0 ? WpfUiControls.ControlAppearance.Success : WpfUiControls.ControlAppearance.Caution,
+                        created > 0 ? WpfUiControls.SymbolRegular.CheckmarkCircle24 : WpfUiControls.SymbolRegular.Info24);
+                    FlashSuccess(sender as System.Windows.Controls.Button);
                     return;
                 }
 
                 _navisworksService.Generate(doc, CurrentRecipe, msg => MicroEngActions.Log(msg));
                 MicroEngActions.Log("SmartSets: generated sets for recipe: " + CurrentRecipe.Name);
                 PreviewStatusText = "Generated sets.";
+                ShowSnackbar("Smart Sets generated",
+                    "Generated sets for the current recipe.",
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+                FlashSuccess(sender as System.Windows.Controls.Button);
             }
             catch (Exception ex)
             {
                 MessageBox.Show("Generate failed: " + ex.Message, "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowSnackbar("Generate failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
             }
         }
 
@@ -1588,6 +1609,11 @@ namespace MicroEng.Navisworks.SmartSets
 
             MicroEngActions.Log("SmartSets: generated grouped search sets.");
             PreviewStatusText = "Generated grouped search sets.";
+            ShowSnackbar("Grouped sets generated",
+                $"Generated {GroupRows.Count} grouped set(s).",
+                WpfUiControls.ControlAppearance.Success,
+                WpfUiControls.SymbolRegular.CheckmarkCircle24);
+            FlashSuccess(sender as System.Windows.Controls.Button);
         }
 
         internal void AnalyzeSelection_Click(object sender, RoutedEventArgs e)
@@ -1660,6 +1686,11 @@ namespace MicroEng.Navisworks.SmartSets
             }
 
             MicroEngActions.Log("SmartSets: pack executed: " + SelectedPack.Name);
+            ShowSnackbar("Pack executed",
+                $"Generated sets for pack '{SelectedPack.Name}'.",
+                WpfUiControls.ControlAppearance.Success,
+                WpfUiControls.SymbolRegular.CheckmarkCircle24);
+            FlashSuccess(sender as System.Windows.Controls.Button);
         }
 
         internal void SaveRecipe_Click(object sender, RoutedEventArgs e)
@@ -1754,6 +1785,54 @@ namespace MicroEng.Navisworks.SmartSets
         {
             RefreshScraperProfiles();
             RefreshSavedSelectionSets();
+        }
+
+        private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
+        {
+            if (SnackbarPresenter == null)
+            {
+                return;
+            }
+
+            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
+            {
+                Title = title,
+                Content = message,
+                Appearance = appearance,
+                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
+                {
+                    Filled = true,
+                    FontSize = 25
+                },
+                Foreground = System.Windows.Media.Brushes.Black,
+                ContentForeground = System.Windows.Media.Brushes.Black,
+                Timeout = TimeSpan.FromSeconds(4),
+                IsCloseButtonEnabled = false
+            };
+
+            snackbar.Show();
+        }
+
+        private void FlashSuccess(System.Windows.Controls.Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            var flashBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80));
+            var animation = new ColorAnimation
+            {
+                From = flashBrush.Color,
+                To = System.Windows.Media.Colors.White,
+                Duration = TimeSpan.FromMilliseconds(6000),
+                BeginTime = TimeSpan.FromSeconds(1),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            animation.Completed += (_, _) => button.ClearValue(BackgroundProperty);
+            button.Background = flashBrush;
+            flashBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
         }
 
         private void OpenDataScraper_Click(object sender, RoutedEventArgs e)
@@ -1968,3 +2047,4 @@ namespace MicroEng.Navisworks.SmartSets
     }
 
 }
+

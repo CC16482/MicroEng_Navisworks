@@ -109,5 +109,12 @@
                         Focusable="False"
                         Background="{DynamicResource ApplicationBackgroundBrush}"
                         Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+
+        <ui:SnackbarPresenter x:Name="SnackbarPresenter"
+                              Grid.RowSpan="3"
+                              Margin="0,0,0,4"
+                              VerticalAlignment="Bottom"
+                              HorizontalAlignment="Center"
+                              Panel.ZIndex="10" />
     </Grid>
 </UserControl>

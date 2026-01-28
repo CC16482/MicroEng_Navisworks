@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Globalization;
 using Autodesk.Navisworks.Api;
 
 namespace MicroEng.Navisworks.QuickColour
@@ -37,6 +38,8 @@ namespace MicroEng.Navisworks.QuickColour
                 return 0;
             }
 
+            log?.Invoke($"QuickColour: apply by single property. Category='{category}', Property='{property}', Scope={scope}, Values={enabledValues.Count}.");
+
             GroupItem folder = null;
             if ((createSearchSets || createSnapshots) && !string.IsNullOrWhiteSpace(folderPath))
             {
@@ -44,6 +47,11 @@ namespace MicroEng.Navisworks.QuickColour
             }
 
             var totalColored = 0;
+
+            var zeroHits = 0;
+            var rowsWithHits = 0;
+            var debugLogged = 0;
+            const int maxDebug = 12;
 
             foreach (var row in enabledValues)
             {
@@ -54,15 +62,31 @@ namespace MicroEng.Navisworks.QuickColour
                 {
                     search.SearchConditions.Add(scopeFilter);
                 }
+
+                var normalized = NormalizeSearchValue(row.Value);
+                var variant = BuildVariantData(normalized, out var variantLabel);
                 search.SearchConditions.Add(
                     SearchCondition.HasPropertyByDisplayName(category, property)
-                        .EqualValue(new VariantData(row.Value ?? "")));
+                        .EqualValue(variant));
 
                 var results = search.FindAll(doc, false);
 
                 if (results == null || results.Count == 0)
                 {
+                    zeroHits++;
+                    if (debugLogged < maxDebug)
+                    {
+                        log?.Invoke($"QuickColour: value='{row.Value}' normalized='{normalized}' variant={variantLabel} -> 0 items.");
+                        debugLogged++;
+                    }
                     continue;
+                }
+
+                rowsWithHits++;
+                if (debugLogged < maxDebug)
+                {
+                    log?.Invoke($"QuickColour: value='{row.Value}' normalized='{normalized}' variant={variantLabel} -> {results.Count} items.");
+                    debugLogged++;
                 }
 
                 var navisColor = QuickColourPalette.ToNavisworksColor(row.Color);
@@ -101,6 +125,7 @@ namespace MicroEng.Navisworks.QuickColour
                 }
             }
 
+            log?.Invoke($"QuickColour: apply summary. RowsWithHits={rowsWithHits}, ZeroHits={zeroHits}, TotalColored={totalColored}.");
             return totalColored;
         }
 
@@ -137,7 +162,13 @@ namespace MicroEng.Navisworks.QuickColour
                 return 0;
             }
 
+            log?.Invoke($"QuickColour(Hierarchy): apply. L1='{l1Category}.{l1Property}', L2='{l2Category}.{l2Property}', Scope={scope}, Groups={enabledGroups.Count}.");
+
             var totalColored = 0;
+            var zeroHits = 0;
+            var rowsWithHits = 0;
+            var debugLogged = 0;
+            const int maxDebug = 12;
 
             foreach (var group in enabledGroups)
             {
@@ -158,18 +189,35 @@ namespace MicroEng.Navisworks.QuickColour
                     {
                         search.SearchConditions.Add(scopeFilter);
                     }
+                    var l1Normalized = NormalizeSearchValue(group.Value);
+                    var l2Normalized = NormalizeSearchValue(typeRow.Value);
+                    var l1Variant = BuildVariantData(l1Normalized, out var l1VariantLabel);
+                    var l2Variant = BuildVariantData(l2Normalized, out var l2VariantLabel);
                     search.SearchConditions.Add(
                         SearchCondition.HasPropertyByDisplayName(l1Category, l1Property)
-                            .EqualValue(new VariantData(group.Value ?? "")));
+                            .EqualValue(l1Variant));
                     search.SearchConditions.Add(
                         SearchCondition.HasPropertyByDisplayName(l2Category, l2Property)
-                            .EqualValue(new VariantData(typeRow.Value ?? "")));
+                            .EqualValue(l2Variant));
 
                     var results = search.FindAll(doc, false);
 
                     if (results == null || results.Count == 0)
                     {
+                        zeroHits++;
+                        if (debugLogged < maxDebug)
+                        {
+                            log?.Invoke($"QuickColour(Hierarchy): L1='{group.Value}' ({l1VariantLabel}) L2='{typeRow.Value}' ({l2VariantLabel}) -> 0 items.");
+                            debugLogged++;
+                        }
                         continue;
+                    }
+
+                    rowsWithHits++;
+                    if (debugLogged < maxDebug)
+                    {
+                        log?.Invoke($"QuickColour(Hierarchy): L1='{group.Value}' ({l1VariantLabel}) L2='{typeRow.Value}' ({l2VariantLabel}) -> {results.Count} items.");
+                        debugLogged++;
                     }
 
                     var navisColor = QuickColourPalette.ToNavisworksColor(typeRow.Color);
@@ -209,6 +257,7 @@ namespace MicroEng.Navisworks.QuickColour
                 }
             }
 
+            log?.Invoke($"QuickColour(Hierarchy): apply summary. RowsWithHits={rowsWithHits}, ZeroHits={zeroHits}, TotalColored={totalColored}.");
             return totalColored;
         }
 
@@ -243,6 +292,80 @@ namespace MicroEng.Navisworks.QuickColour
 
             var full = CombinePath(groupPathParts.ToArray());
             return EnsureFolder(doc, full);
+        }
+
+        private static string NormalizeSearchValue(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            var trimmed = value.Trim();
+            var idx = trimmed.IndexOf(':');
+            if (idx > 0)
+            {
+                var prefix = trimmed.Substring(0, idx).Trim();
+                if (IsKnownValuePrefix(prefix))
+                {
+                    return trimmed.Substring(idx + 1).Trim();
+                }
+            }
+
+            return trimmed;
+        }
+
+        private static VariantData BuildVariantData(string value, out string debugLabel)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                debugLabel = "string(empty)";
+                return new VariantData("");
+            }
+
+            var trimmed = value.Trim();
+
+            if (bool.TryParse(trimmed, out var boolValue))
+            {
+                debugLabel = "bool";
+                return new VariantData(boolValue);
+            }
+
+            if (int.TryParse(trimmed, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intValue))
+            {
+                debugLabel = "int";
+                return new VariantData(intValue);
+            }
+
+            if (double.TryParse(trimmed, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleValue))
+            {
+                debugLabel = "double";
+                return new VariantData(doubleValue);
+            }
+
+            debugLabel = "string";
+            return new VariantData(trimmed);
+        }
+
+        private static bool IsKnownValuePrefix(string prefix)
+        {
+            if (string.IsNullOrWhiteSpace(prefix))
+            {
+                return false;
+            }
+
+            return prefix.Equals("Int32", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Int64", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("UInt32", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("UInt64", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Double", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Single", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Float", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Decimal", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Boolean", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Bool", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("DateTime", StringComparison.OrdinalIgnoreCase)
+                   || prefix.Equals("Date", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void ApplyScopeToSearch(

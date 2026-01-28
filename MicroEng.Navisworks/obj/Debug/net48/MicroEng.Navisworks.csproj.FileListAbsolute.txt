@@ -83,3 +83,7 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.51BD3962.Up2Date
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks.pdb
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.baml

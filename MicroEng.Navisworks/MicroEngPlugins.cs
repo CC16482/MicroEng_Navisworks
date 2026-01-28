@@ -143,12 +143,61 @@ namespace MicroEng.Navisworks
             }
         }
 
+        private static bool _dispatcherHooked;
+        private static bool _taskSchedulerHooked;
+
         private static void SafeWireUnhandledExceptionLogging()
         {
             try
             {
                 AppDomain.CurrentDomain.UnhandledException -= OnUnhandled;
                 AppDomain.CurrentDomain.UnhandledException += OnUnhandled;
+                WireDispatcherUnhandledException();
+                WireTaskSchedulerUnhandledException();
+            }
+            catch
+            {
+                // swallow
+            }
+        }
+
+        private static void WireDispatcherUnhandledException()
+        {
+            if (_dispatcherHooked)
+            {
+                return;
+            }
+
+            try
+            {
+                var app = System.Windows.Application.Current;
+                if (app == null)
+                {
+                    return;
+                }
+
+                app.DispatcherUnhandledException -= OnDispatcherUnhandled;
+                app.DispatcherUnhandledException += OnDispatcherUnhandled;
+                _dispatcherHooked = true;
+            }
+            catch
+            {
+                // swallow
+            }
+        }
+
+        private static void WireTaskSchedulerUnhandledException()
+        {
+            if (_taskSchedulerHooked)
+            {
+                return;
+            }
+
+            try
+            {
+                System.Threading.Tasks.TaskScheduler.UnobservedTaskException -= OnUnobservedTaskException;
+                System.Threading.Tasks.TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
+                _taskSchedulerHooked = true;
             }
             catch
             {
@@ -162,6 +211,30 @@ namespace MicroEng.Navisworks
             {
                 var ex = e.ExceptionObject as Exception;
                 Log($"[Unhandled] {(e.IsTerminating ? "Terminating" : "Non-terminating")}: {ex}");
+            }
+            catch
+            {
+                // swallow
+            }
+        }
+
+        private static void OnDispatcherUnhandled(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+        {
+            try
+            {
+                Log($"[DispatcherUnhandled] {e.Exception}");
+            }
+            catch
+            {
+                // swallow
+            }
+        }
+
+        private static void OnUnobservedTaskException(object sender, System.Threading.Tasks.UnobservedTaskExceptionEventArgs e)
+        {
+            try
+            {
+                Log($"[UnobservedTaskException] {e.Exception}");
             }
             catch
             {

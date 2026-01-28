@@ -6,8 +6,11 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Autodesk.Navisworks.Api;
 using MicroEng.Navisworks;
+using WpfUiControls = Wpf.Ui.Controls;
 
 namespace MicroEng.Navisworks.ViewpointsGenerator
 {
@@ -174,11 +177,69 @@ namespace MicroEng.Navisworks.ViewpointsGenerator
                     });
 
                 StatusText = "Done. Viewpoints created.";
+                ShowSnackbar("Viewpoints generated",
+                    $"Created {enabledCount} viewpoint(s).",
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+                FlashSuccess(sender as System.Windows.Controls.Button);
             }
             catch (Exception ex)
             {
                 StatusText = "Generate failed: " + ex.Message;
+                ShowSnackbar("Generate failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
             }
+        }
+
+        private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
+        {
+            if (SnackbarPresenter == null)
+            {
+                return;
+            }
+
+            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
+            {
+                Title = title,
+                Content = message,
+                Appearance = appearance,
+                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
+                {
+                    Filled = true,
+                    FontSize = 25
+                },
+                Foreground = System.Windows.Media.Brushes.Black,
+                ContentForeground = System.Windows.Media.Brushes.Black,
+                Timeout = TimeSpan.FromSeconds(4),
+                IsCloseButtonEnabled = false
+            };
+
+            snackbar.Show();
+        }
+
+        private void FlashSuccess(System.Windows.Controls.Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            var flashBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80));
+            var animation = new ColorAnimation
+            {
+                From = flashBrush.Color,
+                To = System.Windows.Media.Colors.White,
+                Duration = TimeSpan.FromMilliseconds(6000),
+                BeginTime = TimeSpan.FromSeconds(1),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            animation.Completed += (_, _) => button.ClearValue(BackgroundProperty);
+            button.Background = flashBrush;
+            flashBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
         }
     }
 }
+

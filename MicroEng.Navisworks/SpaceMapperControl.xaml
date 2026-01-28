@@ -45,15 +45,16 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <ui:NavigationView x:Name="SpaceMapperNav"
-                       PaneDisplayMode="LeftFluent"
-                       IsBackButtonVisible="Collapsed"
-                       IsPaneToggleVisible="False"
-                       IsPaneOpen="True"
-                       ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                       Background="{DynamicResource ApplicationBackgroundBrush}"
-                       Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+    <Grid>
+        <ui:NavigationView x:Name="SpaceMapperNav"
+                           PaneDisplayMode="LeftFluent"
+                           IsBackButtonVisible="Collapsed"
+                           IsPaneToggleVisible="False"
+                           IsPaneOpen="True"
+                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           Background="{DynamicResource ApplicationBackgroundBrush}"
+                           Foreground="{DynamicResource TextFillColorPrimaryBrush}">
         <ui:NavigationView.PaneHeader>
             <Grid HorizontalAlignment="Stretch"
                   VerticalAlignment="Center">
@@ -221,5 +222,12 @@
                         Background="#FFFFFFFF" />
             </StackPanel>
         </ui:NavigationView.Header>
-    </ui:NavigationView>
+        </ui:NavigationView>
+
+        <ui:SnackbarPresenter x:Name="SnackbarPresenter"
+                              Margin="0,0,0,4"
+                              VerticalAlignment="Bottom"
+                              HorizontalAlignment="Center"
+                              Panel.ZIndex="10" />
+    </Grid>
 </UserControl>

@@ -9,6 +9,8 @@ using Autodesk.Navisworks.Api;
 using NavisApp = Autodesk.Navisworks.Api.Application;
 using System.Windows.Media;
 using System.Windows.Interop;
+using System.Windows.Media.Animation;
+using WpfUiControls = Wpf.Ui.Controls;
 
 namespace MicroEng.Navisworks
 {
@@ -230,11 +232,20 @@ namespace MicroEng.Navisworks
                 StatusText.Text = result.Message ?? "Completed.";
                 MessageBox.Show(result.Message ?? "Completed.", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
                 LogAction?.Invoke(result.Message ?? string.Empty);
+                ShowSnackbar("Data Mapper complete",
+                    result.Message ?? "Completed.",
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+                FlashSuccess(sender as System.Windows.Controls.Button);
             }
             catch (Exception ex)
             {
                 StatusText.Text = ex.Message;
                 MessageBox.Show(ex.Message, "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowSnackbar("Data Mapper failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
             }
         }
 
@@ -275,6 +286,54 @@ namespace MicroEng.Navisworks
             return dialog.ShowDialog() == true ? box.Text : null;
         }
 
+        private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
+        {
+            if (SnackbarPresenter == null)
+            {
+                return;
+            }
+
+            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
+            {
+                Title = title,
+                Content = message,
+                Appearance = appearance,
+                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
+                {
+                    Filled = true,
+                    FontSize = 25
+                },
+                Foreground = System.Windows.Media.Brushes.Black,
+                ContentForeground = System.Windows.Media.Brushes.Black,
+                Timeout = TimeSpan.FromSeconds(4),
+                IsCloseButtonEnabled = false
+            };
+
+            snackbar.Show();
+        }
+
+        private void FlashSuccess(System.Windows.Controls.Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            var flashBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80));
+            var animation = new ColorAnimation
+            {
+                From = flashBrush.Color,
+                To = System.Windows.Media.Colors.White,
+                Duration = TimeSpan.FromMilliseconds(6000),
+                BeginTime = TimeSpan.FromSeconds(1),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            animation.Completed += (_, _) => button.ClearValue(BackgroundProperty);
+            button.Background = flashBrush;
+            flashBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
+        }
+
         private void RefreshDataProfiles()
         {
             _dataProfiles = DataScraperCache.AllSessions
@@ -311,3 +370,4 @@ namespace MicroEng.Navisworks
         }
     }
 }
+

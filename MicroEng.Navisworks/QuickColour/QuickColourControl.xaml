@@ -470,9 +470,11 @@
                                 <ui:TextBlock Text="Palette &amp; Limits" FontSize="13" FontWeight="SemiBold" />
                                 <WrapPanel Grid.Row="1" Margin="0,6,0,0">
                                     <TextBlock Text="Palette:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                                    <ComboBox ItemsSource="{Binding PaletteStyleOptions}"
-                                              SelectedItem="{Binding HierarchyPaletteStyle}"
-                                              Width="110"
+                                    <ComboBox ItemsSource="{Binding QuickColourPaletteOptions}"
+                                              SelectedValue="{Binding HierarchyPaletteKind}"
+                                              SelectedValuePath="Value"
+                                              DisplayMemberPath="Label"
+                                              Width="170"
                                               Margin="0,0,12,0" />
                                     <TextBlock Text="Type shade spread:" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <Slider Width="140"
@@ -521,11 +523,11 @@
                                             Margin="0,0,6,0" />
                                     <TextBox Width="90"
                                              Text="{Binding HierarchyHueHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                             IsEnabled="{Binding HierarchySingleHueMode}"
+                                             IsEnabled="{Binding IsHierarchyHueEditEnabled}"
                                              Margin="0,0,6,0" />
                                     <ui:Button Content="Pick..."
                                                Click="PickHierarchyHue_Click"
-                                               IsEnabled="{Binding HierarchySingleHueMode}"
+                                               IsEnabled="{Binding IsHierarchyHueEditEnabled}"
                                                Margin="0,0,14,0" />
                                     <TextBlock Text="Category contrast:" VerticalAlignment="Center" Margin="0,0,6,0" />
                                     <Slider Width="140"
@@ -661,6 +663,13 @@
             <TextBlock Text="{Binding StatusText}"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </ui:Card>
+
+        <ui:SnackbarPresenter x:Name="SnackbarPresenter"
+                              Grid.RowSpan="3"
+                              Margin="0,0,0,4"
+                              VerticalAlignment="Bottom"
+                              HorizontalAlignment="Center"
+                              Panel.ZIndex="10" />
     </Grid>
 </UserControl>
 

@@ -1,0 +1,2359 @@
+For **Revit model data**, the “better” export depends on what you’ll do with it later. With your current scraper shape (it already produces a “raw rows” list per item/property/value), you can support both with minimal extra work.
+
+## Raw rows (property-per-line JSONL)
+
+Best when you want:
+
+* SQL-style analytics: “count of items by Category”, “distinct values of parameter X”, “null-rate”, “joins”, QA rules
+* Incremental ingestion: append-only, easy to stream, compress, partition
+* Flexibility: you can always reconstruct item documents later
+
+Tradeoffs:
+
+* More rows (big file), needs indexing/aggregation in DB
+* Multi-valued props become multiple lines per item
+
+This matches what your `DataScraperService` already emits today as `RawEntry` (one row per item/property/value).
+
+## Item documents (one line per item with nested properties)
+
+Best when you want:
+
+* Document store / search indexing: “retrieve all properties for this element”
+* AI/RAG features later: embed the item’s full property blob
+* Fast API reads by item id (GUID/ElementId/IFC GUID)
+
+Tradeoffs:
+
+* Harder to query globally without flattening
+* Updates require rewriting a full item document (still fine with JSONL, but heavier)
+* Need to decide how to represent multi-valued properties (arrays)
+
+### What I’d choose for Revit data
+
+If your target is “database down the line” and you’re not 100% sure whether it’ll be SQL analytics vs document search:
+
+**Do Raw Rows as the primary export, and optionally add Item Documents as a second export mode.**
+
+Reasoning:
+
+* Raw rows are the most future-proof and cheapest to generate/stream from your current `RawEntries` pipeline.
+* You can derive item documents later in the DB (group by `itemKey`), or generate them at export time if needed.
+* Revit has lots of QA/standardisation needs (null rates, duplicates, naming patterns) that are vastly easier on raw rows.
+
+### Practical recommendation: export both files in one click
+
+Add an “Export mode” dropdown:
+
+* `Raw rows (JSONL)` (default)
+* `Item documents (JSONL)`
+* `Both`
+
+That way you don’t have to guess now.
+
+---
+
+## One key fix before any “item documents” mode
+
+Right now your RawEntry uses `ItemPath = item.TryGetDisplayName()` (so it’s basically display name, not a stable hierarchical path).
+If you want item documents to be useful in a DB, you should export at least one stable identifier beyond `InstanceGuid`:
+
+* Revit UniqueId / ElementId / IFC GUID, if present in properties (you can include them in a “derivedIds” object during export).
+
+You can still ship JSONL now, but plan to include “best effort IDs” soon.
+
+---
+
+If you tell me your likely downstream store (Postgres/BigQuery vs Elastic/OpenSearch vs “vector DB + RAG”), I’ll recommend the default mode and the exact minimal schema fields that will save you pain later.
+
+
+
+
+Below is a single **Codex work order** (sequenced, file-by-file) that implements:
+
+* **Stream JSONL during scrape** (writes as you iterate items; avoids holding raw rows in RAM)
+* **Two export modes**
+
+  * **Raw rows** (property-per-line) → best for relational DB tables
+  * **Item documents** (one line per item with nested properties) → best for document DB / search indexing
+* **Optional gzip** (`.jsonl.gz`) → typically 5–20× smaller
+* **UI + tooltips** so users understand what they’re choosing
+
+I’m keeping this **low-risk**: existing behavior remains the default unless export is enabled.
+
+---
+
+## Codex work order: Data Scraper JSONL export (streaming, 2 modes, gzip)
+
+### 0) Goal / acceptance criteria
+
+After this change:
+
+1. Data Scraper UI has an **Export** tab with:
+
+   * checkbox to enable export
+   * export mode dropdown: Raw rows / Item documents
+   * gzip toggle
+   * output path textbox + Browse
+   * “Keep raw rows in memory” toggle (controls whether Raw Data tab can show rows)
+   * tooltips explaining each option
+2. When enabled, Data Scraper writes:
+
+   * `.jsonl` or `.jsonl.gz`
+   * **line-delimited JSON** (1 record per line)
+   * streamed during scrape (not buffered into a huge list)
+3. Properties tab still populates even if raw rows are not kept in memory.
+4. Status bar indicates export file path + record count.
+
+---
+
+## 1) Edit `DataScraperModels.cs` (add export types + session fields)
+
+**Add these types inside `namespace MicroEng.Navisworks`** (near the top, after the namespace opens is fine):
+
+```csharp
+internal enum JsonlExportMode
+{
+    RawRows = 0,       // property-per-line
+    ItemDocuments = 1  // one line per item with nested properties
+}
+
+internal sealed class JsonlExportOptions
+{
+    public bool Enabled { get; set; }
+    public JsonlExportMode Mode { get; set; } = JsonlExportMode.RawRows;
+    public bool Gzip { get; set; }
+    public string OutputPath { get; set; } = "";
+    public bool KeepRawEntriesInMemory { get; set; } = true;
+}
+```
+
+**Then extend `ScrapeSession`** with DB-friendly tracking fields (don’t remove anything existing):
+
+```csharp
+public Guid SessionId { get; set; } = Guid.NewGuid();
+
+public bool JsonlExportEnabled { get; set; }
+public JsonlExportMode JsonlExportMode { get; set; } = JsonlExportMode.RawRows;
+public bool JsonlExportGzip { get; set; }
+public string JsonlExportPath { get; set; } = "";
+public long JsonlExportRecordsWritten { get; set; }
+
+public bool RawEntriesStored { get; set; } = true;
+```
+
+Notes:
+
+* `RawEntriesStored=false` means we didn’t keep `RawEntries` for memory reasons (but export still happened).
+* `SessionId` is important for DB joins.
+
+---
+
+## 2) Add new file `DataScraperJsonlWriter.cs` (stream JSONL + optional gzip)
+
+Create a new file **next to** the existing DataScraper files:
+
+`MicroEng.Navisworks/DataScraperJsonlWriter.cs`
+
+```csharp
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Text;
+using Newtonsoft.Json;
+
+namespace MicroEng.Navisworks
+{
+    internal sealed class JsonlStreamWriter : IDisposable
+    {
+        private readonly Stream _stream;
+        private readonly StreamWriter _writer;
+        private readonly JsonSerializerSettings _settings;
+
+        public long RecordsWritten { get; private set; }
+
+        public JsonlStreamWriter(Stream stream)
+        {
+            _stream = stream;
+            _writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), 1 << 16, leaveOpen: true);
+
+            _settings = new JsonSerializerSettings
+            {
+                NullValueHandling = NullValueHandling.Ignore,
+                Formatting = Formatting.None
+            };
+        }
+
+        public void WriteRecord(object record)
+        {
+            // JSONL = one JSON object per line
+            var json = JsonConvert.SerializeObject(record, _settings);
+            _writer.WriteLine(json);
+
+            RecordsWritten++;
+
+            // Periodic flush to keep file durable without flushing every line
+            if ((RecordsWritten % 4096) == 0)
+                _writer.Flush();
+        }
+
+        public void Dispose()
+        {
+            try { _writer.Flush(); } catch { /* ignore */ }
+            _writer.Dispose();
+            _stream.Dispose();
+        }
+    }
+
+    internal static class DataScraperJsonl
+    {
+        public static string EnsureExtension(string path, bool gzip)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return path;
+
+            var p = path.Trim();
+
+            if (gzip)
+            {
+                if (p.EndsWith(".jsonl.gz", StringComparison.OrdinalIgnoreCase)) return p;
+                if (p.EndsWith(".gz", StringComparison.OrdinalIgnoreCase)) return p;
+                if (p.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)) return p + ".gz";
+                return p + ".jsonl.gz";
+            }
+            else
+            {
+                if (p.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)) return p;
+                if (p.EndsWith(".jsonl.gz", StringComparison.OrdinalIgnoreCase))
+                    return p.Substring(0, p.Length - 3); // remove ".gz"
+                return p + ".jsonl";
+            }
+        }
+
+        public static string GetDefaultPath(string profileName, bool gzip, DateTime utcNow)
+        {
+            var safeProfile = MakeSafeFileName(profileName);
+            var ts = utcNow.ToString("yyyyMMdd_HHmmss");
+            var ext = gzip ? ".jsonl.gz" : ".jsonl";
+
+            var folder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "MicroEng",
+                "DataScraper",
+                "Exports");
+
+            Directory.CreateDirectory(folder);
+
+            return Path.Combine(folder, $"DataScraper_{safeProfile}_{ts}{ext}");
+        }
+
+        public static JsonlStreamWriter Create(string path, bool gzip)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+
+            Stream stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+
+            if (gzip)
+                stream = new GZipStream(stream, CompressionLevel.Optimal, leaveOpen: false);
+
+            return new JsonlStreamWriter(stream);
+        }
+
+        private static string MakeSafeFileName(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s))
+                return "Profile";
+
+            foreach (var c in Path.GetInvalidFileNameChars())
+                s = s.Replace(c, '_');
+
+            return s.Trim();
+        }
+    }
+}
+```
+
+---
+
+## 3) Edit `DataScraperService.cs` (streaming writer + two output modes)
+
+### 3.1 Add internal JSON record shapes (inside `DataScraperService` class or namespace)
+
+Put these near the top of the file (inside namespace `MicroEng.Navisworks`, outside the class is fine):
+
+```csharp
+internal sealed class JsonlRawRow
+{
+    public Guid sessionId { get; set; }
+    public DateTime sessionUtc { get; set; }
+
+    public string profile { get; set; }
+    public string scopeType { get; set; }
+    public string scopeDescription { get; set; }
+
+    public string itemKey { get; set; }
+    public string itemPath { get; set; }
+
+    public string category { get; set; }
+    public string property { get; set; }
+    public string dataType { get; set; }
+    public string value { get; set; }
+}
+
+internal sealed class JsonlItemDocument
+{
+    public Guid sessionId { get; set; }
+    public DateTime sessionUtc { get; set; }
+
+    public string profile { get; set; }
+    public string scopeType { get; set; }
+    public string scopeDescription { get; set; }
+
+    public string itemKey { get; set; }
+    public string itemPath { get; set; }
+
+    // category -> property -> values
+    public Dictionary<string, Dictionary<string, List<string>>> properties { get; set; }
+
+    // optional: category -> property -> datatype
+    public Dictionary<string, Dictionary<string, string>> types { get; set; }
+}
+```
+
+### 3.2 Add a new overload of `Scrape(...)` that takes `JsonlExportOptions`
+
+**Keep the existing `Scrape(...)` method** and have it call the new overload with `null` to preserve old behavior.
+
+Add this overload:
+
+```csharp
+public ScrapeSession Scrape(
+    string profileName,
+    ScrapeScopeType scopeType,
+    string scopeDescription,
+    IEnumerable<ModelItem> items,
+    JsonlExportOptions exportOptions)
+{
+    var sw = Stopwatch.StartNew();
+    var utcNow = DateTime.UtcNow;
+
+    var session = new ScrapeSession
+    {
+        CreatedUtc = utcNow,
+        Profile = profileName,
+        ScopeType = scopeType.ToString(),
+        Scope = scopeDescription,
+        RawEntries = new List<RawEntry>()
+    };
+
+    var exportEnabled = exportOptions != null && exportOptions.Enabled;
+    var keepRaw = !exportEnabled || exportOptions.KeepRawEntriesInMemory;
+
+    session.RawEntriesStored = keepRaw;
+
+    JsonlStreamWriter jsonl = null;
+
+    if (exportEnabled)
+    {
+        session.JsonlExportEnabled = true;
+        session.JsonlExportMode = exportOptions.Mode;
+        session.JsonlExportGzip = exportOptions.Gzip;
+
+        var outPath = string.IsNullOrWhiteSpace(exportOptions.OutputPath)
+            ? DataScraperJsonl.GetDefaultPath(profileName, exportOptions.Gzip, utcNow)
+            : DataScraperJsonl.EnsureExtension(exportOptions.OutputPath, exportOptions.Gzip);
+
+        session.JsonlExportPath = outPath;
+        jsonl = DataScraperJsonl.Create(outPath, exportOptions.Gzip);
+    }
+
+    // Property accumulation (so Properties tab still works even if we don't keep RawEntries)
+    var propAcc = new Dictionary<string, (string cat, string name, string dtype, int itemCount, long valueCount, HashSet<string> distinct, List<string> sample)>(StringComparer.OrdinalIgnoreCase);
+
+    void TouchProperty(string cat, string name, string dtype, bool firstTimeThisItem, IEnumerable<string> values)
+    {
+        var key = cat + "\u001F" + name + "\u001F" + dtype;
+
+        if (!propAcc.TryGetValue(key, out var a))
+        {
+            a = (cat, name, dtype, 0, 0, new HashSet<string>(StringComparer.OrdinalIgnoreCase), new List<string>());
+        }
+
+        if (firstTimeThisItem)
+            a.itemCount++;
+
+        foreach (var v in values)
+        {
+            a.valueCount++;
+
+            // cap distinct tracking to reduce RAM blowups on huge models
+            if (a.distinct.Count < 5000)
+                a.distinct.Add(v);
+
+            if (a.sample.Count < 12 && !a.sample.Contains(v))
+                a.sample.Add(v);
+        }
+
+        propAcc[key] = a;
+    }
+
+    try
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in items)
+        {
+            if (item == null)
+                continue;
+
+            var itemKey = item.InstanceGuid.ToString();
+            if (!visited.Add(itemKey))
+                continue;
+
+            session.ItemsScanned++;
+
+            var itemPath = ItemToPath(item);
+
+            Dictionary<string, Dictionary<string, List<string>>> docProps = null;
+            Dictionary<string, Dictionary<string, string>> docTypes = null;
+
+            if (exportEnabled && exportOptions.Mode == JsonlExportMode.ItemDocuments)
+            {
+                docProps = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
+                docTypes = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            // track per-item property keys so ItemCount counts items, not values
+            var seenPropsThisItem = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var cat in item.PropertyCategories)
+            {
+                var catName = cat.DisplayName;
+
+                foreach (var prop in cat.Properties)
+                {
+                    var name = prop.DisplayName;
+                    var dtype = prop.Value?.DataType.ToString() ?? "Unknown";
+
+                    var values = GetPropertyValueStrings(prop).Distinct().ToList();
+                    if (values.Count == 0)
+                        continue;
+
+                    var pkey = catName + "\u001F" + name + "\u001F" + dtype;
+                    var firstThisItem = seenPropsThisItem.Add(pkey);
+
+                    TouchProperty(catName, name, dtype, firstThisItem, values);
+
+                    // RAW ROWS export (property-per-line)
+                    if (exportEnabled && exportOptions.Mode == JsonlExportMode.RawRows)
+                    {
+                        foreach (var v in values)
+                        {
+                            jsonl.WriteRecord(new JsonlRawRow
+                            {
+                                sessionId = session.SessionId,
+                                sessionUtc = session.CreatedUtc,
+
+                                profile = profileName,
+                                scopeType = scopeType.ToString(),
+                                scopeDescription = scopeDescription,
+
+                                itemKey = itemKey,
+                                itemPath = itemPath,
+
+                                category = catName,
+                                property = name,
+                                dataType = dtype,
+                                value = v
+                            });
+                        }
+                    }
+
+                    // Keep RawEntries for UI if enabled
+                    if (keepRaw)
+                    {
+                        foreach (var v in values)
+                        {
+                            session.RawEntries.Add(new RawEntry
+                            {
+                                Profile = profileName,
+                                Scope = scopeDescription,
+                                ItemKey = itemKey,
+                                ItemPath = itemPath,
+                                Category = catName,
+                                Name = name,
+                                DataType = dtype,
+                                Value = v
+                            });
+                        }
+                    }
+
+                    // ITEM DOCUMENT export (one JSON per item)
+                    if (docProps != null)
+                    {
+                        if (!docProps.TryGetValue(catName, out var pd))
+                        {
+                            pd = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                            docProps[catName] = pd;
+                        }
+
+                        pd[name] = values;
+
+                        if (!docTypes.TryGetValue(catName, out var td))
+                        {
+                            td = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                            docTypes[catName] = td;
+                        }
+
+                        td[name] = dtype;
+                    }
+                }
+            }
+
+            if (exportEnabled && exportOptions.Mode == JsonlExportMode.ItemDocuments)
+            {
+                jsonl.WriteRecord(new JsonlItemDocument
+                {
+                    sessionId = session.SessionId,
+                    sessionUtc = session.CreatedUtc,
+
+                    profile = profileName,
+                    scopeType = scopeType.ToString(),
+                    scopeDescription = scopeDescription,
+
+                    itemKey = itemKey,
+                    itemPath = itemPath,
+
+                    properties = docProps ?? new Dictionary<string, Dictionary<string, List<string>>>(),
+                    types = docTypes ?? new Dictionary<string, Dictionary<string, string>>()
+                });
+            }
+        }
+    }
+    finally
+    {
+        if (jsonl != null)
+        {
+            session.JsonlExportRecordsWritten = jsonl.RecordsWritten;
+            jsonl.Dispose();
+        }
+    }
+
+    // Build Properties list from accumulator
+    session.Properties = propAcc.Values
+        .Select(a => new ScrapedProperty
+        {
+            Category = a.cat,
+            Name = a.name,
+            DataType = a.dtype,
+            ItemCount = a.itemCount,
+            DistinctValueCount = a.distinct.Count,
+            SampleValues = string.Join(", ", a.sample)
+        })
+        .OrderBy(p => p.Category)
+        .ThenBy(p => p.Name)
+        .ToList();
+
+    session.ElapsedMs = sw.ElapsedMilliseconds;
+
+    _cache.AddSession(session);
+    return session;
+}
+```
+
+### 3.3 Update the old method to call the new one
+
+Find the existing `Scrape(...)` and change it to:
+
+```csharp
+public ScrapeSession Scrape(string profileName, ScrapeScopeType scopeType, string scopeDescription, IEnumerable<ModelItem> items)
+{
+    return Scrape(profileName, scopeType, scopeDescription, items, exportOptions: null);
+}
+```
+
+---
+
+## 4) Update `DataScraperWindow.xaml` (add Export tab + tooltips + “raw rows not stored” hint)
+
+### 4.1 Add a new `TabItem Header="Export"` inside the existing `TabControl`
+
+Insert it after “Raw Data” tab (or wherever you prefer):
+
+```xml
+<TabItem Header="Export">
+    <Grid Margin="8">
+        <ui:Card>
+            <Grid Margin="12">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+
+                <CheckBox x:Name="ExportEnabledCheckBox"
+                          Content="Export JSONL during scrape"
+                          ToolTip="Streams JSONL while scanning items. This is DB-friendly and avoids holding all raw rows in memory." />
+
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="Mode:" Width="70" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="ExportModeComboBox"
+                              Width="360"
+                              IsEnabled="{Binding IsChecked, ElementName=ExportEnabledCheckBox}"
+                              ToolTip="Raw rows = one line per property value (best for SQL tables). Item documents = one line per item with nested properties (best for search/document DB).">
+                        <ComboBoxItem Content="Raw rows (property-per-line) — DB tables" Tag="RawRows" />
+                        <ComboBoxItem Content="Item documents (one line per item) — search/indexing" Tag="ItemDocuments" />
+                    </ComboBox>
+
+                    <CheckBox x:Name="ExportGzipCheckBox"
+                              Content="gzip (.gz)"
+                              Margin="14,0,0,0"
+                              VerticalAlignment="Center"
+                              IsEnabled="{Binding IsChecked, ElementName=ExportEnabledCheckBox}"
+                              ToolTip="Compress output to .jsonl.gz (usually 5–20× smaller)." />
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,0">
+                    <TextBlock Text="File:" Width="70" VerticalAlignment="Center"/>
+                    <TextBox x:Name="ExportPathBox"
+                             Width="480"
+                             IsEnabled="{Binding IsChecked, ElementName=ExportEnabledCheckBox}"
+                             ToolTip="Leave blank to auto-generate under %LOCALAPPDATA%\\MicroEng\\DataScraper\\Exports." />
+                    <ui:Button x:Name="BrowseExportButton"
+                               Content="Browse..."
+                               Margin="10,0,0,0"
+                               Click="BrowseExport_Click"
+                               IsEnabled="{Binding IsChecked, ElementName=ExportEnabledCheckBox}" />
+                </StackPanel>
+
+                <CheckBox x:Name="KeepRawInMemoryCheckBox"
+                          Grid.Row="3"
+                          Margin="0,10,0,0"
+                          Content="Keep raw rows in memory (enables Raw Data tab; uses more RAM)"
+                          IsChecked="True"
+                          IsEnabled="{Binding IsChecked, ElementName=ExportEnabledCheckBox}"
+                          ToolTip="Turn this off for very large models. Export still works, but the Raw Data tab won’t show per-property rows." />
+
+                <TextBlock Grid.Row="4"
+                           Margin="0,10,0,0"
+                           Opacity="0.75"
+                           TextWrapping="Wrap"
+                           Text="Tip: Use Raw rows for database imports. Use Item documents for document stores / text search indexing (Elastic/OpenSearch/etc.)."/>
+            </Grid>
+        </ui:Card>
+    </Grid>
+</TabItem>
+```
+
+### 4.2 In the “Raw Data” tab, add a hint textblock for when raw rows aren’t stored
+
+Inside the Raw Data tab grid, add a message (top row is fine):
+
+```xml
+<TextBlock x:Name="RawDataNotStoredHint"
+           Margin="0,0,0,8"
+           Opacity="0.8"
+           Visibility="Collapsed"
+           Text="Raw rows were not stored in memory (Export mode / memory saver). Enable 'Keep raw rows in memory' to view rows here." />
+```
+
+(Leave your existing RawGrid as-is.)
+
+---
+
+## 5) Update `DataScraperWindow.xaml.cs` (wire UI → export options → service)
+
+### 5.1 Set defaults in the constructor
+
+In `DataScraperWindow()` after `InitializeComponent();` add:
+
+```csharp
+ExportModeComboBox.SelectedIndex = 0; // Raw rows default
+```
+
+### 5.2 Add Browse handler
+
+Add:
+
+```csharp
+private void BrowseExport_Click(object sender, RoutedEventArgs e)
+{
+    var dlg = new Microsoft.Win32.SaveFileDialog
+    {
+        Filter = "JSONL (*.jsonl)|*.jsonl|GZip JSONL (*.jsonl.gz)|*.jsonl.gz|All files (*.*)|*.*",
+        FileName = "DataScraper.jsonl"
+    };
+
+    if (dlg.ShowDialog(this) == true)
+    {
+        ExportPathBox.Text = dlg.FileName;
+        ExportEnabledCheckBox.IsChecked = true;
+    }
+}
+```
+
+### 5.3 Build export options and call the new `Scrape(...)` overload
+
+In `Run_Click`, change the scrape call to pass options:
+
+```csharp
+var export = new JsonlExportOptions();
+
+if (ExportEnabledCheckBox.IsChecked == true)
+{
+    export.Enabled = true;
+    export.Gzip = ExportGzipCheckBox.IsChecked == true;
+    export.OutputPath = ExportPathBox.Text ?? "";
+    export.KeepRawEntriesInMemory = KeepRawInMemoryCheckBox.IsChecked == true;
+
+    var tag = (ExportModeComboBox.SelectedItem as ComboBoxItem)?.Tag as string;
+    export.Mode = string.Equals(tag, "ItemDocuments", StringComparison.OrdinalIgnoreCase)
+        ? JsonlExportMode.ItemDocuments
+        : JsonlExportMode.RawRows;
+}
+else
+{
+    export = null; // keep old behavior
+}
+```
+
+Then replace:
+
+```csharp
+var session = _service.Scrape(profile.Name, profile.ScopeType, scopeDesc, items);
+```
+
+with:
+
+```csharp
+var session = _service.Scrape(profile.Name, profile.ScopeType, scopeDesc, items, export);
+```
+
+### 5.4 Update UI refresh to rely on `session.Properties`
+
+In `RefreshProperties(ScrapeSession session)` change:
+
+```csharp
+_propRows = _service.DeriveProperties(session);
+```
+
+to:
+
+```csharp
+_propRows = session.Properties ?? new List<ScrapedProperty>();
+```
+
+### 5.5 Raw tab hint toggle
+
+In `RefreshRawData(ScrapeSession session)` add:
+
+```csharp
+RawDataNotStoredHint.Visibility = session.RawEntriesStored ? Visibility.Collapsed : Visibility.Visible;
+```
+
+Also, if you want to be explicit, when not stored:
+
+```csharp
+if (!session.RawEntriesStored)
+{
+    RawGrid.ItemsSource = null;
+    return;
+}
+```
+
+### 5.6 Improve status text after scrape
+
+In `Run_Click`, after scrape completes, append export info:
+
+```csharp
+if (session.JsonlExportEnabled)
+{
+    StatusLabel.Content = $"Completed: {session.ItemsScanned} items, {session.Properties.Count} properties, " +
+                          $"{session.JsonlExportRecordsWritten} JSONL record(s) -> {session.JsonlExportPath}";
+}
+else
+{
+    StatusLabel.Content = $"Completed: {session.ItemsScanned} items, {session.Properties.Count} properties, {session.RawEntries.Count} raw rows.";
+}
+```
+
+---
+
+## 6) Build + quick test checklist
+
+1. `dotnet clean MicroEng.Navisworks/MicroEng.Navisworks.csproj`
+2. `dotnet build MicroEng.Navisworks/MicroEng.Navisworks.csproj`
+3. In Navisworks → MicroEng Tools → Data Scraper:
+
+   * Select a profile
+   * Go to **Export** tab
+   * Enable export → choose mode → optionally gzip → Run Scrape
+4. Confirm file exists and looks like JSONL:
+
+   * Raw rows mode: many lines; each line has `itemKey/category/property/value`
+   * Item documents mode: one line per item; each line has nested `properties`
+
+---
+
+# Tooltips text (copy/paste)
+
+Use these exact strings (they’re short but clear):
+
+* **Export JSONL during scrape**
+  “Streams JSONL while scanning items. DB-friendly and avoids holding all raw rows in memory.”
+
+* **Mode**
+  “Raw rows = one line per property value (best for SQL tables). Item documents = one line per item with nested properties (best for document DB/search indexing).”
+
+* **gzip (.gz)**
+  “Compress output to .jsonl.gz (usually 5–20× smaller).”
+
+* **File**
+  “Leave blank to auto-generate under %LOCALAPPDATA%\MicroEng\DataScraper\Exports.”
+
+* **Keep raw rows in memory**
+  “Turn off for very large models. Export still works, but Raw Data tab won’t show per-row entries.”
+
+---
+
+If you want the export to also include **model/source file name**, **Revit element ids**, or **GUID normalization** (so DB joins are cleaner across appended models), tell me what IDs you want as your primary key and I’ll adjust the JSON schema accordingly.
+
+Yes — this absolutely belongs in **Data Scraper settings**, because the “best” identity fields depend heavily on the authoring/source pipeline (Revit→NWC, IFC, DWG, etc). The key is to:
+
+* **Export multiple IDs when available** (not just one), so you have options later in the database.
+* Let the user choose a **Primary Key strategy** (and always fall back safely).
+* Optionally **normalize GUID-like IDs** so joins are stable and painless.
+
+Below is a single “Codex work order” + concrete code that implements:
+
+* JSONL export settings in the Data Scraper UI
+* Two JSONL modes (Raw Rows and Item Documents)
+* Optional gzip (.jsonl.gz)
+* Export identity fields (source file, Revit IDs, IFC GUID, DWG handle, Navisworks InstanceGuid)
+* A user-selectable **Primary Key Mode**
+* GUID normalization (safe, only for GUID-like IDs)
+
+---
+
+## Recommended defaults (what you should ship)
+
+**Primary key mode (default):** `SourceFilePlusBestExternalId`
+
+Why:
+
+* Navisworks `InstanceGuid` can change across exports / appended model merges.
+* Revit `UniqueId` (when available) is the best cross-export identity.
+* IFC `GlobalId` (when available) is the best cross-export identity.
+* DWG handles are sometimes stable, sometimes not—still useful.
+
+**BestExternalId selection order:**
+
+1. `revit.uniqueId`
+2. `ifc.globalId`
+3. `revit.elementId`
+4. `dwg.handle`
+5. fallback: `navis.instanceGuid`
+
+**Normalize IDs:** ON by default, but only normalize GUID-like strings (don’t mangle IFC GlobalId).
+
+---
+
+## Codex work order (single pass)
+
+Paste this as-is to Codex.
+
+> ### CODEX WORK ORDER — Data Scraper JSONL export + identity fields
+>
+> Implement JSONL export settings inside Data Scraper (WPF UI) with two export modes, optional gzip, and configurable identity fields (source file, Revit IDs, IFC GUID, DWG handle, Navisworks InstanceGuid) and primary key strategy.
+>
+> #### A) DataScraperModels.cs
+>
+> 1. Add enums:
+>
+> * `DataScraperJsonlExportMode { RawRows, ItemDocuments }`
+>
+> * `DataScraperPrimaryKeyMode { InstanceGuid, BestExternalId, SourceFilePlusBestExternalId, ItemPath }`
+>
+> * `DataScraperSourceFileKeyMode { FileNameOnly, FullPath }`
+>
+> 2. Add class `DataScraperJsonlExportSettings` with:
+>
+> * Enabled, StreamDuringScrape, OutputPath, Gzip, Mode
+>
+> * PrimaryKeyMode, SourceFileKeyMode
+>
+> * IncludeDocumentFile, IncludeSourceFile, IncludeNavisworksInstanceGuid, IncludeRevitIds, IncludeIfcIds, IncludeDwgIds
+>
+> * NormalizeIds
+>
+> * PreviewRowLimit (default 50000)
+>
+> 3. Add `JsonlExport` property to `DataScraperSettings`.
+> 4. Add export diagnostics fields to `DataScraperSession`:
+>
+> * `long JsonlLinesWritten`, `string JsonlLastPath`, `bool JsonlStreamedDuringScrape`
+>
+> #### B) DataScraperWindow.xaml
+>
+> 1. In Summary tab, add an “Export (JSONL)” card with:
+>
+> * Enable JSONL export checkbox
+>
+> * Output path textbox + Browse button
+>
+> * Mode dropdown (Raw Rows / Item Documents)
+>
+> * GZip checkbox
+>
+> * Stream during scrape checkbox
+>
+> * Identity group:
+>
+>   * Primary key dropdown
+>   * Source key mode dropdown (FilenameOnly/FullPath)
+>   * Checkboxes for Include Document File, Include Source File, Include Navis InstanceGuid, Include Revit IDs, Include IFC IDs, Include DWG IDs
+>   * Normalize IDs checkbox
+>
+> * Add tooltips for each setting that explain the use-case (Revit/IFC/DWG).
+>
+> 2. Add an “Export JSONL now” button (disabled if no session is loaded OR if streaming is enabled and no run done yet).
+>
+> #### C) DataScraperWindow.xaml.cs
+>
+> 1. Wire Browse button to SaveFileDialog. Default extension depends on gzip (.jsonl or .jsonl.gz).
+> 2. When RunScrape is clicked, pass `Settings` including `Settings.JsonlExport` into service.
+> 3. Wire Export JSONL button to call `DataScraperService.ExportSessionAsJsonlAsync(session, Settings)` (for non-streaming).
+> 4. Update the Summary display to show:
+>
+> * Last export path
+> * Lines written
+> * Whether export streamed during scrape
+>
+> #### D) DataScraperService.cs
+>
+> 1. Add a JSONL writer (StreamWriter + optional GZipStream + Newtonsoft.Json serializer).
+> 2. If `Settings.JsonlExport.Enabled && StreamDuringScrape`:
+>
+> * open writer at start
+> * write JSONL records as you iterate items (no big in-memory build)
+> * still keep up to PreviewRowLimit RawEntries so the Raw grid isn’t empty.
+>
+> 3. Implement two modes:
+>
+> * RawRows: emit one JSON line per property value row.
+> * ItemDocuments: emit one JSON line per item with nested properties `{ category: { prop: [values] } }`
+>
+> 4. Implement identity extraction:
+>
+> * Always compute itemPath (existing logic)
+> * Probe properties during iteration to capture:
+>
+>   * sourceFile candidates: “Source File”, “File Name”, “SourceFile”, etc.
+>   * Revit candidates: “UniqueId”, “Element ID”
+>   * IFC candidates: “GlobalId”, “IfcGUID”
+>   * DWG candidates: “Handle”, “Entity Handle”
+> * Build `ids` dictionary with keys:
+>
+>   * navis.instanceGuid
+>   * revit.uniqueId
+>   * revit.elementId
+>   * ifc.globalId
+>   * dwg.handle
+> * Normalize GUID-like values only when NormalizeIds=true:
+>
+>   * Guid.TryParse → canonical `D`
+>   * Revit UniqueId: canonicalize first 36 chars if they parse as Guid, keep suffix unchanged
+>   * Do NOT uppercase/alter IFC GlobalId
+>
+> 5. Compute PrimaryKey based on PrimaryKeyMode:
+>
+> * InstanceGuid → navis.instanceGuid
+> * BestExternalId → first available: revit.uniqueId > ifc.globalId > revit.elementId > dwg.handle > navis.instanceGuid
+> * SourceFilePlusBestExternalId → `${sourceKey}|${bestExternalOrGuid}`
+> * ItemPath → itemPath
+>
+> 6. Ensure safe fallbacks: if fields not present, still export with InstanceGuid + itemPath.
+>
+> #### E) Add ExportSessionAsJsonlAsync
+>
+> If user didn’t stream during scrape, export from the captured RawEntries (raw mode) or rebuild item docs from the session (doc mode).
+>
+> Keep everything WPF (no WinForms UI controls), but using SaveFileDialog from Microsoft.Win32 is fine.
+
+---
+
+## Code you can hand to Codex
+
+### 1) DataScraperModels.cs
+
+Add these near the bottom (and add `JsonlExport` to `DataScraperSettings`):
+
+```csharp
+namespace MicroEng.Navisworks
+{
+    public enum DataScraperJsonlExportMode
+    {
+        RawRows,
+        ItemDocuments
+    }
+
+    public enum DataScraperPrimaryKeyMode
+    {
+        InstanceGuid,
+        BestExternalId,
+        SourceFilePlusBestExternalId,
+        ItemPath
+    }
+
+    public enum DataScraperSourceFileKeyMode
+    {
+        FileNameOnly,
+        FullPath
+    }
+
+    public sealed class DataScraperJsonlExportSettings : INotifyPropertyChanged
+    {
+        private bool _enabled;
+        private bool _streamDuringScrape = true;
+        private string _outputPath = "";
+        private bool _gzip;
+        private DataScraperJsonlExportMode _mode = DataScraperJsonlExportMode.RawRows;
+
+        private DataScraperPrimaryKeyMode _primaryKeyMode = DataScraperPrimaryKeyMode.SourceFilePlusBestExternalId;
+        private DataScraperSourceFileKeyMode _sourceFileKeyMode = DataScraperSourceFileKeyMode.FileNameOnly;
+
+        private bool _includeDocumentFile = true;
+        private bool _includeSourceFile = true;
+        private bool _includeNavisInstanceGuid = true;
+        private bool _includeRevitIds = true;
+        private bool _includeIfcIds = true;
+        private bool _includeDwgIds = true;
+        private bool _normalizeIds = true;
+
+        private int _previewRowLimit = 50000;
+
+        public bool Enabled { get => _enabled; set { _enabled = value; OnPropertyChanged(nameof(Enabled)); } }
+        public bool StreamDuringScrape { get => _streamDuringScrape; set { _streamDuringScrape = value; OnPropertyChanged(nameof(StreamDuringScrape)); } }
+        public string OutputPath { get => _outputPath; set { _outputPath = value ?? ""; OnPropertyChanged(nameof(OutputPath)); } }
+        public bool Gzip { get => _gzip; set { _gzip = value; OnPropertyChanged(nameof(Gzip)); } }
+        public DataScraperJsonlExportMode Mode { get => _mode; set { _mode = value; OnPropertyChanged(nameof(Mode)); } }
+
+        public DataScraperPrimaryKeyMode PrimaryKeyMode { get => _primaryKeyMode; set { _primaryKeyMode = value; OnPropertyChanged(nameof(PrimaryKeyMode)); } }
+        public DataScraperSourceFileKeyMode SourceFileKeyMode { get => _sourceFileKeyMode; set { _sourceFileKeyMode = value; OnPropertyChanged(nameof(SourceFileKeyMode)); } }
+
+        public bool IncludeDocumentFile { get => _includeDocumentFile; set { _includeDocumentFile = value; OnPropertyChanged(nameof(IncludeDocumentFile)); } }
+        public bool IncludeSourceFile { get => _includeSourceFile; set { _includeSourceFile = value; OnPropertyChanged(nameof(IncludeSourceFile)); } }
+        public bool IncludeNavisworksInstanceGuid { get => _includeNavisInstanceGuid; set { _includeNavisInstanceGuid = value; OnPropertyChanged(nameof(IncludeNavisworksInstanceGuid)); } }
+        public bool IncludeRevitIds { get => _includeRevitIds; set { _includeRevitIds = value; OnPropertyChanged(nameof(IncludeRevitIds)); } }
+        public bool IncludeIfcIds { get => _includeIfcIds; set { _includeIfcIds = value; OnPropertyChanged(nameof(IncludeIfcIds)); } }
+        public bool IncludeDwgIds { get => _includeDwgIds; set { _includeDwgIds = value; OnPropertyChanged(nameof(IncludeDwgIds)); } }
+        public bool NormalizeIds { get => _normalizeIds; set { _normalizeIds = value; OnPropertyChanged(nameof(NormalizeIds)); } }
+
+        public int PreviewRowLimit { get => _previewRowLimit; set { _previewRowLimit = Math.Max(0, value); OnPropertyChanged(nameof(PreviewRowLimit)); } }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        private void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+}
+```
+
+Update `DataScraperSettings`:
+
+```csharp
+public class DataScraperSettings : INotifyPropertyChanged
+{
+    // existing...
+    public DataScraperJsonlExportSettings JsonlExport { get; } = new DataScraperJsonlExportSettings();
+}
+```
+
+Update `DataScraperSession` (add diagnostics):
+
+```csharp
+public long JsonlLinesWritten { get; set; }
+public string JsonlLastPath { get; set; }
+public bool JsonlStreamedDuringScrape { get; set; }
+```
+
+---
+
+### 2) DataScraperService.cs
+
+Add a small JSONL writer + identity extraction.
+
+**Add these helpers inside `DataScraperService` (or as private nested types):**
+
+```csharp
+using System.IO.Compression;
+using Newtonsoft.Json;
+
+private sealed class JsonlWriter : IDisposable
+{
+    private readonly StreamWriter _writer;
+    private readonly JsonSerializer _serializer;
+    private long _lines;
+
+    public long LinesWritten => _lines;
+
+    public JsonlWriter(string path, bool gzip)
+    {
+        Stream stream = File.Create(path);
+        if (gzip)
+            stream = new GZipStream(stream, CompressionLevel.Optimal, leaveOpen: false);
+
+        _writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        _serializer = JsonSerializer.CreateDefault(new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore
+        });
+    }
+
+    public void WriteLine(object obj)
+    {
+        _serializer.Serialize(_writer, obj);
+        _writer.WriteLine();
+        _lines++;
+
+        if ((_lines % 2000) == 0)
+            _writer.Flush();
+    }
+
+    public void Dispose() => _writer?.Dispose();
+}
+
+private static string NormalizeKey(string s)
+{
+    if (string.IsNullOrWhiteSpace(s)) return "";
+    var chars = s.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray();
+    return new string(chars);
+}
+
+private static string NormalizeGuidLike(string value)
+{
+    if (string.IsNullOrWhiteSpace(value)) return value;
+    var v = value.Trim().Trim('{', '}');
+
+    if (Guid.TryParse(v, out var g))
+        return g.ToString("D");
+
+    // Revit UniqueId: GUID + suffix (often "-0000xxxx")
+    if (v.Length >= 36 && Guid.TryParse(v.Substring(0, 36), out var rg))
+        return rg.ToString("D") + v.Substring(36);
+
+    return v;
+}
+
+private static string? SourceKeyPart(string? sourceFile, DataScraperSourceFileKeyMode mode)
+{
+    if (string.IsNullOrWhiteSpace(sourceFile)) return null;
+    var s = sourceFile.Trim();
+    return mode == DataScraperSourceFileKeyMode.FileNameOnly ? Path.GetFileName(s) : s;
+}
+
+private sealed class IdentityProbe
+{
+    public string? SourceFile;
+    public string? RevitUniqueId;
+    public string? RevitElementId;
+    public string? IfcGlobalId;
+    public string? DwgHandle;
+
+    public void Observe(string propName, IReadOnlyList<string> values, DataScraperJsonlExportSettings opt)
+    {
+        if (values == null || values.Count == 0) return;
+        var v = values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+        if (string.IsNullOrWhiteSpace(v)) return;
+
+        var k = NormalizeKey(propName);
+
+        if (opt.IncludeSourceFile && SourceFile == null)
+        {
+            if (k == "sourcefile" || k == "sourcefilename" || k == "filename" || k == "modelfilename")
+                SourceFile = v;
+        }
+
+        if (opt.IncludeRevitIds)
+        {
+            if (RevitUniqueId == null && (k == "uniqueid" || k == "uniqueid"))
+                RevitUniqueId = v;
+
+            if (RevitElementId == null && (k == "elementid" || k == "elementid"))
+                RevitElementId = v;
+        }
+
+        if (opt.IncludeIfcIds)
+        {
+            if (IfcGlobalId == null && (k == "globalid" || k == "ifcguid" || k == "ifcglobalid"))
+                IfcGlobalId = v;
+        }
+
+        if (opt.IncludeDwgIds)
+        {
+            if (DwgHandle == null && (k == "handle" || k == "entityhandle" || k == "objecthandle"))
+                DwgHandle = v;
+        }
+    }
+}
+
+private static (string primaryKey, string primaryKeyType, Dictionary<string, string> ids, string? sourceFile)
+    BuildIdentity(Autodesk.Navisworks.Api.ModelItem item, string itemPath, string docFile, IdentityProbe probe, DataScraperJsonlExportSettings opt)
+{
+    var ids = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    var instanceGuid = item.InstanceGuid.ToString("D");
+    if (opt.IncludeNavisworksInstanceGuid)
+        ids["navis.instanceGuid"] = instanceGuid;
+
+    string? sourceFile = opt.IncludeSourceFile ? probe.SourceFile : null;
+
+    if (opt.IncludeRevitIds)
+    {
+        if (!string.IsNullOrWhiteSpace(probe.RevitUniqueId))
+            ids["revit.uniqueId"] = opt.NormalizeIds ? NormalizeGuidLike(probe.RevitUniqueId) : probe.RevitUniqueId.Trim();
+
+        if (!string.IsNullOrWhiteSpace(probe.RevitElementId))
+            ids["revit.elementId"] = probe.RevitElementId.Trim();
+    }
+
+    if (opt.IncludeIfcIds && !string.IsNullOrWhiteSpace(probe.IfcGlobalId))
+    {
+        // NOTE: IFC GlobalId is not a GUID; do NOT “normalize” it like a GUID.
+        ids["ifc.globalId"] = probe.IfcGlobalId.Trim();
+    }
+
+    if (opt.IncludeDwgIds && !string.IsNullOrWhiteSpace(probe.DwgHandle))
+        ids["dwg.handle"] = probe.DwgHandle.Trim();
+
+    // best external id priority
+    string? bestIdKey = null;
+    if (ids.ContainsKey("revit.uniqueId")) bestIdKey = "revit.uniqueId";
+    else if (ids.ContainsKey("ifc.globalId")) bestIdKey = "ifc.globalId";
+    else if (ids.ContainsKey("revit.elementId")) bestIdKey = "revit.elementId";
+    else if (ids.ContainsKey("dwg.handle")) bestIdKey = "dwg.handle";
+
+    var bestIdValue = bestIdKey != null ? ids[bestIdKey] : null;
+
+    var srcKey = SourceKeyPart(sourceFile, opt.SourceFileKeyMode) ?? Path.GetFileName(docFile);
+
+    switch (opt.PrimaryKeyMode)
+    {
+        case DataScraperPrimaryKeyMode.InstanceGuid:
+            return (instanceGuid, "navis.instanceGuid", ids, sourceFile);
+
+        case DataScraperPrimaryKeyMode.BestExternalId:
+            return (bestIdValue ?? instanceGuid, bestIdKey ?? "navis.instanceGuid", ids, sourceFile);
+
+        case DataScraperPrimaryKeyMode.SourceFilePlusBestExternalId:
+            var right = bestIdValue ?? instanceGuid;
+            var rightType = bestIdKey ?? "navis.instanceGuid";
+            return ($"{srcKey}|{right}", $"composite({opt.SourceFileKeyMode},{rightType})", ids, sourceFile);
+
+        case DataScraperPrimaryKeyMode.ItemPath:
+            return (itemPath, "item.path", ids, sourceFile);
+
+        default:
+            return (instanceGuid, "navis.instanceGuid", ids, sourceFile);
+    }
+}
+```
+
+**Then update your scrape loop** in `RunScrapeAsync` so it optionally streams JSONL:
+
+* Open `JsonlWriter` when enabled+streaming
+* For raw rows: write one line per property value
+* For item documents: build nested dict then write once per item
+* Keep `RawEntries` only up to `PreviewRowLimit`
+
+(You already have the core loops—Codex should integrate these exactly where you iterate `PropertyCategories` / `Properties`.)
+
+---
+
+### 3) UI: DataScraperWindow.xaml + .cs
+
+Add an “Export (JSONL)” section in Summary and bind to `Settings.JsonlExport.*`.
+
+Key UI behaviors:
+
+* If **Mode = ItemDocuments**: explain “one line per item”.
+* If condition “StreamDuringScrape” is checked, show: “Export will be written during next scrape; Raw Entries grid will only keep preview rows.”
+* Tooltips:
+
+  * **Primary Key**: recommends Source+External for appended models / DB joins
+  * **Include Revit/IFC/DWG**: explains it depends on importer/exporter
+  * **Normalize IDs**: explains it canonicalizes GUID-like strings only
+
+Codex can mirror the Data Scraper styling (cards, compact spacing) since it’s already your baseline.
+
+---
+
+## Practical note on “source file name”
+
+For appended models, Navisworks sometimes exposes source file info inconsistently. That’s why this design:
+
+* Writes **Document file** (always known)
+* Tries to capture **Source File** from properties (best-effort)
+* Still provides stable fallback keys if it’s missing
+
+If you tell me what you see in the Properties pane for source file (exact category/property labels in your NWC/IFC/DWG cases), I can tighten the probe list so it hits ~100% for your datasets.
+
+---
+
+If you want, I can also give you a **default JSON schema** recommendation for the DB (“raw rows” table schema + “item docs” schema) so Codex writes fields in the most query-friendly names.
+
+
+Below is a **default, DB-friendly JSONL schema** recommendation for both export modes (Raw Rows + Item Documents), designed specifically for “mixed-source Navisworks reality” (Revit→NWC, IFC, DWG, federated append models) and for later ingest into **either**:
+
+* a relational/analytics DB (Postgres, SQL Server, BigQuery/Snowflake), and/or
+* a document/search index (OpenSearch/Elastic), and/or
+* AI retrieval (vectorization later).
+
+The core idea: **keep the JSON stable and flat-ish**, avoid dynamic JSON keys, and always include enough identity to join across sessions/models.
+
+---
+
+# 1) Common metadata fields (present on every JSONL line)
+
+These fields should appear in both export modes.
+
+### Required
+
+* `schemaVersion` *(int)*
+  Start at `1` and never change semantics without bumping it.
+* `recordType` *(string)*
+  `"rawRow"` or `"itemDoc"`.
+* `sessionId` *(string uuid)*
+  Your `ScrapeSession.Id`.
+* `sessionTimestampUtc` *(string ISO-8601)*
+  `ScrapeSession.Timestamp` converted to UTC once at start of run.
+* `profileName` *(string)*
+* `scopeType` *(string)*
+  `"EntireModel"`, `"CurrentSelection"`, etc.
+* `scopeDescription` *(string)*
+  Human-readable.
+* `primaryKey` *(string)*
+  The computed “best join key” based on the user’s settings.
+* `primaryKeyType` *(string)*
+  Ex: `"navis.instanceGuid"`, `"revit.uniqueId"`, `"ifc.globalId"`, or `"composite(filename,revit.uniqueId)"`.
+* `itemPath` *(string)*
+  Your display/hierarchy path (even if it’s currently only display name, still keep it).
+
+### Strongly recommended (because federated models)
+
+* `documentFile` *(string)*
+  Active NWF/NWD file path or name.
+* `documentFileKey` *(string)*
+  Usually filename only, used for joins/partitioning.
+* `sourceFile` *(string|null)*
+  Best-effort source model filename/path if you can infer it from properties.
+* `sourceFileKey` *(string|null)*
+  Filename-only or fullpath depending on settings.
+
+### Identity bundle (export as BOTH convenience fields + an `ids` map)
+
+To make SQL and indexing easy, I recommend you output *both*:
+
+**Convenience top-level fields** *(nullable)*:
+
+* `navisInstanceGuid`
+* `revitUniqueId`
+* `revitElementId`
+* `ifcGlobalId`
+* `dwgHandle`
+
+…and also a single `ids` object:
+
+```json
+"ids": {
+  "navis.instanceGuid": "...",
+  "revit.uniqueId": "...",
+  "revit.elementId": "...",
+  "ifc.globalId": "...",
+  "dwg.handle": "..."
+}
+```
+
+Why both?
+
+* In SQL/BigQuery, top-level columns are faster/easier to index.
+* `ids` is future-proof for “new ID types” without schema migrations.
+
+---
+
+# 2) Raw Rows JSONL schema (property-per-line)
+
+This is your “DB tables / analytics” format.
+
+## Record shape (RawRow v1)
+
+Additional fields for `"recordType":"rawRow"`:
+
+* `category` *(string)*
+* `property` *(string)*
+* `dataType` *(string)*
+  Use Navisworks value datatype string if available.
+* `value` *(string|null)*
+  Always store as string for consistency.
+* `valueNorm` *(string|null)*
+  Optional but useful: trimmed + maybe lowercased.
+* `valueNum` *(number|null)*
+  Optional: parse numeric where possible.
+* `valueBool` *(bool|null)*
+  Optional.
+* `valueDateUtc` *(string ISO|null)*
+  Optional.
+
+### Example RawRow line
+
+```json
+{
+  "schemaVersion": 1,
+  "recordType": "rawRow",
+  "sessionId": "3b0d2a91-7a4e-4a0d-a77d-2c42ad9d4b64",
+  "sessionTimestampUtc": "2026-01-27T03:21:04.112Z",
+  "profileName": "Default",
+  "scopeType": "EntireModel",
+  "scopeDescription": "Entire Model",
+  "documentFile": "C:\\Models\\Federated.nwf",
+  "documentFileKey": "Federated.nwf",
+  "sourceFile": "C:\\Models\\CRRTSD_ARC.nwc",
+  "sourceFileKey": "CRRTSD_ARC.nwc",
+
+  "primaryKey": "CRRTSD_ARC.nwc|7da9143a-b5fa-4e70-bb3a-b9e91defbccb",
+  "primaryKeyType": "composite(filename,navis.instanceGuid)",
+
+  "navisInstanceGuid": "7da9143a-b5fa-4e70-bb3a-b9e91defbccb",
+  "revitUniqueId": null,
+  "revitElementId": null,
+  "ifcGlobalId": null,
+  "dwgHandle": null,
+  "ids": {
+    "navis.instanceGuid": "7da9143a-b5fa-4e70-bb3a-b9e91defbccb"
+  },
+
+  "itemPath": "Model\\Level 02\\Doors\\HSL_DOR_double_panel_3D_CRRTSD",
+
+  "category": "Element",
+  "property": "Name",
+  "dataType": "String",
+  "value": "HSL_DOR_double_panel_3D_CRRTSD",
+  "valueNorm": "hsl_dor_double_panel_3d_crrtsd"
+}
+```
+
+### Why Raw Rows is “best default”
+
+* It scales linearly and streams perfectly.
+* You can compute QA rules and statistics efficiently.
+* You can always reconstruct item documents later by grouping on `(sessionId, primaryKey)`.
+
+---
+
+# 3) Item Documents JSONL schema (one line per item)
+
+This is your “document store / search indexing / AI-ready per-element blob” format.
+
+## Critical recommendation: don’t use dynamic JSON keys for category/property
+
+Avoid this:
+
+```json
+"properties": { "Element": { "Name": ["..."] } }
+```
+
+Because:
+
+* Elastic/OpenSearch mapping can explode (dynamic fields)
+* Querying becomes awkward (property names become field names)
+
+## Record shape (ItemDoc v1)
+
+Additional fields for `"recordType":"itemDoc"`:
+
+* `properties` *(array)* of:
+
+  * `category` *(string)*
+  * `property` *(string)*
+  * `dataType` *(string)*
+  * `values` *(array of string)*
+
+Optional:
+
+* `propertyCount` *(int)*
+* `categoryCount` *(int)*
+
+### Example ItemDoc line
+
+```json
+{
+  "schemaVersion": 1,
+  "recordType": "itemDoc",
+  "sessionId": "3b0d2a91-7a4e-4a0d-a77d-2c42ad9d4b64",
+  "sessionTimestampUtc": "2026-01-27T03:21:04.112Z",
+  "profileName": "Default",
+  "scopeType": "EntireModel",
+  "scopeDescription": "Entire Model",
+  "documentFile": "C:\\Models\\Federated.nwf",
+  "documentFileKey": "Federated.nwf",
+  "sourceFile": "C:\\Models\\CRRTSD_ARC.nwc",
+  "sourceFileKey": "CRRTSD_ARC.nwc",
+
+  "primaryKey": "CRRTSD_ARC.nwc|7da9143a-b5fa-4e70-bb3a-b9e91defbccb",
+  "primaryKeyType": "composite(filename,navis.instanceGuid)",
+
+  "navisInstanceGuid": "7da9143a-b5fa-4e70-bb3a-b9e91defbccb",
+  "ids": { "navis.instanceGuid": "7da9143a-b5fa-4e70-bb3a-b9e91defbccb" },
+
+  "itemPath": "Model\\Level 02\\Doors\\HSL_DOR_double_panel_3D_CRRTSD",
+
+  "propertyCount": 123,
+  "properties": [
+    { "category": "Element", "property": "Name", "dataType": "String", "values": ["HSL_DOR_double_panel_3D_CRRTSD"] },
+    { "category": "Element", "property": "Category", "dataType": "String", "values": ["Doors"] }
+  ]
+}
+```
+
+### Why this shape is “search index friendly”
+
+* The index mapping stays stable.
+* You can run nested queries like “category=Element AND property=Name AND values contains X”.
+
+---
+
+# 4) Default relational DB schema (Postgres example)
+
+This is a practical “works everywhere” layout that maps cleanly from JSONL.
+
+## 4.1 `scrape_sessions` table
+
+One row per run.
+
+```sql
+create table if not exists scrape_sessions (
+  session_id uuid primary key,
+  session_timestamp_utc timestamptz not null,
+  profile_name text not null,
+  scope_type text not null,
+  scope_description text not null,
+  document_file text null,
+  document_file_key text null,
+  source_file text null,
+  source_file_key text null,
+  schema_version int not null default 1,
+  created_at timestamptz not null default now()
+);
+```
+
+## 4.2 `scrape_raw_rows` table
+
+This is the main analytics/QA table.
+
+```sql
+create table if not exists scrape_raw_rows (
+  id bigserial primary key,
+  session_id uuid not null references scrape_sessions(session_id),
+  session_timestamp_utc timestamptz not null,
+
+  profile_name text not null,
+  scope_type text not null,
+  scope_description text not null,
+
+  document_file_key text null,
+  source_file_key text null,
+
+  primary_key text not null,
+  primary_key_type text not null,
+
+  navis_instance_guid uuid null,
+  revit_unique_id text null,
+  revit_element_id text null,
+  ifc_global_id text null,
+  dwg_handle text null,
+
+  item_path text null,
+
+  category text not null,
+  property text not null,
+  data_type text null,
+
+  value text null,
+  value_norm text null,
+  value_num double precision null,
+  value_bool boolean null,
+  value_date_utc timestamptz null
+);
+```
+
+### Indexes you will actually use
+
+```sql
+create index if not exists ix_rows_session on scrape_raw_rows(session_id);
+create index if not exists ix_rows_pk on scrape_raw_rows(primary_key);
+create index if not exists ix_rows_cat_prop on scrape_raw_rows(category, property);
+create index if not exists ix_rows_revit_uid on scrape_raw_rows(revit_unique_id) where revit_unique_id is not null;
+create index if not exists ix_rows_ifc_gid on scrape_raw_rows(ifc_global_id) where ifc_global_id is not null;
+```
+
+If you want “find anything by value quickly”, add a trigram index:
+
+```sql
+-- requires pg_trgm extension
+create extension if not exists pg_trgm;
+create index if not exists ix_rows_value_trgm on scrape_raw_rows using gin (value gin_trgm_ops);
+```
+
+---
+
+# 5) Default document/search index mapping (OpenSearch/Elastic concept)
+
+If you index **ItemDoc JSONL**, aim for:
+
+* `sessionId`: keyword
+* `primaryKey`: keyword
+* `documentFileKey/sourceFileKey`: keyword
+* `properties`: nested type:
+
+  * `category`: keyword
+  * `property`: keyword
+  * `dataType`: keyword
+  * `values`: keyword (and optionally text)
+
+This keeps your mapping stable and avoids field explosion.
+
+---
+
+# 6) What Codex should change in your exporter to match this schema
+
+If your current “Item documents” export uses nested dictionaries (category→property→values), instruct Codex to **switch it to the `properties[]` array format** above. That is the single biggest “DB-friendly” improvement.
+
+Also, if you currently only output `ids` as a dictionary, instruct Codex to also emit the top-level convenience columns:
+
+* `navisInstanceGuid`, `revitUniqueId`, `revitElementId`, `ifcGlobalId`, `dwgHandle`
+
+Those five top-level fields will pay dividends immediately once you ingest into SQL.
+
+---
+
+# 7) Default choices you should preselect in UI
+
+* Export enabled: **off** by default (safe)
+* Stream during scrape: **on**
+* Export mode: **Raw rows** (DB tables)
+* gzip: **on** for large models
+* Primary key: **SourceFile + BestExternalId**
+* Normalize IDs: **on**
+* Identity includes:
+
+  * include document file: on
+  * include source file: on
+  * include navis instance guid: on
+  * include revit ids: on
+  * include ifc ids: on
+  * include dwg ids: on
+
+---
+
+If you want, I can turn the above into a **strict “Codex work order patch”** that updates your JSONL writer to exactly emit these fields (including the array-based itemDoc properties) without changing the rest of the scraper logic.
+
+
+Yep — let’s lock this down into a **single, precise Codex work order** that updates your Data Scraper JSONL export to emit the **stable DB schema** we discussed, **and** exposes the identity/primary-key options as **Data Scraper settings** (because Revit/IFC/DWG behave differently).
+
+Below is:
+
+1. A **Codex work order** (file-by-file, one pass)
+2. The **exact record schema** Codex must output
+3. **Code blocks** you can paste into the relevant files (Codex can integrate them)
+
+Everything is designed to work with your current files:
+
+* `DataScraperModels.cs`
+* `DataScraperService.cs`
+* `DataScraperWindow.xaml`
+* `DataScraperWindow.xaml.cs`
+
+---
+
+# 1) Codex Work Order (one-pass, sequenced checklist)
+
+Paste this into Codex:
+
+> ## CODEX WORK ORDER — Data Scraper: JSONL schema v1 + Identity settings in UI
+>
+> **Goal:** Implement DB-friendly JSONL export (streamed during scrape) with two modes (Raw Rows / Item Docs), optional gzip, and “Identity & Keys” settings in Data Scraper UI. Output schema must match “MicroEng DataScraper JSONL Schema v1” exactly (see section below).
+>
+> ### A) Update `DataScraperModels.cs`
+>
+> 1. Add enums:
+>
+>    * `DataScraperJsonlExportMode { RawRows, ItemDocuments }`
+>    * `DataScraperPrimaryKeyMode { InstanceGuid, BestExternalId, SourceFilePlusBestExternalId, ItemPath }`
+>    * `DataScraperPathKeyMode { FileNameOnly, FullPath }`
+> 2. Add class `DataScraperJsonlExportSettings` (plain POCO is fine) with:
+>
+>    * `Enabled`, `StreamDuringScrape`, `Gzip`, `Mode`, `OutputPath`
+>    * `PrimaryKeyMode`, `SourceFileKeyMode`
+>    * `IncludeDocumentFile`, `IncludeSourceFile`
+>    * `IncludeNavisworksInstanceGuid`, `IncludeRevitIds`, `IncludeIfcIds`, `IncludeDwgIds`
+>    * `NormalizeIds`
+>    * `KeepRawEntriesInMemory`, `PreviewRawRowLimit`
+> 3. Extend `ScrapeSession` with:
+>
+>    * `DocumentFile`, `DocumentFileKey`
+>    * `JsonlExportEnabled`, `JsonlExportPath`, `JsonlExportMode`, `JsonlExportGzip`, `JsonlPrimaryKeyMode`, `JsonlLinesWritten`, `JsonlStreamedDuringScrape`
+>    * `RawEntriesTruncated` (bool)
+>
+> ### B) Update `DataScraperWindow.xaml` (add “Export” tab with settings + tooltips)
+>
+> Add a new TabItem “Export” to the existing TabControl, using same styling/cards as Data Scraper.
+> Include:
+>
+> * Enable JSONL export checkbox
+> * Stream during scrape checkbox (default on)
+> * Mode dropdown: Raw Rows / Item Documents
+> * GZip checkbox
+> * Output path textbox + Browse button
+> * Identity & Keys card:
+>
+>   * Primary Key dropdown (InstanceGuid / BestExternalId / SourceFile+BestExternalId / ItemPath)
+>   * Source key mode dropdown (FileNameOnly / FullPath)
+>   * Include checkboxes: DocumentFile, SourceFile, Navis Guid, Revit IDs, IFC IDs, DWG IDs
+>   * Normalize IDs checkbox (tooltip: normalizes GUID-like IDs but does NOT alter IFC GlobalId)
+> * Memory card:
+>
+>   * Keep raw entries in memory checkbox
+>   * PreviewRawRowLimit textbox (used if not keeping all rows)
+>     Add tooltips for “what to pick” depending on Revit/IFC/DWG.
+>
+> ### C) Update `DataScraperWindow.xaml.cs`
+>
+> 1. Implement Browse click handler using `Microsoft.Win32.SaveFileDialog`.
+> 2. In `Run_Click`, build a `DataScraperJsonlExportSettings` from UI and pass it to a new overload:
+>
+>    * `_service.Scrape(profile, scope, description, items, exportSettings)`
+> 3. Update status text/log to include export path + lines written when enabled.
+> 4. In `ShowProperties(session)`, show a hint if `RawEntriesTruncated==true` so the user understands why Raw Data tab is partial.
+>
+> ### D) Update `DataScraperService.cs`
+>
+> 1. Keep existing `Scrape(...)` signature for compatibility, but implement a new overload:
+>
+>    * `Scrape(..., DataScraperJsonlExportSettings export)`
+> 2. Implement JSONL Schema v1 output (exact fields and names):
+>
+>    * Always include common metadata fields.
+>    * Output `ids` map + also top-level convenience id fields.
+>    * ItemDocuments must output `properties` as an ARRAY of objects (NOT nested dictionaries).
+> 3. Implement identity extraction while scanning each item:
+>
+>    * Probe for source file + Revit/IFC/DWG ids by property name heuristics (normalize prop names by removing non-alphanumerics, lowercasing).
+>    * Build `ids` dictionary:
+>
+>      * `navis.instanceGuid`
+>      * `revit.uniqueId` (if found)
+>      * `revit.elementId` (if found)
+>      * `ifc.globalId` (if found; DO NOT normalize)
+>      * `dwg.handle` (if found)
+>    * Normalize GUID-like values only when NormalizeIds=true:
+>
+>      * Guid.TryParse -> canonical D
+>      * Revit UniqueId -> canonicalize first 36 chars if GUID, keep suffix
+>      * never modify IFC GlobalId
+> 4. Primary key calculation:
+>
+>    * InstanceGuid: navis.instanceGuid
+>    * BestExternalId: revit.uniqueId > ifc.globalId > revit.elementId > dwg.handle > navis.instanceGuid
+>    * SourceFilePlusBestExternalId: `${sourceFileKey}|${bestExternalOrGuid}`
+>    * ItemPath: itemPath
+> 5. Streaming strategy:
+>
+>    * If export enabled, open writer once at start and stream per item.
+>    * Buffer per-item property rows in a small list so primaryKey is computed before writing raw rows.
+> 6. Memory:
+>
+>    * If KeepRawEntriesInMemory: keep all RawEntries.
+>    * Else keep only up to PreviewRawRowLimit and set session.RawEntriesTruncated=true when exceeded.
+>
+> ### E) Build + quick verification
+>
+> * dotnet build
+> * Run Data Scraper with export enabled:
+>
+>   * RawRows mode should output many lines (1 per property value)
+>   * ItemDocuments should output 1 line per item with `properties` array
+> * Confirm each line has `schemaVersion`, `recordType`, `primaryKey`, `ids`, etc.
+
+---
+
+# 2) “MicroEng DataScraper JSONL Schema v1” (what MUST be emitted)
+
+### Common fields (every line)
+
+* `schemaVersion` (int) = 1
+* `recordType` = `"rawRow"` or `"itemDoc"`
+* `sessionId` (uuid string)
+* `sessionTimestampUtc` (ISO string or DateTime UTC)
+* `profileName`
+* `scopeType`
+* `scopeDescription`
+* `documentFile` (optional if setting off)
+* `documentFileKey` (filename or fullpath depending on setting)
+* `sourceFile` (optional)
+* `sourceFileKey` (optional; filename or fullpath depending on setting)
+* `primaryKey`
+* `primaryKeyType`
+* top-level convenience IDs (nullable):
+
+  * `navisInstanceGuid`
+  * `revitUniqueId`
+  * `revitElementId`
+  * `ifcGlobalId`
+  * `dwgHandle`
+* `ids` (object map)
+* `itemPath`
+
+### RawRows-only fields
+
+* `category`
+* `property`
+* `dataType`
+* `value`
+* optional typed helpers (only when parse works):
+
+  * `valueNorm`
+  * `valueNum`
+  * `valueBool`
+  * `valueDateUtc`
+
+### ItemDocuments-only fields
+
+* `propertyCount`
+* `properties`: **array** of `{ category, property, dataType, values[] }`
+
+---
+
+# 3) Concrete code blocks to integrate
+
+## 3.1 Patch `DataScraperModels.cs`
+
+Add these inside `namespace MicroEng.Navisworks` (below existing classes is fine):
+
+```csharp
+internal enum DataScraperJsonlExportMode
+{
+    RawRows = 0,
+    ItemDocuments = 1
+}
+
+internal enum DataScraperPrimaryKeyMode
+{
+    InstanceGuid = 0,
+    BestExternalId = 1,
+    SourceFilePlusBestExternalId = 2,
+    ItemPath = 3
+}
+
+internal enum DataScraperPathKeyMode
+{
+    FileNameOnly = 0,
+    FullPath = 1
+}
+
+internal sealed class DataScraperJsonlExportSettings
+{
+    public bool Enabled { get; set; }
+    public bool StreamDuringScrape { get; set; } = true;
+
+    public DataScraperJsonlExportMode Mode { get; set; } = DataScraperJsonlExportMode.RawRows;
+    public bool Gzip { get; set; }
+    public string OutputPath { get; set; } = "";
+
+    public DataScraperPrimaryKeyMode PrimaryKeyMode { get; set; } = DataScraperPrimaryKeyMode.SourceFilePlusBestExternalId;
+    public DataScraperPathKeyMode SourceFileKeyMode { get; set; } = DataScraperPathKeyMode.FileNameOnly;
+
+    public bool IncludeDocumentFile { get; set; } = true;
+    public bool IncludeSourceFile { get; set; } = true;
+
+    public bool IncludeNavisworksInstanceGuid { get; set; } = true;
+    public bool IncludeRevitIds { get; set; } = true;
+    public bool IncludeIfcIds { get; set; } = true;
+    public bool IncludeDwgIds { get; set; } = true;
+
+    public bool NormalizeIds { get; set; } = true;
+
+    public bool KeepRawEntriesInMemory { get; set; } = true;
+    public int PreviewRawRowLimit { get; set; } = 50000;
+}
+```
+
+Extend `ScrapeSession` in the same file (add these properties):
+
+```csharp
+public string DocumentFile { get; set; }
+public string DocumentFileKey { get; set; }
+
+public bool JsonlExportEnabled { get; set; }
+public string JsonlExportPath { get; set; }
+public string JsonlExportMode { get; set; }
+public bool JsonlExportGzip { get; set; }
+public string JsonlPrimaryKeyMode { get; set; }
+public long JsonlLinesWritten { get; set; }
+public bool JsonlStreamedDuringScrape { get; set; }
+
+public bool RawEntriesTruncated { get; set; }
+```
+
+---
+
+## 3.2 Patch `DataScraperService.cs` (add JSONL writer + schema output)
+
+At the top add these `using`s:
+
+```csharp
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.IO.Compression;
+using System.Text;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
+```
+
+Then add these private DTOs + writer inside the `MicroEng.Navisworks` namespace (below `DataScraperService` class is OK):
+
+```csharp
+internal sealed class JsonlItemDocProperty
+{
+    public string Category { get; set; }
+    public string Property { get; set; }
+    public string DataType { get; set; }
+    public List<string> Values { get; set; }
+}
+
+internal sealed class JsonlRawRowRecord
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string RecordType { get; set; } = "rawRow";
+
+    public Guid SessionId { get; set; }
+    public DateTime SessionTimestampUtc { get; set; }
+
+    public string ProfileName { get; set; }
+    public string ScopeType { get; set; }
+    public string ScopeDescription { get; set; }
+
+    public string DocumentFile { get; set; }
+    public string DocumentFileKey { get; set; }
+    public string SourceFile { get; set; }
+    public string SourceFileKey { get; set; }
+
+    public string PrimaryKey { get; set; }
+    public string PrimaryKeyType { get; set; }
+
+    public string NavisInstanceGuid { get; set; }
+    public string RevitUniqueId { get; set; }
+    public string RevitElementId { get; set; }
+    public string IfcGlobalId { get; set; }
+    public string DwgHandle { get; set; }
+
+    public Dictionary<string, string> Ids { get; set; }
+    public string ItemPath { get; set; }
+
+    public string Category { get; set; }
+    public string Property { get; set; }
+    public string DataType { get; set; }
+
+    public string Value { get; set; }
+    public string ValueNorm { get; set; }
+    public double? ValueNum { get; set; }
+    public bool? ValueBool { get; set; }
+    public DateTime? ValueDateUtc { get; set; }
+}
+
+internal sealed class JsonlItemDocRecord
+{
+    public int SchemaVersion { get; set; } = 1;
+    public string RecordType { get; set; } = "itemDoc";
+
+    public Guid SessionId { get; set; }
+    public DateTime SessionTimestampUtc { get; set; }
+
+    public string ProfileName { get; set; }
+    public string ScopeType { get; set; }
+    public string ScopeDescription { get; set; }
+
+    public string DocumentFile { get; set; }
+    public string DocumentFileKey { get; set; }
+    public string SourceFile { get; set; }
+    public string SourceFileKey { get; set; }
+
+    public string PrimaryKey { get; set; }
+    public string PrimaryKeyType { get; set; }
+
+    public string NavisInstanceGuid { get; set; }
+    public string RevitUniqueId { get; set; }
+    public string RevitElementId { get; set; }
+    public string IfcGlobalId { get; set; }
+    public string DwgHandle { get; set; }
+
+    public Dictionary<string, string> Ids { get; set; }
+    public string ItemPath { get; set; }
+
+    public int PropertyCount { get; set; }
+    public List<JsonlItemDocProperty> Properties { get; set; }
+}
+
+internal sealed class JsonlStreamWriter : IDisposable
+{
+    private readonly StreamWriter _writer;
+    private readonly JsonSerializer _ser;
+    public long LinesWritten { get; private set; }
+
+    public JsonlStreamWriter(string path, bool gzip)
+    {
+        Stream stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        if (gzip)
+            stream = new GZipStream(stream, CompressionLevel.Optimal, leaveOpen: false);
+
+        _writer = new StreamWriter(stream, new UTF8Encoding(false), 1 << 16, leaveOpen: false);
+        _ser = JsonSerializer.Create(new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore,
+            Formatting = Formatting.None,
+            ContractResolver = new CamelCasePropertyNamesContractResolver()
+        });
+    }
+
+    public void Write(object record)
+    {
+        _ser.Serialize(_writer, record);
+        _writer.WriteLine();
+        LinesWritten++;
+
+        if ((LinesWritten % 4096) == 0)
+            _writer.Flush();
+    }
+
+    public void Dispose()
+    {
+        try { _writer.Flush(); } catch { }
+        _writer.Dispose();
+    }
+}
+```
+
+Now update `DataScraperService` by adding an overload and routing the old method to it:
+
+```csharp
+public ScrapeSession Scrape(string profileName, ScrapeScopeType scopeType, string scopeDescription, IEnumerable<ModelItem> items)
+{
+    return Scrape(profileName, scopeType, scopeDescription, items, export: null);
+}
+
+public ScrapeSession Scrape(string profileName, ScrapeScopeType scopeType, string scopeDescription, IEnumerable<ModelItem> items, DataScraperJsonlExportSettings export)
+{
+    // Codex: implement the full streaming + identity extraction logic here using the schema above.
+    // (The key is: buffer per-item properties so primaryKey is computed before writing rows.)
+}
+```
+
+Codex should implement the overload using the Work Order rules (identity probe, primary key logic, keep/truncate raw entries).
+
+---
+
+## 3.3 Patch `DataScraperWindow.xaml` (add Export tab)
+
+Add a new TabItem after “Raw Data”:
+
+* “Export” tab with cards and tooltips as specified in the work order.
+* Use standard `ComboBox`, `CheckBox`, `TextBox`, `ui:Button`, `ui:Card`.
+* Bind enable/disable with `IsEnabled="{Binding IsChecked, ElementName=...}"` patterns like you already use elsewhere.
+
+---
+
+## 3.4 Patch `DataScraperWindow.xaml.cs` (build export settings + pass to service)
+
+Add:
+
+* `BrowseExport_Click` handler (SaveFileDialog)
+* `BuildExportSettingsFromUi()` method returning `DataScraperJsonlExportSettings` or null
+* Call `_service.Scrape(..., exportSettings)`
+
+Also: if `RawEntriesTruncated`, show a hint in Raw Data tab summary.
+
+---
+
+# 4) Important behavior choices (do these exactly)
+
+### What the user should pick (tooltips)
+
+* **Revit → NWC:** Primary key = `SourceFilePlusBestExternalId`, include Revit IDs, normalize ON
+* **IFC:** include IFC IDs, normalize ON but do NOT alter IFC GlobalId
+* **DWG:** include DWG handle; primary key often needs `SourceFilePlusBestExternalId`
+
+### Why not rely only on Navis InstanceGuid
+
+It’s good *inside one scrape session*, but it’s not guaranteed stable across exports / merges. That’s why the primary key selector matters.
+
+---
+
+If you want, I can also give you a **strict property-name probe list** tuned to what Navisworks typically exposes for Revit/IFC/DWG (e.g., likely category + property label combinations). That’s the next lever to push “sourceFile” and “revitUniqueId/ifcGlobalId” capture closer to 100% in your real models.
+
+
+Below is a **tight “probe list” you can hard‑code** (with priority order) to reliably extract **Source File**, **Revit IDs**, **IFC GlobalId**, and **DWG Handle** from Navisworks properties — tuned to what Navisworks typically exposes via the Properties window / API.
+
+I’m giving you:
+
+1. The **exact category/property targets** (what to probe first vs fallback)
+2. **Normalized-key rules** (so you survive minor naming variations + internal names)
+3. A **Codex-ready “work order”** to implement the probe list cleanly
+4. A **quick validation method** to confirm it’s working on your real models
+
+Key references:
+
+* Navisworks API `DataPropertyNames` includes canonical names like **Item/Source File Name**, **Item/GUID**, **Revit Element Id / Value**, **AutoCad Entity Handle / Value**. ([apidocs.co][1])
+* Revit `UniqueId` shows up under **Element Properties → UniqueId** when “Convert element properties” is enabled during NWC export / File Readers settings. ([The Field of View][2])
+* IFC GlobalId commonly appears as **IFC / GLOBALID**. ([help.revizto.com][3])
+* “Item > Source File Name” is associated with internal naming like `LcOaPartitionSourceFilename` in some pipelines. ([Stack Overflow][4])
+* Autodesk support repeatedly emphasizes Navisworks GUIDs won’t match Revit’s unique identifier; you want **Revit UniqueId** when available. ([Autodesk][5])
+
+---
+
+## 1) “Strict probe list” by identity field (priority order)
+
+### A) Source model file (what file the item came from)
+
+**Primary (best)**
+
+1. **Category:** `Item`
+   **Property:** `Source File Name` *(API name: `DataPropertyNames.ItemSourceFileName`)* ([apidocs.co][1])
+2. **Category:** `Item`
+   **Property:** `Source File` *(API name: `DataPropertyNames.ItemSourceFile`)* ([apidocs.co][1])
+
+**Fallbacks (use lower confidence)**
+3. **Category:** `Item`
+**Property:** `File Name` *(API name: `DataPropertyNames.ItemFileName`)* ([apidocs.co][1])
+*Note:* sometimes this is not the “source model” but still useful for grouping.
+4. **Internal key fallback (if you capture internal names):**
+
+* `LcOaPartitionSourceFilename` (or normalized equivalent) ([Stack Overflow][4])
+
+**Recommendation**
+
+* Always store both:
+
+  * `documentFile` (the current NWF/NWD)
+  * `sourceFile` (best-effort from Item tab)
+* Your **default primary key** should remain `sourceFileKey | bestExternalId` when `sourceFileKey` exists.
+
+---
+
+### B) Navisworks Instance GUID (session-local but always present)
+
+**Primary**
+
+* **Direct API:** `ModelItem.InstanceGuid` (best, doesn’t depend on properties)
+* **Category:** `Item`
+  **Property:** `GUID` *(API name: `DataPropertyNames.ItemGuid`)* ([apidocs.co][1])
+
+---
+
+### C) Revit IDs
+
+#### 1) Revit UniqueId (best for DB joins across exports)
+
+**Primary**
+
+1. **Category:** `Element Properties`
+   **Property:** `UniqueId` ([The Field of View][2])
+
+**Notes**
+
+* This does **not** appear unless “Convert element properties” is enabled in exporter / File Readers. ([The Field of View][2])
+* Revit `UniqueId` looks like a GUID + extra suffix. You should normalize only the GUID portion.
+
+#### 2) Revit Element Id (helpful but not always stable)
+
+**Primary**
+
+1. **Category:** `Revit Element Id`
+   **Property:** `Value` *(API name: `DataPropertyNames.RevitElementIdValue`)* ([apidocs.co][1])
+
+**Fallback**
+2. **Category:** `Element Properties`
+**Property:** `Element ID` / `ElementId` (varies by exporter/options)
+
+---
+
+### D) IFC GUID / GlobalId
+
+**Primary**
+
+1. **Category:** `IFC`
+   **Property:** `GLOBALID` (case varies) ([help.revizto.com][3])
+
+**Fallbacks**
+2. **Category:** `IFC`
+**Property:** `GlobalId` / `IfcGuid` / `Ifc GUID` (importer dependent)
+
+**Important**
+
+* **Do not “GUID-normalize” IFC GlobalId** — it is not a standard GUID; it’s an IFC identifier string.
+
+---
+
+### E) DWG / AutoCAD Handle (very useful for DWG-originated content)
+
+**Primary**
+
+1. **Category:** `AutoCad Entity Handle`
+   **Property:** `Value` *(API name: `DataPropertyNames.AutoCadEntityHandleValue`)* ([apidocs.co][1])
+
+**Fallbacks**
+2. **Category:** `Entity Handle`
+**Property:** `Value` (some builds show “Entity Handle” without “AutoCad”)
+3. **Category:** `AutoCAD` / `DWG`
+**Property:** `Handle` / `Entity Handle`
+
+---
+
+## 2) Normalized key rules (to survive naming variations)
+
+Even with a “strict list”, Navisworks exporters vary a lot. The winning strategy is:
+
+* Match **Category + Property** when possible
+* Use a **normalized** comparer so minor differences don’t break you
+
+**Normalization function**
+
+* Lowercase
+* Remove all non `[a-z0-9]`
+
+Examples:
+
+* `"Source File Name"` → `sourcefilename`
+* `"AutoCad Entity Handle"` → `autocadentityhandle`
+* `"Revit Element Id"` → `revitelementid`
+
+**Also normalize internal names** (if you record them) like:
+
+* `LcOaPartitionSourceFilename` → `lcoapartitionsourcefilename`
+
+---
+
+## 3) “Codex work order” to implement the probe list cleanly
+
+Paste this to Codex (no wandering, just implement):
+
+> ### CODEX WORK ORDER — tighten IdentityProbe with a strict probe list + scoring
+>
+> **Goal:** Replace the current “loose Observe() heuristics” with a structured rule list so we reliably extract:
+>
+> * sourceFile (Item/Source File Name first)
+> * revit.uniqueId (Element Properties/UniqueId)
+> * revit.elementId (Revit Element Id/Value)
+> * ifc.globalId (IFC/GLOBALID)
+> * dwg.handle (AutoCad Entity Handle/Value)
+>
+> #### 1) In DataScraperService.cs (or shared IdentityProbe file)
+>
+> Implement:
+>
+> * `NormalizeKey(string)` = lowercase alphanumerics only
+> * `ProbeRule` struct: `{ fieldKey, catKey, propKey, weight }`
+> * `ProbeHit` capture storing `{ fieldKey, score, category, property, value }`
+>
+> #### 2) Replace IdentityProbe.Observe(propName, values) with Observe(categoryName, propName, internalName?, values)
+>
+> * Compute `cat = NormalizeKey(categoryName)`
+> * Compute `prop = NormalizeKey(propName)`
+> * Compute `internalProp = NormalizeKey(internalName)` if available (else empty)
+> * For each rule, if cat matches and (prop or internalProp matches), update best hit for that field if higher score and value non-empty.
+>
+> #### 3) Use this exact rule list (priority via weight)
+>
+> * sourceFile:
+>
+>   * (item, sourcefilename, 100)
+>   * (item, sourcefile, 90)
+>   * (item, lcoapartitionsourcefilename, 95) // internal fallback
+>   * (item, filename, 40) // low confidence fallback
+> * revitUniqueId:
+>
+>   * (elementproperties, uniqueid, 100)
+> * revitElementId:
+>
+>   * (revitelementid, value, 100)
+>   * (elementproperties, elementid, 70)
+> * ifcGlobalId:
+>
+>   * (ifc, globalid, 100)
+>   * (ifc, ifcguid, 90)
+> * dwgHandle:
+>
+>   * (autocadentityhandle, value, 100)
+>   * (entityhandle, value, 90)
+>   * (autocad, handle, 80)
+>
+> #### 4) Value validation (reduce false positives)
+>
+> * For sourceFile: accept if contains “.nwc/.dwg/.ifc/.rvt” OR contains path separators OR ends with known model extension.
+> * For revitUniqueId: accept if length>=36 AND first 36 chars parse as Guid.
+> * For ifcGlobalId: accept if length between 18–30 and contains only [A-Za-z0-9_$] (don’t over-restrict).
+> * For dwgHandle: accept hex-like strings length 4–16.
+>
+> #### 5) BuildIdentity() output
+>
+> Emit both:
+>
+> * top-level convenience fields (sourceFile, revitUniqueId, ifcGlobalId, dwgHandle)
+> * ids map keys exactly: navis.instanceGuid, revit.uniqueId, revit.elementId, ifc.globalId, dwg.handle
+>
+> #### 6) Add a one-line session summary log after scrape:
+>
+> “Identity capture: sourceFile=xx%, revitUniqueId=xx%, ifcGlobalId=xx%, dwgHandle=xx% (n=itemsScanned)”
+> This helps tune rules per dataset.
+
+---
+
+## 4) Quick validation method (so you know it’s actually working)
+
+After Codex implements the probe list:
+
+1. Run Data Scraper on **Entire Model** with JSONL enabled.
+
+2. In the MicroEng log / session summary, you should see something like:
+
+   * `sourceFile=92%`
+   * `revitUniqueId=78%` (depends on exporter settings)
+   * `ifcGlobalId=99%` (if IFC input)
+   * `dwgHandle=95%` (if DWG input)
+
+3. Spot-check:
+
+   * Pick 3 items from Revit NWC: confirm `revitUniqueId` is populated (if “Convert element properties” is on). ([The Field of View][2])
+   * Pick 3 IFC items: confirm `ifcGlobalId` appears from `IFC/GLOBALID`. ([help.revizto.com][3])
+   * Pick 3 DWG objects: confirm `dwgHandle` from `AutoCad Entity Handle/Value`. ([apidocs.co][1])
+   * Confirm source file from `Item/Source File Name`. ([apidocs.co][1])
+
+---
+
+## One important reality check
+
+If your Revit exporters are not set to include element properties, you simply won’t get Revit UniqueId, and Navis GUID won’t match it — Autodesk and others warn about that mismatch. ([Autodesk][5])
+
+So the UI should **tooltip this clearly**:
+
+* “Revit UniqueId requires ‘Convert element properties’ enabled in Revit export or Navisworks Revit File Reader options.” ([The Field of View][2])
+
+---
+
+If you want the probe list to be even more “enterprise‑proof”, the next step is: **add a hidden debug command** (“Dump all category/property pairs encountered to JSON”) so you can tune the rule list per-client without guessing.
+
+[1]: https://apidocs.co/apps/navisworks/2018/Properties_T_Autodesk_Navisworks_Api_DataPropertyNames.htm "ApiDocs.co · Navisworks · DataPropertyNames Properties"
+[2]: https://fieldofviewblog.wordpress.com/2015/02/13/revit-uniqueid-in-glue-and-navisworks/ "Revit UniqueId in Glue and Navisworks – The Field of View"
+[3]: https://help.revizto.com/hc/en-us/articles/5100708726799-Exporting-models-to-IFC-files?utm_source=chatgpt.com "Exporting models to IFC files Follow"
+[4]: https://stackoverflow.com/questions/72446191/navisworks-source-file-name-lcoapartitionsourcefilename-property-is-neither-in?utm_source=chatgpt.com "autodesk forge - Navisworks Source File Name ..."
+[5]: https://www.autodesk.com/support/technical/article/caas/sfdcarticles/sfdcarticles/Revit-Item-GUID-not-matching-with-Navisworks-GUID.html?utm_source=chatgpt.com "Revit Item GUID not matching with Navisworks GUID"
+

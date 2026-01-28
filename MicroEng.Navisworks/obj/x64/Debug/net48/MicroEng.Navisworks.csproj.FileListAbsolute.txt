@@ -26,6 +26,7 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\SmartSets\PropertyPickerWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\AppendIntegrateDialog.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataMatrixControl.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataScraperRunProgressWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataScraperWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEngPanelControl.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEngSettingsWindow.g.cs
@@ -55,6 +56,7 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEng.Navisworks_MarkupCompile.lref
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\AppendIntegrateDialog.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataMatrixControl.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataScraperRunProgressWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\DataScraperWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEngPanelControl.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\x64\Debug\net48\MicroEngSettingsWindow.baml

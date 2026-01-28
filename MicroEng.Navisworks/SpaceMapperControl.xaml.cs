@@ -9,11 +9,14 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Autodesk.Navisworks.Api;
 using Wpf.Ui.Abstractions;
 using WpfNavigationView = Wpf.Ui.Controls.NavigationView;
 using WpfNavigatingCancelEventArgs = Wpf.Ui.Controls.NavigatingCancelEventArgs;
 using WpfFlyout = Wpf.Ui.Controls.Flyout;
+using WpfUiControls = Wpf.Ui.Controls;
 using NavisApp = Autodesk.Navisworks.Api.Application;
 using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
 using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
@@ -1711,15 +1714,32 @@ namespace MicroEng.Navisworks
                 progressHost?.Close();
                 ShowResults(result);
                 SpaceMapperNav.Navigate(typeof(SpaceMapperStepResultsPage));
+                var stats = result?.Stats;
+                var summary = stats == null
+                    ? "Run completed."
+                    : $"Processed {stats.ZonesProcessed} zones, {stats.TargetsProcessed} targets.";
+                ShowSnackbar("Space Mapper complete",
+                    summary,
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+                FlashSuccess(RunSpaceMapperButtonControl);
             }
             catch (OperationCanceledException)
             {
                 runProgress?.MarkCancelled();
+                ShowSnackbar("Run cancelled",
+                    "Space Mapper run was cancelled.",
+                    WpfUiControls.ControlAppearance.Caution,
+                    WpfUiControls.SymbolRegular.Info24);
             }
             catch (Exception ex)
             {
                 runProgress?.MarkFailed(ex);
                 MessageBox.Show($"Space Mapper failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowSnackbar("Run failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
             }
             finally
             {
@@ -1882,17 +1902,30 @@ namespace MicroEng.Navisworks
                 runProgress.MarkCompleted();
                 progressHost?.Close();
 
-                MessageBox.Show($"Variation check report saved to:\n{reportPath}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
-            }
-            catch (OperationCanceledException)
-            {
-                runProgress?.MarkCancelled();
-            }
-            catch (Exception ex)
-            {
-                runProgress?.MarkFailed(ex);
-                MessageBox.Show($"Variation check failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
+                  MessageBox.Show($"Variation check report saved to:\n{reportPath}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Information);
+                  ShowSnackbar("Variation check complete",
+                      "Report saved.",
+                      WpfUiControls.ControlAppearance.Success,
+                      WpfUiControls.SymbolRegular.CheckmarkCircle24);
+                  FlashSuccess(_processingPage?.VariationCheckButton);
+              }
+              catch (OperationCanceledException)
+              {
+                  runProgress?.MarkCancelled();
+                  ShowSnackbar("Variation check cancelled",
+                      "Variation check was cancelled.",
+                      WpfUiControls.ControlAppearance.Caution,
+                      WpfUiControls.SymbolRegular.Info24);
+              }
+              catch (Exception ex)
+              {
+                  runProgress?.MarkFailed(ex);
+                  MessageBox.Show($"Variation check failed: {ex.Message}", "MicroEng", MessageBoxButton.OK, MessageBoxImage.Error);
+                  ShowSnackbar("Variation check failed",
+                      ex.Message,
+                      WpfUiControls.ControlAppearance.Danger,
+                      WpfUiControls.SymbolRegular.ErrorCircle24);
+              }
             finally
             {
                 progressHost?.Close();
@@ -3513,6 +3546,54 @@ namespace MicroEng.Navisworks
             return window.ShowDialog() == true ? box.Text : null;
         }
 
+        private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
+        {
+            if (SnackbarPresenter == null)
+            {
+                return;
+            }
+
+            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
+            {
+                Title = title,
+                Content = message,
+                Appearance = appearance,
+                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
+                {
+                    Filled = true,
+                    FontSize = 25
+                },
+                Foreground = System.Windows.Media.Brushes.Black,
+                ContentForeground = System.Windows.Media.Brushes.Black,
+                Timeout = TimeSpan.FromSeconds(4),
+                IsCloseButtonEnabled = false
+            };
+
+            snackbar.Show();
+        }
+
+        private void FlashSuccess(System.Windows.Controls.Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            var flashBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80));
+            var animation = new ColorAnimation
+            {
+                From = flashBrush.Color,
+                To = System.Windows.Media.Colors.White,
+                Duration = TimeSpan.FromMilliseconds(6000),
+                BeginTime = TimeSpan.FromSeconds(1),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            animation.Completed += (_, _) => button.ClearValue(BackgroundProperty);
+            button.Background = flashBrush;
+            flashBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
+        }
+
         private sealed class SpaceMapperStepPageProvider : INavigationViewPageProvider
         {
             private readonly Dictionary<Type, object> _pages;
@@ -3530,3 +3611,4 @@ namespace MicroEng.Navisworks
         }
     }
 }
+

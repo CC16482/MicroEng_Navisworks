@@ -5,15 +5,158 @@
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
         xmlns:local="clr-namespace:MicroEng.Navisworks"
         Title="Data Scraper"
-        Height="640" Width="900"
+        Height="720" Width="980"
         Background="{DynamicResource ApplicationBackgroundBrush}"
         Foreground="{DynamicResource TextFillColorPrimaryBrush}"
         FontSize="12"
+        ToolTipService.IsEnabled="True"
         WindowStartupLocation="CenterOwner">
   <Window.Resources>
     <ResourceDictionary>
       <!-- Reduce WPF-UI typography for data-dense screens (Gallery is larger by default). -->
       <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+      <Style x:Key="HelpToggleButtonStyle" TargetType="Button">
+        <Setter Property="Width" Value="18" />
+        <Setter Property="Height" Value="18" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="Margin" Value="6,0,0,0" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        <Setter Property="ToolTipService.IsEnabled" Value="True" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="ToolTipService.InitialShowDelay" Value="200" />
+        <Setter Property="ToolTipService.ShowDuration" Value="15000" />
+        <Setter Property="ToolTipService.Placement" Value="Mouse" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="Button">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+      <Style x:Key="SetSearchDropDownButtonStyle" TargetType="ui:DropDownButton" BasedOn="{StaticResource {x:Type ui:DropDownButton}}">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="ui:DropDownButton">
+              <Border x:Name="ContentBorder"
+                      Width="{TemplateBinding Width}"
+                      Height="{TemplateBinding Height}"
+                      MinWidth="{TemplateBinding MinWidth}"
+                      MinHeight="{TemplateBinding MinHeight}"
+                      HorizontalAlignment="{TemplateBinding HorizontalAlignment}"
+                      VerticalAlignment="{TemplateBinding VerticalAlignment}"
+                      Background="{TemplateBinding Background}"
+                      CornerRadius="{TemplateBinding CornerRadius}">
+                <Border Padding="{TemplateBinding Padding}"
+                        BorderBrush="{TemplateBinding BorderBrush}"
+                        BorderThickness="{TemplateBinding BorderThickness}"
+                        CornerRadius="{TemplateBinding CornerRadius}">
+                  <ContentPresenter x:Name="ControlIcon"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Content="{TemplateBinding Icon}"
+                                    Focusable="False"
+                                    TextElement.FontSize="{TemplateBinding FontSize}"
+                                    TextElement.Foreground="{TemplateBinding Foreground}" />
+                </Border>
+              </Border>
+              <ControlTemplate.Triggers>
+                <MultiTrigger>
+                  <MultiTrigger.Conditions>
+                    <Condition Property="IsMouseOver" Value="True" />
+                    <Condition Property="IsPressed" Value="False" />
+                  </MultiTrigger.Conditions>
+                  <Setter TargetName="ContentBorder" Property="Background" Value="{Binding MouseOverBackground, RelativeSource={RelativeSource TemplatedParent}}" />
+                  <Setter TargetName="ContentBorder" Property="BorderBrush" Value="{Binding MouseOverBorderBrush, RelativeSource={RelativeSource TemplatedParent}}" />
+                </MultiTrigger>
+                <MultiTrigger>
+                  <MultiTrigger.Conditions>
+                    <Condition Property="IsMouseOver" Value="True" />
+                    <Condition Property="IsPressed" Value="True" />
+                  </MultiTrigger.Conditions>
+                  <Setter TargetName="ContentBorder" Property="Background" Value="{Binding PressedBackground, RelativeSource={RelativeSource TemplatedParent}}" />
+                  <Setter TargetName="ContentBorder" Property="BorderBrush" Value="{Binding PressedBorderBrush, RelativeSource={RelativeSource TemplatedParent}}" />
+                  <Setter TargetName="ControlIcon" Property="TextElement.Foreground" Value="{Binding PressedForeground, RelativeSource={RelativeSource TemplatedParent}}" />
+                </MultiTrigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter TargetName="ContentBorder" Property="Background" Value="{DynamicResource ControlFillColorDisabledBrush}" />
+                  <Setter TargetName="ContentBorder" Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                  <Setter TargetName="ControlIcon" Property="TextElement.Foreground" Value="{DynamicResource TextFillColorDisabledBrush}" />
+                </Trigger>
+                <Trigger Property="Icon" Value="{x:Null}">
+                  <Setter TargetName="ControlIcon" Property="Visibility" Value="Collapsed" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
+      <Style x:Key="SetSearchMenuItemStyle" TargetType="MenuItem">
+        <Setter Property="Header" Value="{Binding DisplayName}" />
+        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="{x:Type MenuItem}">
+              <Border x:Name="ItemBorder"
+                      Margin="4,1,4,1"
+                      Background="{TemplateBinding Background}"
+                      CornerRadius="4">
+                <Grid Margin="8,6,8,6">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <Rectangle x:Name="ActiveRectangle"
+                             Grid.Column="0"
+                             Width="3"
+                             Height="18"
+                             Margin="0,0,8,0"
+                             HorizontalAlignment="Left"
+                             VerticalAlignment="Center"
+                             Fill="{DynamicResource ListViewItemPillFillBrush}"
+                             RadiusX="2"
+                             RadiusY="2"
+                             Visibility="Collapsed" />
+                  <ContentPresenter Grid.Column="1"
+                                    ContentSource="Header"
+                                    RecognizesAccessKey="True"
+                                    TextElement.Foreground="{TemplateBinding Foreground}" />
+                </Grid>
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                  <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ListViewItemBackgroundPointerOver}" />
+                </Trigger>
+                <Trigger Property="IsPressed" Value="True">
+                  <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ListViewItemBackgroundPointerOver}" />
+                </Trigger>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                  <Setter TargetName="ActiveRectangle" Property="Visibility" Value="Visible" />
+                  <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ListViewItemBackgroundPointerOver}" />
+                </DataTrigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter Property="Foreground">
+                    <Setter.Value>
+                      <SolidColorBrush Color="{DynamicResource TextFillColorDisabled}" />
+                    </Setter.Value>
+                  </Setter>
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
       </ResourceDictionary.MergedDictionaries>
@@ -24,29 +167,21 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <!-- Header -->
-    <!-- NOTE: use ui:Card (not ui:CardControl) for general container layout; CardControl is a 3-column header/content control and will offset Content to the right. -->
     <ui:Card Grid.Row="0"
              Padding="10"
              Margin="0,0,0,8"
              HorizontalAlignment="Stretch"
-             VerticalAlignment="Top"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Top">
+             HorizontalContentAlignment="Stretch">
       <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Vertical" HorizontalAlignment="Left">
+        <StackPanel Grid.Column="0" Orientation="Vertical">
           <ui:TextBlock Text="Data Scraper" FontSize="16" FontWeight="SemiBold" />
           <ui:TextBlock Text="Scan a scope and cache properties for Data Matrix / Mapper."
                         Margin="0,2,0,0"
@@ -54,249 +189,587 @@
                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
         </StackPanel>
 
-        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
-          <TextBlock Text="Profile:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-          <TextBox x:Name="ProfileNameBox"
-                   Width="170"
-                   Padding="8,4"
-                   VerticalContentAlignment="Center"
-                   TextChanged="ProfileNameBox_TextChanged" />
-          <ui:Button Content="Close"
+        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
+          <TextBlock Text="Status:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+          <ui:Button x:Name="RunScrapeButton"
                      Appearance="Primary"
+                     Background="White"
+                     Foreground="Black"
                      Padding="12,6"
                      Margin="12,0,0,0"
-                     Click="Close_Click" />
+                     Click="Run_Click">
+            <Grid>
+              <TextBlock x:Name="RunScrapeLabel"
+                         Text="Run Scrape"
+                         Foreground="Black"
+                         VerticalAlignment="Center"
+                         HorizontalAlignment="Center" />
+              <ui:SymbolIcon x:Name="RunScrapeSpinnerIcon"
+                             Symbol="ArrowSyncCircle24"
+                             Filled="True"
+                             FontSize="28"
+                             Foreground="#F59E0B"
+                             Visibility="Collapsed"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center" />
+            </Grid>
+          </ui:Button>
         </StackPanel>
+      </Grid>
+    </ui:Card>
 
-        <ui:Card Grid.Row="1"
-                 Grid.ColumnSpan="2"
-                 Padding="8"
-                 Margin="0,10,0,0"
-                 HorizontalAlignment="Stretch"
-                 HorizontalContentAlignment="Stretch"
-                 VerticalContentAlignment="Top">
+    <!-- Profile -->
+    <ScrollViewer x:Name="MainScrollViewer"
+                  Grid.Row="1"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
+      <Grid>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="8" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="8" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="8" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="8" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Profile -->
+        <ui:Card Grid.Row="0" Padding="10" Margin="0" HorizontalContentAlignment="Stretch">
           <Grid>
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="2*" />
-              <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
               <RowDefinition Height="Auto" />
               <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <ui:TextBlock Text="Scope" FontSize="13" FontWeight="SemiBold" Grid.ColumnSpan="2" />
-
-            <StackPanel Grid.Row="1" Orientation="Vertical">
-              <RadioButton x:Name="EntireModelRadio" Content="Entire Model" IsChecked="True" />
-              <RadioButton x:Name="CurrentSelectionRadio" Content="Current Selection" />
-              <RadioButton x:Name="SingleItemRadio" Content="Single Item (pick current selection)" />
-              <RadioButton x:Name="SelectionSetRadio" Content="Selection Set (coming soon)" IsEnabled="False" />
-              <RadioButton x:Name="SearchSetRadio" Content="Search Set (coming soon)" IsEnabled="False" />
+            <StackPanel Grid.Row="0" Orientation="Vertical">
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <ui:TextBlock Text="1 Profile" FontSize="13" FontWeight="SemiBold" />
+                <Button Style="{StaticResource HelpToggleButtonStyle}"
+                        ToolTip="Profiles group runs and cached properties. Use a unique name to keep separate history.">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:TextBlock Text="Profiles group runs and cached properties." Margin="0,2,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
-            <StackPanel Grid.Column="1" Grid.Row="1">
-              <ComboBox x:Name="SelectionSetCombo" IsEnabled="False" Margin="0,0,0,6" />
-              <ComboBox x:Name="SearchSetCombo" IsEnabled="False" Margin="0,0,0,6" />
-              <ui:Button Content="Refresh Sets" Padding="10,4" Click="RefreshSets_Click" />
+            <Grid Grid.Row="1" Margin="0,8,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+
+              <TextBlock Text="Existing profile:" Grid.Row="0" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,6" />
+              <ComboBox x:Name="ExistingProfileCombo"
+                        Grid.Row="0"
+                        Grid.Column="1"
+                        Margin="0,0,6,6"
+                        Width="220"
+                        SelectionChanged="ExistingProfileCombo_SelectionChanged" />
+              <ui:Button x:Name="UseLatestProfileButton"
+                         Grid.Row="0"
+                         Grid.Column="2"
+                         Content="Use Latest"
+                         Padding="10,4"
+                         Margin="0,0,6,6"
+                         Click="UseLatestProfile_Click" />
+
+              <TextBlock Text="Profile name:" Grid.Row="1" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,6,0" />
+              <TextBox x:Name="ProfileNameBox"
+                       Grid.Row="1"
+                       Grid.Column="1"
+                       Padding="8,4"
+                       Margin="0,0,6,0"
+                       VerticalContentAlignment="Center"
+                       TextChanged="ProfileNameBox_TextChanged" />
+              <!-- New button removed per request -->
+            </Grid>
+          </Grid>
+        </ui:Card>
+
+        <!-- Scope -->
+        <ui:Card Grid.Row="2" Padding="10" Margin="0" HorizontalContentAlignment="Stretch">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Row="0" Grid.ColumnSpan="2" Orientation="Vertical">
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <ui:TextBlock Text="2 Scope" FontSize="13" FontWeight="SemiBold" />
+                <Button Style="{StaticResource HelpToggleButtonStyle}"
+                        ToolTip="Scope controls which items are scanned. Larger scopes take longer but collect more properties.">
+                  <ui:SymbolIcon Symbol="Info16" />
+                </Button>
+              </StackPanel>
+              <ui:TextBlock Text="Choose what to scan. Larger scopes take longer but capture more properties."
+                            Margin="0,2,0,0"
+                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Vertical" Margin="0,8,12,0">
+              <RadioButton x:Name="EntireModelRadio" Content="Entire Model" IsChecked="True" Checked="OtherScope_Checked" ToolTip="Scan the entire model." />
+              <RadioButton x:Name="CurrentSelectionRadio" Content="Current Selection" Checked="OtherScope_Checked" ToolTip="Scan only the current selection set in Navisworks." />
+              <RadioButton x:Name="SingleItemRadio" Content="Single Item" Checked="OtherScope_Checked" ToolTip="Scan a single selected item." />
+              <RadioButton x:Name="SetSearchRadio" Content="Selection/Search Set" Checked="SetSearchRadio_Checked" ToolTip="Scan items from a saved Selection/Search set." />
+            </StackPanel>
+
+            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Vertical" Margin="0,8,0,0">
+              <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <ui:Button Content="Pick..." Padding="10,4" Click="PickSingleItem_Click" />
+                <TextBlock x:Name="SingleItemLabel" Text="No item picked" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+                  <TextBlock Text="Set/Search Name:" VerticalAlignment="Center" />
+                  <Button Style="{StaticResource HelpToggleButtonStyle}"
+                          ToolTip="Pick a saved Selection Set or Search Set from Navisworks.">
+                    <ui:SymbolIcon Symbol="Info16" />
+                  </Button>
+                </StackPanel>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBox x:Name="SetSearchNameBox"
+                           Grid.Column="0"
+                           Width="220"
+                           IsEnabled="{Binding IsChecked, ElementName=SetSearchRadio}"
+                           TextChanged="SetSearchNameBox_TextChanged" />
+                  <ui:DropDownButton x:Name="SetSearchDropDownButton"
+                                     Grid.Column="1"
+                                     Margin="6,0,0,0"
+                                     Icon="{ui:SymbolIcon Search20}"
+                                     ToolTip="Selection/Search Sets"
+                                     IsEnabled="{Binding IsChecked, ElementName=SetSearchRadio}"
+                                     Style="{StaticResource SetSearchDropDownButtonStyle}">
+                    <ui:DropDownButton.Flyout>
+                      <ContextMenu x:Name="SetSearchMenu" ItemContainerStyle="{StaticResource SetSearchMenuItemStyle}" />
+                    </ui:DropDownButton.Flyout>
+                  </ui:DropDownButton>
+                </Grid>
+              </StackPanel>
+            </StackPanel>
+
+            <!-- Run Scrape button lives in the header now -->
+          </Grid>
+        </ui:Card>
+
+        <!-- History -->
+        <ui:Card Grid.Row="4" Padding="10" Margin="0" HorizontalContentAlignment="Stretch">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Vertical">
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <ui:TextBlock Text="3 History" FontSize="13" FontWeight="SemiBold" />
+            <Button Style="{StaticResource HelpToggleButtonStyle}"
+                    ToolTip="Select a run to view cached Properties and Raw Data for that run.">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+          </StackPanel>
+          <ui:TextBlock Text="Pick a run to load its cached properties and raw rows."
+                        Margin="0,2,0,0"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <ui:DataGrid x:Name="HistoryList"
+                     Grid.Row="1"
+                     Margin="0,8,0,0"
+                     HorizontalAlignment="Stretch"
+                     VerticalAlignment="Stretch"
+                     AutoGenerateColumns="False"
+                     CanUserAddRows="False"
+                     CanUserDeleteRows="False"
+                     HeadersVisibility="Column"
+                     GridLinesVisibility="All"
+                     HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                     VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                     SelectionChanged="HistoryList_SelectionChanged"
+                     FontSize="12"
+                     RowHeight="26"
+                     ColumnHeaderHeight="28"
+                     MaxHeight="220"
+                     EnableRowVirtualization="True"
+                     EnableColumnVirtualization="True"
+                     VirtualizingPanel.IsVirtualizing="True"
+                     VirtualizingPanel.VirtualizationMode="Recycling">
+          <ui:DataGrid.Columns>
+            <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="120" />
+            <DataGridTextColumn Header="Profile" Binding="{Binding ProfileName}" Width="140" />
+            <DataGridTextColumn Header="Scope" Binding="{Binding ScopeType}" Width="130" />
+            <DataGridTextColumn Header="Items" Binding="{Binding ItemsScanned}" Width="80" />
+            <DataGridTextColumn Header="Props" Binding="{Binding Properties.Count}" Width="80" />
+            <DataGridTextColumn Header="Raw" Binding="{Binding RawEntries.Count}" Width="70" />
+          </ui:DataGrid.Columns>
+        </ui:DataGrid>
+
+            <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
+              <ui:Button Content="View" Padding="10,4" Click="ViewProperties_Click" />
+              <ui:Button Content="Re-run" Padding="10,4" Margin="6,0,0,0" Click="Rerun_Click" />
             </StackPanel>
           </Grid>
         </ui:Card>
+
+        <!-- Data view -->
+        <ui:Card Grid.Row="6"
+                 Padding="10"
+                 Margin="0"
+                 HorizontalContentAlignment="Stretch"
+                 VerticalContentAlignment="Stretch">
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Vertical">
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <ui:TextBlock Text="4 Data View" FontSize="13" FontWeight="SemiBold" />
+            <Button Style="{StaticResource HelpToggleButtonStyle}"
+                    ToolTip="View cached Properties and Raw Data for the selected run.">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+          </StackPanel>
+          <ui:TextBlock Text="Properties and raw rows for the selected run."
+                        Margin="0,2,0,0"
+                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <TextBlock x:Name="SelectedRunSummary"
+                   Grid.Row="1"
+                   Margin="0,6,0,8"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+        <StackPanel Grid.Row="2">
+          <StackPanel Orientation="Horizontal" Margin="0,0,0,8" VerticalAlignment="Center">
+            <TextBlock Text="Memory:" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <CheckBox x:Name="KeepRawEntriesCheckBox"
+                      Content="Keep raw rows in memory (UI preview)"
+                      Margin="12,0,0,0"
+                      IsChecked="True"
+                      ToolTip="Keeps raw rows for the Raw Data tab." />
+            <TextBlock Text="Preview limit:" Margin="16,0,6,0" VerticalAlignment="Center" />
+            <TextBox x:Name="PreviewRawRowLimitBox" Width="80" Padding="6,2" Text="50000"
+                     ToolTip="Used when raw rows are not kept in memory." />
+          </StackPanel>
+
+          <TabControl Background="Transparent"
+                      BorderThickness="0"
+                      Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+                      FontSize="12"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Stretch">
+              <!-- Properties -->
+              <TabItem Header="Properties">
+                <ui:Card Padding="10"
+                         Margin="0,6,0,0"
+                         HorizontalContentAlignment="Stretch"
+                         VerticalContentAlignment="Stretch">
+                  <Grid>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <TextBox x:Name="FilterBox" Grid.Row="0" Margin="0,0,0,8" Padding="8,4" TextChanged="FilterBox_TextChanged" />
+              <ui:DataGrid x:Name="PropertiesGrid"
+                         Grid.Row="1"
+                         HorizontalAlignment="Stretch"
+                         VerticalAlignment="Stretch"
+                         IsReadOnly="True"
+                         AutoGenerateColumns="False"
+                         GridLinesVisibility="All"
+                         HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                         VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                         FontSize="12"
+                         RowHeight="26"
+                         ColumnHeaderHeight="28"
+                         MaxHeight="240"
+                         EnableRowVirtualization="True"
+                         EnableColumnVirtualization="True"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling">
+                <ui:DataGrid.Columns>
+                  <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="150" />
+                  <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="200" />
+                  <DataGridTextColumn Header="Type" Binding="{Binding DataType}" Width="100" />
+                  <DataGridTextColumn Header="Items" Binding="{Binding ItemCount}" Width="80" />
+                  <DataGridTextColumn Header="Distinct" Binding="{Binding DistinctValueCount}" Width="80" />
+                  <DataGridTextColumn Header="Samples" Binding="{Binding SampleValuesString}" Width="*" />
+                </ui:DataGrid.Columns>
+              </ui:DataGrid>
+              <TextBlock x:Name="PropertySummary" Grid.Row="2" Margin="0,6,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                  </Grid>
+                </ui:Card>
+              </TabItem>
+
+              <!-- Raw Data -->
+              <TabItem Header="Raw Data">
+                <ui:Card Padding="10"
+                         Margin="0,6,0,0"
+                         HorizontalContentAlignment="Stretch"
+                         VerticalContentAlignment="Stretch">
+                  <Grid>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <TextBox x:Name="RawFilterBox" Grid.Row="0" Margin="0,0,0,8" Padding="8,4" TextChanged="RawFilterBox_TextChanged" />
+              <TextBlock x:Name="RawDataNotStoredHint"
+                         Grid.Row="1"
+                         Margin="0,0,0,8"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                         Visibility="Collapsed" />
+              <ui:DataGrid x:Name="RawDataGrid"
+                         Grid.Row="2"
+                         HorizontalAlignment="Stretch"
+                         VerticalAlignment="Stretch"
+                         IsReadOnly="True"
+                         AutoGenerateColumns="False"
+                         GridLinesVisibility="All"
+                         HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                         VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
+                         FontSize="12"
+                         RowHeight="26"
+                         ColumnHeaderHeight="28"
+                         MaxHeight="240"
+                         EnableRowVirtualization="True"
+                         EnableColumnVirtualization="True"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling">
+                <ui:DataGrid.Columns>
+                  <DataGridTextColumn Header="Profile" Binding="{Binding Profile}" Width="110" />
+                  <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="150" />
+                  <DataGridTextColumn Header="Item" Binding="{Binding ItemPath}" Width="200" />
+                  <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="150" />
+                  <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="180" />
+                  <DataGridTextColumn Header="Type" Binding="{Binding DataType}" Width="110" />
+                  <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*" />
+                </ui:DataGrid.Columns>
+              </ui:DataGrid>
+              <TextBlock x:Name="RawSummaryText" Grid.Row="3" Margin="0,6,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                  </Grid>
+                </ui:Card>
+              </TabItem>
+          </TabControl>
+        </StackPanel>
       </Grid>
     </ui:Card>
 
-    <!-- Tabs -->
-    <ui:Card Grid.Row="1"
-             Padding="10"
-             Margin="0,0,0,8"
-             HorizontalAlignment="Stretch"
-             VerticalAlignment="Stretch"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Stretch">
-      <TabControl Background="Transparent"
-                  Foreground="{DynamicResource TextFillColorPrimaryBrush}"
-                  FontSize="12"
-                  HorizontalAlignment="Stretch"
-                  VerticalAlignment="Stretch"
-                  HorizontalContentAlignment="Stretch"
-                  VerticalContentAlignment="Stretch">
-        <!-- Profile -->
-        <TabItem Header="Profile">
-          <Grid Margin="10">
-            <Grid.RowDefinitions>
-              <RowDefinition Height="*" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <ui:DataGrid x:Name="ProfileList"
-                         Grid.Row="0"
-                         HorizontalAlignment="Stretch"
-                         VerticalAlignment="Stretch"
-                         AutoGenerateColumns="False"
-                         CanUserAddRows="False"
-                         CanUserDeleteRows="False"
-                         HeadersVisibility="Column"
-                         GridLinesVisibility="All"
-                         HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                         VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                         FontSize="12"
-                         RowHeight="28"
-                         ColumnHeaderHeight="30"
-                         EnableRowVirtualization="True"
-                         EnableColumnVirtualization="True"
-                         VirtualizingPanel.IsVirtualizing="True"
-                         VirtualizingPanel.VirtualizationMode="Recycling">
-              <ui:DataGrid.Columns>
-                <DataGridTextColumn Header="Profile" Binding="{Binding ProfileName}" Width="140" />
-                <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="150" />
-                <DataGridTextColumn Header="Scope" Binding="{Binding ScopeType}" Width="140" />
-                <DataGridTextColumn Header="Description" Binding="{Binding ScopeDescription}" Width="220" />
-                <DataGridTextColumn Header="Items" Binding="{Binding ItemsScanned}" Width="80" />
-                <DataGridTextColumn Header="Props" Binding="{Binding Properties.Count}" Width="80" />
-              </ui:DataGrid.Columns>
-            </ui:DataGrid>
-            <TextBlock x:Name="ProfileSummaryText"
-                       Grid.Row="1"
-                       Margin="0,6,0,0"
-                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-          </Grid>
-        </TabItem>
-
-        <!-- History -->
-        <TabItem Header="History">
-          <Grid Margin="10">
-            <Grid.RowDefinitions>
-              <RowDefinition Height="*" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <ui:DataGrid x:Name="HistoryList"
-                         Grid.Row="0"
-                         HorizontalAlignment="Stretch"
-                         VerticalAlignment="Stretch"
-                         AutoGenerateColumns="False"
-                         CanUserAddRows="False"
-                         CanUserDeleteRows="False"
-                         HeadersVisibility="Column"
-                         GridLinesVisibility="All"
-                         HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                         VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                         SelectionChanged="HistoryList_SelectionChanged"
-                         FontSize="12"
-                         RowHeight="28"
-                         ColumnHeaderHeight="30"
-                         EnableRowVirtualization="True"
-                         EnableColumnVirtualization="True"
-                         VirtualizingPanel.IsVirtualizing="True"
-                         VirtualizingPanel.VirtualizationMode="Recycling">
-              <ui:DataGrid.Columns>
-                <DataGridTextColumn Header="Profile" Binding="{Binding ProfileName}" Width="140" />
-                <DataGridTextColumn Header="Time" Binding="{Binding Timestamp}" Width="150" />
-                <DataGridTextColumn Header="Scope" Binding="{Binding ScopeType}" Width="140" />
-                <DataGridTextColumn Header="Description" Binding="{Binding ScopeDescription}" Width="220" />
-                <DataGridTextColumn Header="Items" Binding="{Binding ItemsScanned}" Width="80" />
-                <DataGridTextColumn Header="Props" Binding="{Binding Properties.Count}" Width="80" />
-              </ui:DataGrid.Columns>
-            </ui:DataGrid>
-            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,6,0,0">
-              <ui:Button Content="Re-run" Padding="10,4" Click="Rerun_Click" />
-              <ui:Button Content="View Properties" Padding="10,4" Click="ViewProperties_Click" Margin="6,0,0,0" />
-            </StackPanel>
-          </Grid>
-        </TabItem>
-
-        <!-- Properties -->
-        <TabItem Header="Properties">
-          <Grid Margin="10">
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="*" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <TextBox x:Name="FilterBox" Grid.Row="0" Margin="0,0,0,8" Padding="8,4" TextChanged="FilterBox_TextChanged" />
-            <ui:DataGrid x:Name="PropertiesGrid"
-                       Grid.Row="1"
-                       HorizontalAlignment="Stretch"
-                       VerticalAlignment="Stretch"
-                       IsReadOnly="True"
-                       AutoGenerateColumns="False"
-                       GridLinesVisibility="All"
-                       HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                       VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                       FontSize="12"
-                       RowHeight="28"
-                       ColumnHeaderHeight="30"
-                       EnableRowVirtualization="True"
-                       EnableColumnVirtualization="True"
-                       VirtualizingPanel.IsVirtualizing="True"
-                       VirtualizingPanel.VirtualizationMode="Recycling">
-              <ui:DataGrid.Columns>
-                <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="150" />
-                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="200" />
-                <DataGridTextColumn Header="Type" Binding="{Binding DataType}" Width="100" />
-                <DataGridTextColumn Header="Items" Binding="{Binding ItemCount}" Width="80" />
-                <DataGridTextColumn Header="Distinct" Binding="{Binding DistinctValueCount}" Width="80" />
-                <DataGridTextColumn Header="Samples" Binding="{Binding SampleValuesString}" Width="*" />
-              </ui:DataGrid.Columns>
-            </ui:DataGrid>
-            <TextBlock x:Name="PropertySummary" Grid.Row="2" Margin="0,6,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-          </Grid>
-        </TabItem>
-
-        <!-- Raw Data -->
-        <TabItem Header="Raw Data">
-          <Grid Margin="10">
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="*" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            <TextBox x:Name="RawFilterBox" Grid.Row="0" Margin="0,0,0,8" Padding="8,4" TextChanged="RawFilterBox_TextChanged" />
-            <ui:DataGrid x:Name="RawDataGrid"
-                       Grid.Row="1"
-                       HorizontalAlignment="Stretch"
-                       VerticalAlignment="Stretch"
-                       IsReadOnly="True"
-                       AutoGenerateColumns="False"
-                       GridLinesVisibility="All"
-                       HorizontalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                       VerticalGridLinesBrush="{DynamicResource MicroEngDataGridGridLineBrush}"
-                       FontSize="12"
-                       RowHeight="28"
-                       ColumnHeaderHeight="30"
-                       EnableRowVirtualization="True"
-                       EnableColumnVirtualization="True"
-                       VirtualizingPanel.IsVirtualizing="True"
-                       VirtualizingPanel.VirtualizationMode="Recycling">
-              <ui:DataGrid.Columns>
-                <DataGridTextColumn Header="Profile" Binding="{Binding Profile}" Width="110" />
-                <DataGridTextColumn Header="Scope" Binding="{Binding Scope}" Width="150" />
-                <DataGridTextColumn Header="Item" Binding="{Binding ItemPath}" Width="200" />
-                <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="150" />
-                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="180" />
-                <DataGridTextColumn Header="Type" Binding="{Binding DataType}" Width="110" />
-                <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*" />
-              </ui:DataGrid.Columns>
-            </ui:DataGrid>
-            <TextBlock x:Name="RawSummaryText" Grid.Row="2" Margin="0,6,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-          </Grid>
-        </TabItem>
-      </TabControl>
-    </ui:Card>
-
-    <!-- Footer -->
-    <ui:Card Grid.Row="2"
-             Padding="10"
-             HorizontalAlignment="Stretch"
-             VerticalAlignment="Bottom"
-             HorizontalContentAlignment="Stretch"
-             VerticalContentAlignment="Center">
+        <!-- Export -->
+        <ui:Card Grid.Row="8" Padding="10" Margin="0" HorizontalContentAlignment="Stretch">
       <Grid>
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-        <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-        <ui:Button Grid.Column="1" Content="Run Scrape" Appearance="Primary" Margin="8,0,0,0" Padding="12,6" Click="Run_Click" />
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Vertical">
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <ui:TextBlock Text="5 Export" FontSize="13" FontWeight="SemiBold" />
+            <Button Style="{StaticResource HelpToggleButtonStyle}"
+                    ToolTip="Export JSONL for database workflows. Optional and independent of the UI preview.">
+              <ui:SymbolIcon Symbol="Info16" />
+            </Button>
+          </StackPanel>
+          <ui:TextBlock Text="Optional JSONL export for database workflows." Margin="0,2,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <TextBlock x:Name="ExportSummaryText"
+                   Grid.Row="1"
+                   Margin="0,8,0,8"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+        <Grid Grid.Row="2">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,8">
+            <CheckBox x:Name="ExportEnabledCheckBox"
+                      Content="Enable JSONL export"
+                      ToolTip="Write line-delimited JSON during scrape."
+                      Margin="0,0,16,0" />
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+              <TextBlock Text="Scope:" VerticalAlignment="Center" />
+              <Button Style="{StaticResource HelpToggleButtonStyle}"
+                      ToolTip="Preview Raw uses cached rows. Full Raw requires re-scrape. Property Summaries exports aggregated property stats.">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+            </StackPanel>
+            <ComboBox x:Name="ExportSourceComboBox" Width="200" SelectedIndex="0" Margin="0,0,16,0"
+                      ToolTip="Preview Raw uses cached rows. Full Raw requires re-scrape. Property Summaries exports aggregated property stats.">
+              <ComboBoxItem Content="Preview Raw (cached)" Tag="PreviewRaw" />
+              <ComboBoxItem Content="Full Raw (re-scrape)" Tag="FullRaw" />
+              <ComboBoxItem Content="Property Summaries" Tag="PropertySummaries" />
+            </ComboBox>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+              <TextBlock Text="Export:" VerticalAlignment="Center" />
+              <Button Style="{StaticResource HelpToggleButtonStyle}"
+                      ToolTip="Choose Raw Rows (SQL/analytics), Item Documents (search indexing), or Both.">
+                <ui:SymbolIcon Symbol="Info16" />
+              </Button>
+            </StackPanel>
+            <ComboBox x:Name="ExportFormatComboBox" Width="170" SelectedIndex="0" Margin="0,0,12,0"
+                      ToolTip="Raw Rows = per-property rows. Item Documents = per-item JSON. Both writes two files.">
+              <ComboBoxItem Content="Raw Rows" Tag="RawOnly" />
+              <ComboBoxItem Content="Item Documents" Tag="ItemsOnly" />
+              <ComboBoxItem Content="Both" Tag="Both" />
+            </ComboBox>
+            <CheckBox x:Name="ExportStreamDuringScrapeCheckBox"
+                      Content="Stream during scrape"
+                      IsChecked="True"
+                      Margin="16,0,0,0"
+                      VerticalAlignment="Center"
+                      ToolTip="Best for huge models." />
+            <CheckBox x:Name="ExportGzipCheckBox"
+                      Content="gzip (.jsonl.gz)"
+                      Margin="16,0,0,0"
+                      VerticalAlignment="Center"
+                      ToolTip="Smaller and faster to move." />
+          </StackPanel>
+
+          <Grid Grid.Row="1" IsEnabled="{Binding IsChecked, ElementName=ExportEnabledCheckBox}">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" Margin="0,0,0,8">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <TextBlock Text="Output:" VerticalAlignment="Center" Margin="0,0,6,0" />
+              <TextBox x:Name="ExportPathBox"
+                       Grid.Column="1"
+                       Padding="8,4"
+                       Margin="0,0,6,0"
+                       ToolTip="Leave blank to use the default folder in LocalAppData." />
+              <ui:Button Grid.Column="2" Content="Browse" Padding="10,4" Click="BrowseExport_Click"
+                         ToolTip="Choose where to write the JSONL file." />
+              <ui:Button x:Name="ExportNowButton"
+                         Grid.Column="3"
+                         Appearance="Primary"
+                         Background="White"
+                         Foreground="Black"
+                         Padding="12,4"
+                         Margin="8,0,0,0"
+                         ToolTip="Exports using the selected scope and format. Full Raw will re-scrape."
+                         Click="ExportNow_Click">
+                <Grid>
+                  <TextBlock x:Name="ExportNowLabel"
+                             Text="Export Now"
+                             Foreground="Black"
+                             VerticalAlignment="Center"
+                             HorizontalAlignment="Center" />
+                  <ui:SymbolIcon x:Name="ExportNowSpinnerIcon"
+                                 Symbol="ArrowSyncCircle24"
+                                 Filled="True"
+                                 FontSize="26"
+                                 Foreground="#F59E0B"
+                                 Visibility="Collapsed"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center" />
+                </Grid>
+              </ui:Button>
+            </Grid>
+
+            <Grid Grid.Row="1">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+
+              <StackPanel Grid.Column="0" Orientation="Vertical" Margin="0,0,16,0">
+                <ui:TextBlock Text="Identity and Keys" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Text="Primary key:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                  <ComboBox x:Name="PrimaryKeyComboBox"
+                            Width="210"
+                            SelectedIndex="2"
+                            ToolTip="Revit->NWC: SourceFile+BestExternalId. IFC: include IFC IDs. DWG: include DWG handle.">
+                    <ComboBoxItem Content="InstanceGuid" Tag="InstanceGuid" />
+                    <ComboBoxItem Content="BestExternalId" Tag="BestExternalId" />
+                    <ComboBoxItem Content="SourceFile+BestExternalId" Tag="SourceFilePlusBestExternalId" />
+                    <ComboBoxItem Content="ItemPath" Tag="ItemPath" />
+                  </ComboBox>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                  <TextBlock Text="Source key:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                  <ComboBox x:Name="SourceFileKeyModeComboBox" Width="210" SelectedIndex="0"
+                            ToolTip="FileNameOnly keeps keys stable across machines. FullPath is more specific.">
+                    <ComboBoxItem Content="FileNameOnly" Tag="FileNameOnly" />
+                    <ComboBoxItem Content="FullPath" Tag="FullPath" />
+                  </ComboBox>
+                </StackPanel>
+
+                <CheckBox x:Name="NormalizeIdsCheckBox"
+                          Content="Normalize GUID-like IDs"
+                          IsChecked="True"
+                          ToolTip="Normalizes GUIDs but does not alter IFC GlobalId." />
+              </StackPanel>
+
+              <StackPanel Grid.Column="1" Orientation="Vertical">
+                <ui:TextBlock Text="Include" FontWeight="SemiBold" Margin="0,0,0,6" />
+                <CheckBox x:Name="IncludeDocumentFileCheckBox" Content="Document file" IsChecked="True"
+                          ToolTip="Include the Navisworks document file name." />
+                <CheckBox x:Name="IncludeSourceFileCheckBox" Content="Source file" IsChecked="True"
+                          ToolTip="Include the source file name for each item." />
+                <CheckBox x:Name="IncludeNavisInstanceGuidCheckBox" Content="Navis InstanceGuid" IsChecked="True"
+                          ToolTip="Include the Navisworks InstanceGuid identifier." />
+                <CheckBox x:Name="IncludeRevitIdsCheckBox"
+                          Content="Revit IDs (UniqueId / ElementId)"
+                          IsChecked="True"
+                          ToolTip="Revit UniqueId requires Convert element properties enabled." />
+                <CheckBox x:Name="IncludeIfcIdsCheckBox" Content="IFC GlobalId" IsChecked="True"
+                          ToolTip="Include IFC GlobalId when available." />
+                <CheckBox x:Name="IncludeDwgIdsCheckBox" Content="DWG Handle" IsChecked="True"
+                          ToolTip="Include DWG Handle when available." />
+              </StackPanel>
+            </Grid>
+          </Grid>
+        </Grid>
       </Grid>
     </ui:Card>
+      </Grid>
+    </ScrollViewer>
+
+    <ui:SnackbarPresenter x:Name="SnackbarPresenter"
+                          Grid.RowSpan="2"
+                          Margin="0,0,0,4"
+                          VerticalAlignment="Bottom"
+                          HorizontalAlignment="Center"
+                          Panel.ZIndex="10" />
   </Grid>
 </Window>

@@ -10,6 +10,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Autodesk.Navisworks.Api;
 using MicroEng.Navisworks.Colour;
 using MicroEng.Navisworks;
@@ -17,6 +18,7 @@ using MicroEng.Navisworks.QuickColour.Profiles;
 using MicroEng.Navisworks.SmartSets;
 using Microsoft.Win32;
 using NavisApp = Autodesk.Navisworks.Api.Application;
+using WpfUiControls = Wpf.Ui.Controls;
 
 namespace MicroEng.Navisworks.QuickColour
 {
@@ -459,14 +461,16 @@ namespace MicroEng.Navisworks.QuickColour
             set => SetField(ref _hierarchyL2Label, value ?? "");
         }
 
-        private QuickColourPaletteStyle _hierarchyPaletteStyle = QuickColourPaletteStyle.Deep;
-        public QuickColourPaletteStyle HierarchyPaletteStyle
+        private MicroEngPaletteKind _hierarchyPaletteKind = MicroEngPaletteKind.Deep;
+        public MicroEngPaletteKind HierarchyPaletteKind
         {
-            get => _hierarchyPaletteStyle;
+            get => _hierarchyPaletteKind;
             set
             {
-                if (SetField(ref _hierarchyPaletteStyle, value))
+                if (SetField(ref _hierarchyPaletteKind, value))
                 {
+                    OnPropertyChanged(nameof(IsHierarchyHueEditEnabled));
+                    AutoAssignBaseColours();
                     ApplyHierarchyColours();
                 }
             }
@@ -528,6 +532,7 @@ namespace MicroEng.Navisworks.QuickColour
                 if (SetField(ref _hierarchySingleHueMode, value))
                 {
                     OnPropertyChanged(nameof(HierarchyHueSwatchBrush));
+                    OnPropertyChanged(nameof(IsHierarchyHueEditEnabled));
                     ApplyHierarchyColours();
                 }
             }
@@ -542,8 +547,11 @@ namespace MicroEng.Navisworks.QuickColour
                 if (SetField(ref _hierarchyHueHex, value ?? "#00A000"))
                 {
                     OnPropertyChanged(nameof(HierarchyHueSwatchBrush));
-                    if (HierarchySingleHueMode)
+                    if (HierarchySingleHueMode
+                        || HierarchyPaletteKind == MicroEngPaletteKind.CustomHue
+                        || HierarchyPaletteKind == MicroEngPaletteKind.Shades)
                     {
+                        AutoAssignBaseColours();
                         ApplyHierarchyColours();
                     }
                 }
@@ -567,6 +575,10 @@ namespace MicroEng.Navisworks.QuickColour
         }
 
         public Brush HierarchyHueSwatchBrush => new SolidColorBrush(ParseHueColor());
+        public bool IsHierarchyHueEditEnabled =>
+            HierarchySingleHueMode
+            || HierarchyPaletteKind == MicroEngPaletteKind.CustomHue
+            || HierarchyPaletteKind == MicroEngPaletteKind.Shades;
         private bool _hierarchyUseHueGroups;
         public bool HierarchyUseHueGroups
         {
@@ -1009,7 +1021,18 @@ namespace MicroEng.Navisworks.QuickColour
             }
 
             AssignQuickColourPalette();
-            StatusText = rows.Count == 0 ? "No values found for this property." : $"Loaded {rows.Count} value(s).";
+            if (rows.Count == 0)
+            {
+                StatusText = session.RawEntriesTruncated || (session.RawEntries?.Count ?? 0) == 0
+                    ? "No values found. Raw rows are not fully cached. Re-run Data Scraper with 'Keep raw rows in memory' enabled."
+                    : "No values found for this property.";
+            }
+            else
+            {
+                StatusText = session.RawEntriesTruncated
+                    ? $"Loaded {rows.Count} value(s) (preview only). Re-run Data Scraper with 'Keep raw rows in memory' enabled for full values."
+                    : $"Loaded {rows.Count} value(s).";
+            }
         }
 
         private void AutoAssignQuickColours_Click(object sender, RoutedEventArgs e)
@@ -1328,15 +1351,15 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void ApplyQuickColourTemporary_Click(object sender, RoutedEventArgs e)
         {
-            ApplyQuickColour(permanent: false);
+            ApplyQuickColour(permanent: false, sender as System.Windows.Controls.Button);
         }
 
         private void ApplyQuickColourPermanent_Click(object sender, RoutedEventArgs e)
         {
-            ApplyQuickColour(permanent: true);
+            ApplyQuickColour(permanent: true, sender as System.Windows.Controls.Button);
         }
 
-        private void ApplyQuickColour(bool permanent)
+        private void ApplyQuickColour(bool permanent, System.Windows.Controls.Button sourceButton = null)
         {
             var doc = NavisApp.ActiveDocument;
             if (doc == null)
@@ -1370,25 +1393,51 @@ namespace MicroEng.Navisworks.QuickColour
                 return;
             }
 
-            var count = _service.ApplyBySingleProperty(
-                doc,
-                QuickColourCategory,
-                QuickColourProperty,
-                QuickColourValues,
-                QuickColourScope,
-                QuickColourScopeSelectionSetName,
-                QuickColourScopeModelPaths,
-                QuickColourScopeFilterCategory,
-                QuickColourScopeFilterProperty,
-                QuickColourScopeFilterValue,
-                permanent,
-                QuickColourCreateSearchSets,
-                QuickColourCreateSnapshots,
-                QuickColourFolderPath,
-                QuickColourProfileName,
-                Log);
+            try
+            {
+                var expected = QuickColourValues
+                    .Where(v => v != null && v.Enabled)
+                    .Sum(v => Math.Max(0, v.Count));
+                Log($"QuickColour: expected count from cache={expected} for {QuickColourCategory}.{QuickColourProperty}.");
 
-            StatusText = $"Applied {count} item(s).";
+                var count = _service.ApplyBySingleProperty(
+                    doc,
+                    QuickColourCategory,
+                    QuickColourProperty,
+                    QuickColourValues,
+                    QuickColourScope,
+                    QuickColourScopeSelectionSetName,
+                    QuickColourScopeModelPaths,
+                    QuickColourScopeFilterCategory,
+                    QuickColourScopeFilterProperty,
+                    QuickColourScopeFilterValue,
+                    permanent,
+                    QuickColourCreateSearchSets,
+                    QuickColourCreateSnapshots,
+                    QuickColourFolderPath,
+                    QuickColourProfileName,
+                    Log);
+
+                if (expected > 0 && count < expected)
+                {
+                    Log($"QuickColour: apply mismatch. Expected={expected}, Actual={count}, Missing={expected - count}.");
+                }
+
+                StatusText = $"Applied {count} item(s).";
+                FlashSuccess(sourceButton);
+                ShowSnackbar(permanent ? "Applied permanent colours" : "Applied temporary colours",
+                    $"Applied to {count} item(s).",
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+            }
+            catch (Exception ex)
+            {
+                StatusText = "Apply failed: " + ex.Message;
+                ShowSnackbar("Apply failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
+            }
         }
 
         private void ExportQuickColourLegend_Click(object sender, RoutedEventArgs e)
@@ -2106,12 +2155,12 @@ namespace MicroEng.Navisworks.QuickColour
                 }
 
                 _skipHierarchyRecolor = true;
-                ApplyHierarchy(permanent: mode == MicroEngColourApplyMode.Permanent);
+                ApplyHierarchy(permanent: mode == MicroEngColourApplyMode.Permanent, sourceButton: null);
                 return;
             }
 
             LoadQuickColourProfile(profile);
-            ApplyQuickColour(permanent: mode == MicroEngColourApplyMode.Permanent);
+            ApplyQuickColour(permanent: mode == MicroEngColourApplyMode.Permanent, sourceButton: null);
         }
 
         private void SaveQuickColourProfile_Click(object sender, RoutedEventArgs e)
@@ -2286,7 +2335,9 @@ namespace MicroEng.Navisworks.QuickColour
             HierarchyL2Category = l2Category;
             HierarchyL2Property = l2Property;
             ApplyHierarchyScopeFromProfile(profile.Scope);
-            HierarchyPaletteStyle = ParsePaletteStyle(profile.Generator?.PaletteName, HierarchyPaletteStyle);
+            var paletteKind = profile.Generator?.PaletteKind
+                              ?? ParsePaletteKind(profile.Generator?.PaletteName, HierarchyPaletteKind);
+            HierarchyPaletteKind = paletteKind;
 
             CreateSearchSets = profile.Outputs?.CreateSearchSets ?? false;
             CreateSnapshots = profile.Outputs?.CreateSnapshots ?? false;
@@ -2460,7 +2511,8 @@ namespace MicroEng.Navisworks.QuickColour
                 {
                     CategoryName = _hierarchyL1Category ?? "",
                     PropertyName = _hierarchyL1Property ?? "",
-                    PaletteName = HierarchyPaletteStyle.ToString(),
+                    PaletteName = HierarchyPaletteKind.ToString(),
+                    PaletteKind = HierarchyPaletteKind,
                     StableColors = false,
                     Seed = "",
                     Notes = notes
@@ -2612,20 +2664,20 @@ namespace MicroEng.Navisworks.QuickColour
                         continue;
                     }
 
-                    var item = entry.ItemPath ?? "";
-                    if (string.IsNullOrWhiteSpace(item))
+                    var itemKey = entry.ItemKey;
+                    if (string.IsNullOrWhiteSpace(itemKey))
                     {
                         continue;
                     }
 
                     if (IsMatch(entry, _hierarchyL1Category, _hierarchyL1Property))
                     {
-                        l1[item] = entry.Value ?? "";
+                        l1[itemKey] = entry.Value ?? "";
                     }
 
                     if (IsMatch(entry, _hierarchyL2Category, _hierarchyL2Property))
                     {
-                        l2[item] = entry.Value ?? "";
+                        l2[itemKey] = entry.Value ?? "";
                     }
                 }
 
@@ -2723,7 +2775,7 @@ namespace MicroEng.Navisworks.QuickColour
                 .ThenBy(g => g.Value, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var palette = QuickColourPalette.GeneratePalette(groups.Count, HierarchyPaletteStyle);
+            var palette = GetHierarchyBasePalette(groups.Count);
             for (int i = 0; i < groups.Count; i++)
             {
                 var group = groups[i];
@@ -2743,6 +2795,48 @@ namespace MicroEng.Navisworks.QuickColour
             _skipHierarchyRecolor = false;
         }
 
+        private List<System.Windows.Media.Color> GetHierarchyBasePalette(int count)
+        {
+            if (count <= 0)
+            {
+                return new List<System.Windows.Media.Color>();
+            }
+
+            if (HierarchyPaletteKind == MicroEngPaletteKind.Shades)
+            {
+                var baseColor = ColourPaletteGenerator.ParseHexOrDefault(HierarchyHueHex, Colors.HotPink);
+                return QuickColourPalette.GenerateShades(baseColor, count, GetHierarchyPaletteStyle(), 0.85);
+            }
+
+            if (HierarchyPaletteKind == MicroEngPaletteKind.CustomHue)
+            {
+                var baseStyle = QuickColourPaletteStyle.Deep;
+                var palette = QuickColourPalette.GeneratePalette(count, baseStyle);
+                var baseColor = ColourPaletteGenerator.ParseHexOrDefault(HierarchyHueHex, Colors.HotPink);
+                ColourPaletteGenerator.RgbToHsl(baseColor, out _, out _, out var targetL);
+                var baseL = baseStyle == QuickColourPaletteStyle.Pastel ? 0.78 : 0.55;
+                var deltaL = targetL - baseL;
+
+                for (int i = 0; i < palette.Count; i++)
+                {
+                    ColourPaletteGenerator.RgbToHsl(palette[i], out var h, out var s, out var l);
+                    var newL = Math.Max(0.18, Math.Min(0.92, l + deltaL));
+                    palette[i] = ColourPaletteGenerator.HslToRgb(h, s, newL);
+                }
+
+                return palette;
+            }
+
+            return QuickColourPalette.GeneratePalette(count, HierarchyPaletteKind);
+        }
+
+        private QuickColourPaletteStyle GetHierarchyPaletteStyle()
+        {
+            return HierarchyPaletteKind == MicroEngPaletteKind.Pastel
+                ? QuickColourPaletteStyle.Pastel
+                : QuickColourPaletteStyle.Deep;
+        }
+
         private void RegenerateTypeShades_Click(object sender, RoutedEventArgs e)
         {
             ApplyHierarchyColours();
@@ -2750,12 +2844,12 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void ApplyTemporary_Click(object sender, RoutedEventArgs e)
         {
-            ApplyHierarchy(permanent: false);
+            ApplyHierarchy(permanent: false, sender as System.Windows.Controls.Button);
         }
 
         private void ApplyPermanent_Click(object sender, RoutedEventArgs e)
         {
-            ApplyHierarchy(permanent: true);
+            ApplyHierarchy(permanent: true, sender as System.Windows.Controls.Button);
         }
 
         private void ClearTemporary_Click(object sender, RoutedEventArgs e)
@@ -2784,7 +2878,7 @@ namespace MicroEng.Navisworks.QuickColour
             StatusText = "Permanent colors reset.";
         }
 
-        private void ApplyHierarchy(bool permanent)
+        private void ApplyHierarchy(bool permanent, System.Windows.Controls.Button sourceButton = null)
         {
             var skipRecolor = _skipHierarchyRecolor;
             _skipHierarchyRecolor = false;
@@ -2829,28 +2923,55 @@ namespace MicroEng.Navisworks.QuickColour
                 ApplyHierarchyColours();
             }
 
-            var count = _service.ApplyByHierarchy(
-                doc,
-                _hierarchyL1Category,
-                _hierarchyL1Property,
-                _hierarchyL2Category,
-                _hierarchyL2Property,
-                HierarchyGroups,
-                SelectedScope,
-                HierarchyScopeSelectionSetName,
-                HierarchyScopeModelPaths,
-                HierarchyScopeFilterCategory,
-                HierarchyScopeFilterProperty,
-                HierarchyScopeFilterValue,
-                permanent,
-                CreateSearchSets,
-                CreateSnapshots,
-                OutputFolderPath,
-                OutputProfileName,
-                CreateFoldersByHueGroup && HierarchyUseHueGroups,
-                Log);
+            try
+            {
+                var expected = HierarchyGroups
+                    .Where(g => g != null && g.Enabled)
+                    .SelectMany(g => g.Types.Where(t => t != null && t.Enabled))
+                    .Sum(t => Math.Max(0, t.Count));
+                Log($"QuickColour(Hierarchy): expected count from cache={expected} for {_hierarchyL1Category}.{_hierarchyL1Property} -> {_hierarchyL2Category}.{_hierarchyL2Property}.");
 
-            StatusText = $"Applied {count} item(s).";
+                var count = _service.ApplyByHierarchy(
+                    doc,
+                    _hierarchyL1Category,
+                    _hierarchyL1Property,
+                    _hierarchyL2Category,
+                    _hierarchyL2Property,
+                    HierarchyGroups,
+                    SelectedScope,
+                    HierarchyScopeSelectionSetName,
+                    HierarchyScopeModelPaths,
+                    HierarchyScopeFilterCategory,
+                    HierarchyScopeFilterProperty,
+                    HierarchyScopeFilterValue,
+                    permanent,
+                    CreateSearchSets,
+                    CreateSnapshots,
+                    OutputFolderPath,
+                    OutputProfileName,
+                    CreateFoldersByHueGroup && HierarchyUseHueGroups,
+                    Log);
+
+                if (expected > 0 && count < expected)
+                {
+                    Log($"QuickColour(Hierarchy): apply mismatch. Expected={expected}, Actual={count}, Missing={expected - count}.");
+                }
+
+                StatusText = $"Applied {count} item(s).";
+                FlashSuccess(sourceButton);
+                ShowSnackbar(permanent ? "Applied permanent hierarchy" : "Applied temporary hierarchy",
+                    $"Applied to {count} item(s).",
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+            }
+            catch (Exception ex)
+            {
+                StatusText = "Apply failed: " + ex.Message;
+                ShowSnackbar("Apply failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
+            }
         }
         private void ApplyHierarchyColours()
         {
@@ -2883,7 +3004,7 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void ApplyBasePaletteColours()
         {
-            var style = HierarchyPaletteStyle;
+            var style = GetHierarchyPaletteStyle();
             var typeUsage = Math.Max(0.15, GetTypeSpread01());
 
             foreach (var group in HierarchyGroups.Where(g => g != null && g.Enabled))
@@ -2913,7 +3034,7 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void ApplySingleHueColours()
         {
-            var style = HierarchyPaletteStyle;
+            var style = GetHierarchyPaletteStyle();
             var typeUsage = Math.Max(0.15, GetTypeSpread01());
             var hueColor = ParseHueColor();
             var hue01 = QuickColourPalette.GetHue01(hueColor);
@@ -2985,7 +3106,7 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void ApplyHueGroupsColours()
         {
-            var style = HierarchyPaletteStyle;
+            var style = GetHierarchyPaletteStyle();
             var typeSpread01 = Math.Max(0.15, GetTypeSpread01());
             var contrast01 = Clamp01(HierarchyCategoryContrastPct / 100.0);
 
@@ -3849,6 +3970,54 @@ namespace MicroEng.Navisworks.QuickColour
             }
         }
 
+        private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
+        {
+            if (SnackbarPresenter == null)
+            {
+                return;
+            }
+
+            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
+            {
+                Title = title,
+                Content = message,
+                Appearance = appearance,
+                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
+                {
+                    Filled = true,
+                    FontSize = 25
+                },
+                Foreground = System.Windows.Media.Brushes.Black,
+                ContentForeground = System.Windows.Media.Brushes.Black,
+                Timeout = TimeSpan.FromSeconds(4),
+                IsCloseButtonEnabled = false
+            };
+
+            snackbar.Show();
+        }
+
+        private void FlashSuccess(System.Windows.Controls.Button button)
+        {
+            if (button == null)
+            {
+                return;
+            }
+
+            var flashBrush = new SolidColorBrush(System.Windows.Media.Color.FromRgb(76, 175, 80));
+            var animation = new ColorAnimation
+            {
+                From = flashBrush.Color,
+                To = System.Windows.Media.Colors.White,
+                Duration = TimeSpan.FromMilliseconds(6000),
+                BeginTime = TimeSpan.FromSeconds(1),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            animation.Completed += (_, _) => button.ClearValue(BackgroundProperty);
+            button.Background = flashBrush;
+            flashBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
+        }
+
         private void Log(string message)
         {
             MicroEngActions.Log(message);
@@ -3874,3 +4043,4 @@ namespace MicroEng.Navisworks.QuickColour
         }
     }
 }
+

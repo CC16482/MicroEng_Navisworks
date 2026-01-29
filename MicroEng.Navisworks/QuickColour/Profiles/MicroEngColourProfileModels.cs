@@ -92,6 +92,12 @@ namespace MicroEng.Navisworks.QuickColour.Profiles
         [JsonProperty("propertyName", Required = Required.Always)]
         public string PropertyName { get; set; } = "";
 
+        [JsonProperty("l2CategoryName", NullValueHandling = NullValueHandling.Include)]
+        public string L2CategoryName { get; set; } = "";
+
+        [JsonProperty("l2PropertyName", NullValueHandling = NullValueHandling.Include)]
+        public string L2PropertyName { get; set; } = "";
+
         [JsonProperty("paletteName", Required = Required.Always)]
         public string PaletteName { get; set; } = "Deep";
 

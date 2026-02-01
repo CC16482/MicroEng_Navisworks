@@ -1,14 +1,23 @@
 # MicroEng Handoff
 
 ## Status
-- Last build: not rerun after Data Scraper UI overhaul + Quick Colour hierarchy palette/apply fixes; rerun `dotnet build` to confirm.
+- Last build: succeeded (`dotnet build "MicroEng_Navisworks.sln" /p:DeployToProgramData=false`).
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
-- Working tree is dirty (build outputs in bin/obj + new ViewpointsGenerator files + panel changes).
+- Working tree is dirty (build outputs in bin/obj + Data Matrix refactor/column builder + crash-report logging + Quick Colour profile apply fix).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
 - Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 - Quick Colour profiles saved under `%APPDATA%\MicroEng\ColourProfiles\` (JSON schema v1).
+- Crash reports saved under `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\CrashReports\`.
 
 ## Recent changes
+- Data Matrix: schedule-style refactor with scope culling, persistent view presets (AppData), and JSONL export (Item docs/Raw rows, optional .jsonl.gz).
+- Data Matrix: default view opens with no columns; "Columns..." replaced by "Column Builder".
+- Data Matrix Column Builder: split window with tri-state category tree + search on left, chosen columns list with two-state toggles on right.
+- Data Matrix Column Builder: right list uses ItemsControl + plain CheckBox to avoid WPF-UI animation crashes when toggling filtered items.
+- Data Matrix: dedupe attribute IDs during build to avoid duplicate Category|Property collisions.
+- Data Scraper: Selection/Search set scopes implemented via NavisworksSelectionSetUtils (raw capture only; JSONL stays in Data Matrix).
+- Crash reporting: unhandled/dispatcher exceptions write crash files with log tail + dock pane visibility.
+- Quick Colour: Profiles tab apply uses saved category/property (Quick Colour) or Level props (Hierarchy) when applying saved profiles.
 - Data Scraper UI rebuilt into step cards (Profile, Scope, History, Data View, Export) with WPF-UI styling, scroll, and tighter spacing.
 - Data Scraper: Run Scrape/Export Now now use ArrowSync icon during processing; status shows “Processing - Please Wait” in orange while running.
 - Data Scraper: Export requires Output path to be set before enabling; Export Now restores scroll position after completion.
@@ -71,15 +80,27 @@
 - Variation check: baseline CPU variant + GPU variant added for direct CPU vs GPU comparison.
 
 ## Open issues
-- Data Scraper: Selection/Search set scopes are still disabled (set lists are empty).
+- Data Scraper: verify Selection/Search set scopes populate and resolve items correctly.
+- Data Matrix Column Builder: confirm filtering + rapid toggles no longer crash (WPF-UI animations).
+- Data Matrix: verify scope-based column culling + JSONL export formatting across modes.
+- Quick Colour: verify Profiles tab apply no longer asks for category/property when a saved profile is selected.
 - Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
 - Quick Colour: scope filtering + profile scope encoding need verification across selection set/tree/property filter.
 - Quick Colour: verify palette ordering/labels, shade expansion, and Default stable colors behavior.
 - Quick Colour: some hierarchy/quick-colour applies still miss low-count types when Max types is small; decide default for Max types and add UI hint.
 - Viewpoints Generator: PropertyGroups mode is a placeholder (plan empty).
-- Build not rerun after latest Quick Colour + Data Scraper changes.
 
 ## Key files touched
+- `MicroEng.Navisworks/NavisworksSelectionSetUtils.cs`
+- `MicroEng.Navisworks/DataScraperService.cs`
+- `MicroEng.Navisworks/DataMatrixModels.cs`
+- `MicroEng.Navisworks/DataMatrixPresetManager.cs`
+- `MicroEng.Navisworks/DataMatrixRowBuilder.cs`
+- `MicroEng.Navisworks/DataMatrixExporter.cs`
+- `MicroEng.Navisworks/DataMatrixControl.xaml`
+- `MicroEng.Navisworks/DataMatrixControl.xaml.cs`
+- `MicroEng.Navisworks/DataMatrixColumnBuilderWindow.xaml`
+- `MicroEng.Navisworks/DataMatrixColumnBuilderWindow.xaml.cs`
 - `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorModels.cs`
 - `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorNavisworksService.cs`
 - `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorControl.xaml`
@@ -153,6 +174,11 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
+- Data Matrix: default view opens with no columns; loading a preset restores columns/scope.
+- Data Matrix: Column Builder search filters the tree; tri-state parent reflects child state; right list toggles add/remove without crash.
+- Data Matrix: scope culling hides properties not present in selected scope; selection/search set scopes resolve items.
+- Data Matrix: JSONL export works in Item docs/Raw rows modes, optional .jsonl.gz.
+- Crash reporting: unhandled exception writes a file under CrashReports with log tail + pane summary.
 - Data Scraper: status flips to “Processing - Please Wait” in orange while running; returns to Ready after.
 - Data Scraper: Export Now disabled until Output path set; Export Now keeps scroll position.
 - Data Scraper: ArrowSync icons show during Run/Export; snackbars appear on success/error.

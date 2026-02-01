@@ -187,6 +187,7 @@ namespace MicroEng.Navisworks
 
             var snapshot = CaptureDockPanes(gui, exclusions);
             var builtInSnapshot = CaptureBuiltInDockPanes(gui.MainWindow, snapshot.CapturedDisplayNames);
+            LogDockPaneSummary("Hide", snapshot.VisibleById, builtInSnapshot);
             foreach (var kvp in snapshot.VisibleById)
             {
                 if (!kvp.Value)
@@ -211,6 +212,7 @@ namespace MicroEng.Navisworks
                     continue;
                 }
 
+                MicroEngActions.Log($"DockPanes: hiding built-in {kvp.Key}");
                 TryExecuteBuiltInCommand(kvp.Key);
             }
 
@@ -236,6 +238,7 @@ namespace MicroEng.Navisworks
                 return;
             }
 
+            LogDockPaneSummary("Restore", snapshot.VisibleById, snapshot.BuiltInVisibleByCommandId);
             foreach (var kvp in snapshot.VisibleById)
             {
                 try
@@ -255,7 +258,54 @@ namespace MicroEng.Navisworks
                     continue;
                 }
 
+                MicroEngActions.Log($"DockPanes: restoring built-in {kvp.Key}");
                 TryExecuteBuiltInCommand(kvp.Key);
+            }
+        }
+
+        internal static string GetBuiltInDockPaneVisibilitySummary()
+        {
+            try
+            {
+                var gui = NavisApp.Gui;
+                if (gui?.MainWindow == null)
+                {
+                    return "GUI unavailable";
+                }
+
+                var snapshot = CaptureBuiltInDockPanes(gui.MainWindow, new HashSet<string>());
+                if (snapshot == null || snapshot.Count == 0)
+                {
+                    return "none";
+                }
+
+                return string.Join(", ", snapshot.Select(kvp => $"{kvp.Key}={(kvp.Value ? "Visible" : "Hidden")}"));
+            }
+            catch (Exception ex)
+            {
+                return $"error: {ex.Message}";
+            }
+        }
+
+        private static void LogDockPaneSummary(string phase, Dictionary<string, bool> pluginSnapshot, Dictionary<string, bool> builtInSnapshot)
+        {
+            try
+            {
+                var pluginVisible = pluginSnapshot?.Count(kvp => kvp.Value) ?? 0;
+                var pluginTotal = pluginSnapshot?.Count ?? 0;
+                var builtInVisible = builtInSnapshot?.Count(kvp => kvp.Value) ?? 0;
+                var builtInTotal = builtInSnapshot?.Count ?? 0;
+
+                MicroEngActions.Log($"DockPanes: {phase} snapshot. PluginVisible={pluginVisible}/{pluginTotal}, BuiltInVisible={builtInVisible}/{builtInTotal}");
+
+                if (builtInSnapshot != null && builtInSnapshot.TryGetValue("ClashWindowCommand.Navisworks", out var clashVisible))
+                {
+                    MicroEngActions.Log($"DockPanes: {phase} Clash Detective visible={clashVisible}");
+                }
+            }
+            catch
+            {
+                // ignore
             }
         }
 

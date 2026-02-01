@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 
 namespace MicroEng.Navisworks
 {
@@ -31,11 +32,12 @@ namespace MicroEng.Navisworks
         Descending
     }
 
+    [DataContract]
     internal class DataMatrixSortDefinition
     {
-        public string AttributeId { get; set; }
-        public SortDirection Direction { get; set; }
-        public int Priority { get; set; }
+        [DataMember(Order = 1)] public string AttributeId { get; set; }
+        [DataMember(Order = 2)] public SortDirection Direction { get; set; }
+        [DataMember(Order = 3)] public int Priority { get; set; }
     }
 
     internal enum DataMatrixFilterOperator
@@ -51,21 +53,46 @@ namespace MicroEng.Navisworks
         InList
     }
 
+    [DataContract]
     internal class DataMatrixColumnFilter
     {
-        public string AttributeId { get; set; }
-        public DataMatrixFilterOperator Operator { get; set; }
-        public string Value { get; set; }
-        public List<string> ValuesList { get; set; } = new List<string>();
+        [DataMember(Order = 1)] public string AttributeId { get; set; }
+        [DataMember(Order = 2)] public DataMatrixFilterOperator Operator { get; set; }
+        [DataMember(Order = 3)] public string Value { get; set; }
+        [DataMember(Order = 4)] public List<string> ValuesList { get; set; } = new List<string>();
     }
 
+    [DataContract]
+    internal enum DataMatrixScopeKind
+    {
+        [EnumMember] EntireSession,
+        [EnumMember] CurrentSelection,
+        [EnumMember] SingleItem,
+        [EnumMember] SelectionSet,
+        [EnumMember] SearchSet
+    }
+
+    [DataContract]
+    internal enum DataMatrixJsonlMode
+    {
+        [EnumMember] ItemDocuments,
+        [EnumMember] RawRows
+    }
+
+    [DataContract]
     internal class DataMatrixViewPreset
     {
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public string ScraperProfileName { get; set; }
-        public List<string> VisibleAttributeIds { get; set; } = new List<string>();
-        public List<DataMatrixSortDefinition> SortDefinitions { get; set; } = new List<DataMatrixSortDefinition>();
-        public List<DataMatrixColumnFilter> Filters { get; set; } = new List<DataMatrixColumnFilter>();
+        [DataMember(Order = 1)] public string Id { get; set; }
+        [DataMember(Order = 2)] public string Name { get; set; }
+        [DataMember(Order = 3)] public string ScraperProfileName { get; set; }
+
+        [DataMember(Order = 4)] public DataMatrixScopeKind ScopeKind { get; set; } = DataMatrixScopeKind.EntireSession;
+        [DataMember(Order = 5)] public string ScopeSetName { get; set; }
+        [DataMember(Order = 6)] public bool JoinMultiValues { get; set; } = false;
+        [DataMember(Order = 7)] public string MultiValueSeparator { get; set; } = "; ";
+
+        [DataMember(Order = 8)] public List<string> VisibleAttributeIds { get; set; } = new List<string>();
+        [DataMember(Order = 9)] public List<DataMatrixSortDefinition> SortDefinitions { get; set; } = new List<DataMatrixSortDefinition>();
+        [DataMember(Order = 10)] public List<DataMatrixColumnFilter> Filters { get; set; } = new List<DataMatrixColumnFilter>();
     }
 }

@@ -58,13 +58,34 @@
                     <ComboBox x:Name="ProfileCombo" Width="180" Margin="0,0,8,0" />
                     <ui:Button x:Name="RefreshProfilesButton" Content="Refresh" Margin="0,0,12,0" />
 
+                    <TextBlock Text="Scope:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="ScopeCombo"
+                              Width="170"
+                              Margin="0,0,8,0"
+                              ToolTip="Choose how to filter items for this schedule.">
+                      <ComboBoxItem Content="Entire session" Tag="EntireSession" />
+                      <ComboBoxItem Content="Current selection" Tag="CurrentSelection" />
+                      <ComboBoxItem Content="Selection set" Tag="SelectionSet" />
+                      <ComboBoxItem Content="Search set" Tag="SearchSet" />
+                      <ComboBoxItem Content="Single item" Tag="SingleItem" />
+                    </ComboBox>
+                    <ComboBox x:Name="ScopeSetCombo"
+                              Width="200"
+                              Margin="0,0,8,0"
+                              IsEnabled="False"
+                              ToolTip="Choose a saved Selection/Search Set (only when scope uses sets)." />
+                    <ui:Button x:Name="RefreshScopeSetsButton"
+                               Content="Refresh Sets"
+                               Margin="0,0,12,0"
+                               ToolTip="Reload Selection/Search set names from the model." />
+
                     <TextBlock Text="View:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                     <ComboBox x:Name="ViewPresetCombo" Width="160" Margin="0,0,8,0" />
                     <ui:Button x:Name="SaveViewButton" Content="Save" Margin="0,0,8,0"/>
                     <ui:Button x:Name="SaveViewAsButton" Content="Save As" Margin="0,0,8,0"/>
                     <ui:Button x:Name="DeleteViewButton" Content="Delete" Margin="0,0,12,0"/>
 
-                    <ui:Button x:Name="ColumnsButton" Content="Columns..." Margin="0,0,12,0"/>
+                    <ui:Button x:Name="ColumnsButton" Content="Column Builder" Margin="0,0,12,0"/>
                     <ui:ToggleSwitch x:Name="SyncToggle" OffContent="Sync selection" OnContent="Sync selection" Margin="0,0,12,0" />
                     <CheckBox x:Name="SelectedOnlyCheck"
                               Content="Selected only"
@@ -76,6 +97,11 @@
                             <ContextMenu>
                                 <MenuItem Header="Filtered to CSV..." x:Name="ExportFilteredMenu"/>
                                 <MenuItem Header="All to CSV..." x:Name="ExportAllMenu"/>
+                                <Separator />
+                                <MenuItem Header="Export JSONL (Item docs) - Filtered" x:Name="ExportJsonlItemFilteredMenu" />
+                                <MenuItem Header="Export JSONL (Item docs) - All" x:Name="ExportJsonlItemAllMenu" />
+                                <MenuItem Header="Export JSONL (Raw rows) - Filtered" x:Name="ExportJsonlRawFilteredMenu" />
+                                <MenuItem Header="Export JSONL (Raw rows) - All" x:Name="ExportJsonlRawAllMenu" />
                             </ContextMenu>
                         </ui:DropDownButton.Flyout>
                     </ui:DropDownButton>

@@ -1359,7 +1359,11 @@ namespace MicroEng.Navisworks.QuickColour
             ApplyQuickColour(permanent: true, sender as System.Windows.Controls.Button);
         }
 
-        private void ApplyQuickColour(bool permanent, System.Windows.Controls.Button sourceButton = null)
+        private void ApplyQuickColour(bool permanent,
+            System.Windows.Controls.Button sourceButton = null,
+            string categoryOverride = null,
+            string propertyOverride = null,
+            MicroEngColourProfile profileOverride = null)
         {
             var doc = NavisApp.ActiveDocument;
             if (doc == null)
@@ -1374,9 +1378,14 @@ namespace MicroEng.Navisworks.QuickColour
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(QuickColourCategory) || string.IsNullOrWhiteSpace(QuickColourProperty))
+            var category = string.IsNullOrWhiteSpace(categoryOverride) ? QuickColourCategory : categoryOverride;
+            var property = string.IsNullOrWhiteSpace(propertyOverride) ? QuickColourProperty : propertyOverride;
+
+            if (string.IsNullOrWhiteSpace(category) || string.IsNullOrWhiteSpace(property))
             {
-                StatusText = "Pick Category and Property first.";
+                StatusText = profileOverride != null
+                    ? "Profile is missing Category/Property info."
+                    : "Pick Category and Property first.";
                 return;
             }
 
@@ -1398,12 +1407,12 @@ namespace MicroEng.Navisworks.QuickColour
                 var expected = QuickColourValues
                     .Where(v => v != null && v.Enabled)
                     .Sum(v => Math.Max(0, v.Count));
-                Log($"QuickColour: expected count from cache={expected} for {QuickColourCategory}.{QuickColourProperty}.");
+                Log($"QuickColour: expected count from cache={expected} for {category}.{property}.");
 
                 var count = _service.ApplyBySingleProperty(
                     doc,
-                    QuickColourCategory,
-                    QuickColourProperty,
+                    category,
+                    property,
                     QuickColourValues,
                     QuickColourScope,
                     QuickColourScopeSelectionSetName,
@@ -2155,12 +2164,28 @@ namespace MicroEng.Navisworks.QuickColour
                 }
 
                 _skipHierarchyRecolor = true;
-                ApplyHierarchy(permanent: mode == MicroEngColourApplyMode.Permanent, sourceButton: null);
+                var l1Category = profile.Generator?.CategoryName ?? "";
+                var l1Property = profile.Generator?.PropertyName ?? "";
+                var notes = profile.Generator?.Notes ?? "";
+                TryParseHierarchyNotes(notes, out var l2Category, out var l2Property);
+                ApplyHierarchy(permanent: mode == MicroEngColourApplyMode.Permanent,
+                    sourceButton: null,
+                    l1CategoryOverride: l1Category,
+                    l1PropertyOverride: l1Property,
+                    l2CategoryOverride: l2Category,
+                    l2PropertyOverride: l2Property,
+                    profileOverride: profile);
                 return;
             }
 
             LoadQuickColourProfile(profile);
-            ApplyQuickColour(permanent: mode == MicroEngColourApplyMode.Permanent, sourceButton: null);
+            var category = profile.Generator?.CategoryName ?? "";
+            var property = profile.Generator?.PropertyName ?? "";
+            ApplyQuickColour(permanent: mode == MicroEngColourApplyMode.Permanent,
+                sourceButton: null,
+                categoryOverride: category,
+                propertyOverride: property,
+                profileOverride: profile);
         }
 
         private void SaveQuickColourProfile_Click(object sender, RoutedEventArgs e)
@@ -2878,7 +2903,13 @@ namespace MicroEng.Navisworks.QuickColour
             StatusText = "Permanent colors reset.";
         }
 
-        private void ApplyHierarchy(bool permanent, System.Windows.Controls.Button sourceButton = null)
+        private void ApplyHierarchy(bool permanent,
+            System.Windows.Controls.Button sourceButton = null,
+            string l1CategoryOverride = null,
+            string l1PropertyOverride = null,
+            string l2CategoryOverride = null,
+            string l2PropertyOverride = null,
+            MicroEngColourProfile profileOverride = null)
         {
             var skipRecolor = _skipHierarchyRecolor;
             _skipHierarchyRecolor = false;
@@ -2896,12 +2927,19 @@ namespace MicroEng.Navisworks.QuickColour
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(_hierarchyL1Category)
-                || string.IsNullOrWhiteSpace(_hierarchyL1Property)
-                || string.IsNullOrWhiteSpace(_hierarchyL2Category)
-                || string.IsNullOrWhiteSpace(_hierarchyL2Property))
+            var l1Category = string.IsNullOrWhiteSpace(l1CategoryOverride) ? _hierarchyL1Category : l1CategoryOverride;
+            var l1Property = string.IsNullOrWhiteSpace(l1PropertyOverride) ? _hierarchyL1Property : l1PropertyOverride;
+            var l2Category = string.IsNullOrWhiteSpace(l2CategoryOverride) ? _hierarchyL2Category : l2CategoryOverride;
+            var l2Property = string.IsNullOrWhiteSpace(l2PropertyOverride) ? _hierarchyL2Property : l2PropertyOverride;
+
+            if (string.IsNullOrWhiteSpace(l1Category)
+                || string.IsNullOrWhiteSpace(l1Property)
+                || string.IsNullOrWhiteSpace(l2Category)
+                || string.IsNullOrWhiteSpace(l2Property))
             {
-                StatusText = "Pick Level 1 and Level 2 properties first.";
+                StatusText = profileOverride != null
+                    ? "Profile is missing Level 1/Level 2 property info."
+                    : "Pick Level 1 and Level 2 properties first.";
                 return;
             }
 
@@ -2929,14 +2967,14 @@ namespace MicroEng.Navisworks.QuickColour
                     .Where(g => g != null && g.Enabled)
                     .SelectMany(g => g.Types.Where(t => t != null && t.Enabled))
                     .Sum(t => Math.Max(0, t.Count));
-                Log($"QuickColour(Hierarchy): expected count from cache={expected} for {_hierarchyL1Category}.{_hierarchyL1Property} -> {_hierarchyL2Category}.{_hierarchyL2Property}.");
+                Log($"QuickColour(Hierarchy): expected count from cache={expected} for {l1Category}.{l1Property} -> {l2Category}.{l2Property}.");
 
                 var count = _service.ApplyByHierarchy(
                     doc,
-                    _hierarchyL1Category,
-                    _hierarchyL1Property,
-                    _hierarchyL2Category,
-                    _hierarchyL2Property,
+                    l1Category,
+                    l1Property,
+                    l2Category,
+                    l2Property,
                     HierarchyGroups,
                     SelectedScope,
                     HierarchyScopeSelectionSetName,

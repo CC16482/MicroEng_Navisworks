@@ -4,6 +4,8 @@ using System.Drawing;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using WpfWindow = System.Windows.Window;
 using Autodesk.Navisworks.Api;
@@ -145,6 +147,7 @@ namespace MicroEng.Navisworks
 
         private static bool _dispatcherHooked;
         private static bool _taskSchedulerHooked;
+        private static int _crashReportIndex;
 
         private static void SafeWireUnhandledExceptionLogging()
         {
@@ -211,6 +214,7 @@ namespace MicroEng.Navisworks
             {
                 var ex = e.ExceptionObject as Exception;
                 Log($"[Unhandled] {(e.IsTerminating ? "Terminating" : "Non-terminating")}: {ex}");
+                WriteCrashReport("Unhandled", ex, e.IsTerminating);
             }
             catch
             {
@@ -223,6 +227,7 @@ namespace MicroEng.Navisworks
             try
             {
                 Log($"[DispatcherUnhandled] {e.Exception}");
+                WriteCrashReport("DispatcherUnhandled", e.Exception, isTerminating: true);
             }
             catch
             {
@@ -239,6 +244,111 @@ namespace MicroEng.Navisworks
             catch
             {
                 // swallow
+            }
+        }
+
+        private static void WriteCrashReport(string source, Exception ex, bool isTerminating)
+        {
+            try
+            {
+                var dir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MicroEng.Navisworks",
+                    "NavisErrors",
+                    "CrashReports");
+
+                Directory.CreateDirectory(dir);
+
+                var index = Interlocked.Increment(ref _crashReportIndex);
+                var fileName = $"Crash_{DateTime.Now:yyyyMMdd_HHmmss}_{source}_{index}.txt";
+                var path = Path.Combine(dir, fileName);
+
+                var sb = new StringBuilder();
+                sb.AppendLine("MicroEng Crash Report");
+                sb.AppendLine($"Timestamp: {DateTime.Now:O}");
+                sb.AppendLine($"Source: {source}");
+                sb.AppendLine($"IsTerminating: {isTerminating}");
+                sb.AppendLine($"ThreadId: {Thread.CurrentThread.ManagedThreadId}");
+
+                try
+                {
+                    using var proc = Process.GetCurrentProcess();
+                    sb.AppendLine($"Process: {proc.MainModule?.FileName ?? "<unknown>"}");
+                    sb.AppendLine($"ProcessId: {proc.Id}");
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    sb.AppendLine($"BaseDir: {AppDomain.CurrentDomain.BaseDirectory}");
+                    sb.AppendLine($"Assembly: {typeof(MicroEngActions).Assembly.Location}");
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    var doc = NavisApp.ActiveDocument;
+                    sb.AppendLine($"Document: {doc?.FileName ?? "<none>"}");
+                    sb.AppendLine($"SelectionCount: {doc?.CurrentSelection?.SelectedItems?.Count ?? 0}");
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                try
+                {
+                    var builtInSummary = NavisworksDockPaneManager.GetBuiltInDockPaneVisibilitySummary();
+                    sb.AppendLine($"BuiltInDockPanes: {builtInSummary}");
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("Exception:");
+                sb.AppendLine(ex?.ToString() ?? "<null>");
+
+                sb.AppendLine();
+                sb.AppendLine("Recent MicroEng.log:");
+                AppendRecentLogLines(sb, LogFilePathPrimary, 200);
+
+                File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
+                Log($"[CrashReport] Wrote {path}");
+            }
+            catch
+            {
+                // swallow
+            }
+        }
+
+        private static void AppendRecentLogLines(StringBuilder sb, string path, int maxLines)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    sb.AppendLine("(log file missing)");
+                    return;
+                }
+
+                var lines = File.ReadAllLines(path);
+                var start = Math.Max(0, lines.Length - Math.Max(1, maxLines));
+                for (var i = start; i < lines.Length; i++)
+                {
+                    sb.AppendLine(lines[i]);
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"(log read failed: {ex.Message})");
             }
         }
 

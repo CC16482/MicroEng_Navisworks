@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using System.Windows.Media;
 using Autodesk.Navisworks.Api;
 using Microsoft.Win32;
@@ -21,16 +20,20 @@ namespace MicroEng.Navisworks
         }
 
         private readonly DataMatrixRowBuilder _builder = new();
-        private readonly IDataMatrixPresetManager _presetManager = new InMemoryPresetManager();
+        private readonly IDataMatrixPresetManager _presetManager = new FilePresetManager();
         private readonly DataMatrixExporter _exporter = new();
 
         private List<DataMatrixAttributeDefinition> _attributes = new();
+        private List<DataMatrixAttributeDefinition> _attributeCatalogAll = new();
         private List<DataMatrixRow> _allRows = new();
         private ObservableCollection<DataMatrixRow> _viewRows = new();
         private readonly Dictionary<Guid, ModelItem> _itemCache = new();
 
         private bool _syncEnabled;
         private DataMatrixViewPreset _currentPreset;
+        private ScrapeSession _currentSession;
+        private List<string> _visibleColumnOverride;
+        private bool _updatingScope;
 
         public DataMatrixControl()
         {
@@ -45,6 +48,15 @@ namespace MicroEng.Navisworks
             RefreshProfilesButton.Click += (s, e) => RefreshProfiles();
             ProfileCombo.SelectionChanged += (s, e) => LoadProfileSession();
 
+            ScopeCombo.SelectedIndex = 0;
+            ScopeCombo.SelectionChanged += (s, e) => OnScopeChanged();
+            ScopeSetCombo.SelectionChanged += (s, e) => OnScopeSetChanged();
+            RefreshScopeSetsButton.Click += (s, e) =>
+            {
+                RefreshScopeSets();
+                RebuildMatrixFromCurrentState();
+            };
+
             SaveViewButton.Click += (s, e) => SavePreset(saveAs: false);
             SaveViewAsButton.Click += (s, e) => SavePreset(saveAs: true);
             DeleteViewButton.Click += (s, e) => DeletePreset();
@@ -58,6 +70,10 @@ namespace MicroEng.Navisworks
 
             ExportFilteredMenu.Click += (s, e) => ExportCsv(filtered: true);
             ExportAllMenu.Click += (s, e) => ExportCsv(filtered: false);
+            ExportJsonlItemFilteredMenu.Click += (s, e) => ExportJsonl(filtered: true, DataMatrixJsonlMode.ItemDocuments);
+            ExportJsonlItemAllMenu.Click += (s, e) => ExportJsonl(filtered: false, DataMatrixJsonlMode.ItemDocuments);
+            ExportJsonlRawFilteredMenu.Click += (s, e) => ExportJsonl(filtered: true, DataMatrixJsonlMode.RawRows);
+            ExportJsonlRawAllMenu.Click += (s, e) => ExportJsonl(filtered: false, DataMatrixJsonlMode.RawRows);
 
             MatrixGrid.SelectionChanged += MatrixGrid_SelectionChanged;
         }
@@ -87,24 +103,25 @@ namespace MicroEng.Navisworks
             {
                 MatrixGrid.ItemsSource = null;
                 _attributes.Clear();
+                _attributeCatalogAll.Clear();
                 _allRows.Clear();
+                _currentSession = null;
+                _visibleColumnOverride = null;
                 RowsStatus.Text = "Rows: 0";
                 ProfileStatus.Text = $"Profile: {profile} (no sessions)";
                 return;
             }
 
             DataScraperCache.LastSession = session;
-            var built = _builder.Build(session);
-            _attributes = built.Attributes;
-            _allRows = built.Rows;
+            _currentSession = session;
+            _attributeCatalogAll = _builder.BuildAttributeCatalog(session);
             _itemCache.Clear();
-            BuildColumns();
-            ApplyFiltersAndSorts();
             LoadPresets(profile);
+            ApplyPresetSelection();
             ProfileStatus.Text = $"Profile: {profile} @ {session.Timestamp:t}";
         }
 
-        private void BuildColumns()
+        private void BuildGridColumns(IList<string> visibleIds)
         {
             MatrixGrid.Columns.Clear();
             MatrixGrid.Columns.Add(new DataGridTextColumn
@@ -114,9 +131,23 @@ namespace MicroEng.Navisworks
                 Width = 180
             });
 
-            var visibleIds = _currentPreset?.VisibleAttributeIds?.ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var attr in _attributes.Where(a => visibleIds == null ? a.IsVisibleByDefault : visibleIds.Contains(a.Id)))
+            if (visibleIds == null)
             {
+                var catalog = _attributeCatalogAll.Count > 0 ? _attributeCatalogAll : _attributes;
+                visibleIds = catalog
+                    .Where(a => a.IsVisibleByDefault)
+                    .Select(a => a.Id)
+                    .ToList();
+            }
+
+            var ids = (visibleIds ?? new List<string>())
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToList();
+
+            foreach (var id in ids)
+            {
+                var attr = _attributes.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase));
+                if (attr == null) continue;
                 MatrixGrid.Columns.Add(new DataGridTextColumn
                 {
                     Header = attr.DisplayName ?? attr.PropertyName,
@@ -124,6 +155,250 @@ namespace MicroEng.Navisworks
                     Width = attr.DefaultWidth > 0 ? attr.DefaultWidth : 140
                 });
             }
+        }
+
+        private List<string> GetVisibleAttributeIds()
+        {
+            if (_visibleColumnOverride != null)
+            {
+                return _visibleColumnOverride
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            if (_currentPreset?.VisibleAttributeIds != null && _currentPreset.VisibleAttributeIds.Count > 0)
+            {
+                return _currentPreset.VisibleAttributeIds
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            return new List<string>();
+        }
+
+        private void RebuildMatrixFromCurrentState()
+        {
+            if (_currentSession == null)
+            {
+                MatrixGrid.ItemsSource = null;
+                _attributes.Clear();
+                _allRows.Clear();
+                RowsStatus.Text = "Rows: 0";
+                ViewStatus.Text = $"View: {_currentPreset?.Name ?? "(Default)"}";
+                return;
+            }
+
+            var visibleIds = GetVisibleAttributeIds();
+            if (visibleIds.Count == 0)
+            {
+                _attributes = new List<DataMatrixAttributeDefinition>();
+                _allRows = new List<DataMatrixRow>();
+                _itemCache.Clear();
+
+                BuildGridColumns(visibleIds);
+                _viewRows = new ObservableCollection<DataMatrixRow>();
+                MatrixGrid.ItemsSource = _viewRows;
+                RowsStatus.Text = "Rows: 0 (choose columns)";
+                ViewStatus.Text = $"View: {_currentPreset?.Name ?? "(Default)"}";
+                return;
+            }
+
+            var scopeKeys = ResolveScopeItemKeys();
+            var joinMulti = _currentPreset?.JoinMultiValues ?? false;
+            var separator = string.IsNullOrWhiteSpace(_currentPreset?.MultiValueSeparator) ? "; " : _currentPreset.MultiValueSeparator;
+
+            var built = _builder.Build(_currentSession, visibleIds, scopeKeys, joinMulti, separator);
+            _attributes = built.Attributes;
+            _allRows = built.Rows;
+            _itemCache.Clear();
+
+            BuildGridColumns(visibleIds);
+            ApplyFiltersAndSorts();
+        }
+
+        private DataMatrixScopeKind GetScopeKindFromUi()
+        {
+            var tag = (ScopeCombo.SelectedItem as ComboBoxItem)?.Tag as string
+                      ?? (ScopeCombo.SelectedItem as ComboBoxItem)?.Content as string;
+            if (!string.IsNullOrWhiteSpace(tag) && Enum.TryParse(tag, out DataMatrixScopeKind parsed))
+            {
+                return parsed;
+            }
+
+            return DataMatrixScopeKind.EntireSession;
+        }
+
+        private string GetSelectedScopeSetName()
+        {
+            return ScopeSetCombo.SelectedItem?.ToString() ?? string.Empty;
+        }
+
+        private void SetScopeUi(DataMatrixScopeKind kind, string setName)
+        {
+            _updatingScope = true;
+            try
+            {
+                foreach (var item in ScopeCombo.Items)
+                {
+                    if (item is ComboBoxItem combo && string.Equals(combo.Tag as string, kind.ToString(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        ScopeCombo.SelectedItem = combo;
+                        break;
+                    }
+                }
+
+                RefreshScopeSets(setName);
+            }
+            finally
+            {
+                _updatingScope = false;
+            }
+        }
+
+        private void OnScopeChanged()
+        {
+            if (_updatingScope) return;
+            RefreshScopeSets();
+
+            var kind = GetScopeKindFromUi();
+            if (kind != DataMatrixScopeKind.SelectionSet && kind != DataMatrixScopeKind.SearchSet)
+            {
+                RebuildMatrixFromCurrentState();
+            }
+            else if (ScopeSetCombo.Items.Count == 0)
+            {
+                RebuildMatrixFromCurrentState();
+            }
+        }
+
+        private void OnScopeSetChanged()
+        {
+            if (_updatingScope) return;
+            RebuildMatrixFromCurrentState();
+        }
+
+        private void RefreshScopeSets(string desiredSelection = null)
+        {
+            var kind = GetScopeKindFromUi();
+            ScopeSetCombo.Items.Clear();
+            ScopeSetCombo.SelectedItem = null;
+
+            var enableSets = kind == DataMatrixScopeKind.SelectionSet || kind == DataMatrixScopeKind.SearchSet;
+            ScopeSetCombo.IsEnabled = enableSets;
+            if (!enableSets)
+            {
+                return;
+            }
+
+            var doc = NavisApp.ActiveDocument;
+            var names = kind == DataMatrixScopeKind.SelectionSet
+                ? NavisworksSelectionSetUtils.GetSelectionSetNames(doc)
+                : NavisworksSelectionSetUtils.GetSearchSetNames(doc);
+
+            foreach (var name in names)
+            {
+                ScopeSetCombo.Items.Add(name);
+            }
+
+            var target = desiredSelection;
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                target = _currentPreset?.ScopeSetName ?? ScopeSetCombo.SelectedItem?.ToString();
+            }
+
+            if (!string.IsNullOrWhiteSpace(target))
+            {
+                var match = ScopeSetCombo.Items
+                    .Cast<object>()
+                    .FirstOrDefault(item => string.Equals(item?.ToString(), target, StringComparison.OrdinalIgnoreCase));
+                if (match != null)
+                {
+                    ScopeSetCombo.SelectedItem = match;
+                    return;
+                }
+            }
+
+            if (ScopeSetCombo.Items.Count > 0)
+            {
+                ScopeSetCombo.SelectedIndex = 0;
+            }
+        }
+
+        private ISet<string> ResolveScopeItemKeys()
+        {
+            var kind = GetScopeKindFromUi();
+            if (kind == DataMatrixScopeKind.EntireSession)
+            {
+                return null;
+            }
+
+            var doc = NavisApp.ActiveDocument;
+            if (doc == null)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            IEnumerable<ModelItem> items = Enumerable.Empty<ModelItem>();
+            switch (kind)
+            {
+                case DataMatrixScopeKind.CurrentSelection:
+                    items = doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
+                    break;
+                case DataMatrixScopeKind.SingleItem:
+                    var single = doc.CurrentSelection?.SelectedItems?.FirstOrDefault();
+                    items = single != null ? new[] { single } : Enumerable.Empty<ModelItem>();
+                    break;
+                case DataMatrixScopeKind.SelectionSet:
+                    items = NavisworksSelectionSetUtils.GetItemsFromSet(doc, GetSelectedScopeSetName(), expectSearchSet: false, out _);
+                    break;
+                case DataMatrixScopeKind.SearchSet:
+                    items = NavisworksSelectionSetUtils.GetItemsFromSet(doc, GetSelectedScopeSetName(), expectSearchSet: true, out _);
+                    break;
+            }
+
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in items)
+            {
+                if (item == null) continue;
+                try
+                {
+                    keys.Add(item.InstanceGuid.ToString("D"));
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+
+            return keys;
+        }
+
+        private HashSet<string> GetAvailableAttributeIdsForScope(ISet<string> itemKeys)
+        {
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (_currentSession == null)
+            {
+                return ids;
+            }
+
+            if (itemKeys == null)
+            {
+                foreach (var attr in _attributeCatalogAll)
+                {
+                    ids.Add(attr.Id);
+                }
+                return ids;
+            }
+
+            foreach (var entry in _currentSession.RawEntries ?? Enumerable.Empty<RawEntry>())
+            {
+                if (string.IsNullOrWhiteSpace(entry.ItemKey)) continue;
+                if (!itemKeys.Contains(entry.ItemKey)) continue;
+                var id = $"{entry.Category}|{entry.Name}";
+                ids.Add(id);
+            }
+
+            return ids;
         }
 
         private void ApplyFiltersAndSorts()
@@ -244,6 +519,7 @@ namespace MicroEng.Navisworks
             foreach (var p in presets) ViewPresetCombo.Items.Add(new ComboBoxItem { Content = p.Name, Tag = p });
             ViewPresetCombo.SelectedIndex = 0;
             _currentPreset = null;
+            _visibleColumnOverride = null;
         }
 
         private void ApplyPresetSelection()
@@ -256,8 +532,19 @@ namespace MicroEng.Navisworks
             {
                 _currentPreset = null;
             }
-            BuildColumns();
-            ApplyFiltersAndSorts();
+
+            _visibleColumnOverride = null;
+
+            if (_currentPreset != null)
+            {
+                SetScopeUi(_currentPreset.ScopeKind, _currentPreset.ScopeSetName);
+            }
+            else
+            {
+                SetScopeUi(DataMatrixScopeKind.EntireSession, null);
+            }
+
+            RebuildMatrixFromCurrentState();
         }
 
         private void SavePreset(bool saveAs)
@@ -274,6 +561,13 @@ namespace MicroEng.Navisworks
                 .Skip(1) // skip Element column
                 .Select(c => ((System.Windows.Data.Binding)((DataGridBoundColumn)c).Binding).Path.Path.Replace("Values[", string.Empty).TrimEnd(']'))
                 .ToList();
+            var scopeKind = GetScopeKindFromUi();
+            preset.ScopeKind = scopeKind;
+            preset.ScopeSetName = scopeKind == DataMatrixScopeKind.SelectionSet || scopeKind == DataMatrixScopeKind.SearchSet
+                ? GetSelectedScopeSetName()
+                : string.Empty;
+            preset.JoinMultiValues = _currentPreset?.JoinMultiValues ?? preset.JoinMultiValues;
+            preset.MultiValueSeparator = _currentPreset?.MultiValueSeparator ?? preset.MultiValueSeparator;
 
             _presetManager.SavePreset(preset);
             LoadPresets(profile);
@@ -302,29 +596,57 @@ namespace MicroEng.Navisworks
 
         private void ShowColumnsDialog()
         {
-            var dialog = new ColumnsDialog(_attributes, MatrixGrid.Columns.Skip(1).Select(c => ((System.Windows.Data.Binding)((DataGridBoundColumn)c).Binding).Path.Path.Replace("Values[", string.Empty).TrimEnd(']')).ToList());
+            if (_currentSession == null)
+            {
+                return;
+            }
+
+            var currentOrder = GetVisibleColumnIdsFromGrid();
+            var scopeKeys = ResolveScopeItemKeys();
+            var availableIds = GetAvailableAttributeIdsForScope(scopeKeys);
+
+            var attrById = _attributeCatalogAll
+                .ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
+
+            var ordered = new List<DataMatrixAttributeDefinition>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var id in currentOrder)
+            {
+                if (!availableIds.Contains(id)) continue;
+                if (attrById.TryGetValue(id, out var attr))
+                {
+                    ordered.Add(attr);
+                    seen.Add(id);
+                }
+            }
+
+            var remaining = _attributeCatalogAll
+                .Where(a => availableIds.Contains(a.Id) && !seen.Contains(a.Id))
+                .OrderBy(a => a.Category)
+                .ThenBy(a => a.PropertyName)
+                .ToList();
+
+            ordered.AddRange(remaining);
+
+            var dialog = new DataMatrixColumnBuilderWindow(ordered, currentOrder)
+            {
+                Owner = Window.GetWindow(this)
+            };
             if (dialog.ShowDialog() == true)
             {
                 var visibleIds = dialog.VisibleAttributeIds.ToList();
-                MatrixGrid.Columns.Clear();
-                MatrixGrid.Columns.Add(new DataGridTextColumn
-                {
-                    Header = "Element",
-                    Binding = new System.Windows.Data.Binding("ElementDisplayName"),
-                    Width = 180
-                });
-                foreach (var id in visibleIds)
-                {
-                    var attr = _attributes.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase));
-                    if (attr == null) continue;
-                    MatrixGrid.Columns.Add(new DataGridTextColumn
-                    {
-                        Header = attr.DisplayName ?? attr.PropertyName,
-                        Binding = new System.Windows.Data.Binding($"Values[{attr.Id}]"),
-                        Width = attr.DefaultWidth > 0 ? attr.DefaultWidth : 140
-                    });
-                }
+                _visibleColumnOverride = visibleIds;
+                RebuildMatrixFromCurrentState();
             }
+        }
+
+        private List<string> GetVisibleColumnIdsFromGrid()
+        {
+            return MatrixGrid.Columns
+                .Skip(1)
+                .Select(c => ((System.Windows.Data.Binding)((DataGridBoundColumn)c).Binding).Path.Path.Replace("Values[", string.Empty).TrimEnd(']'))
+                .ToList();
         }
 
         private void ExportCsv(bool filtered)
@@ -344,10 +666,56 @@ namespace MicroEng.Navisworks
                 .Select(id => _attributes.First(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
-            var session = DataScraperCache.LastSession ?? DataScraperCache.AllSessions.FirstOrDefault();
+            var session = _currentSession ?? DataScraperCache.LastSession ?? DataScraperCache.AllSessions.FirstOrDefault();
+            if (session == null)
+            {
+                return;
+            }
             try
             {
                 _exporter.ExportCsv(dlg.FileName, columns, rows, session, _currentPreset);
+                ShowSnackbar("Export complete",
+                    $"Wrote {rows.Count} row(s).",
+                    WpfUiControls.ControlAppearance.Success,
+                    WpfUiControls.SymbolRegular.CheckmarkCircle24);
+            }
+            catch (Exception ex)
+            {
+                ShowSnackbar("Export failed",
+                    ex.Message,
+                    WpfUiControls.ControlAppearance.Danger,
+                    WpfUiControls.SymbolRegular.ErrorCircle24);
+            }
+        }
+
+        private void ExportJsonl(bool filtered, DataMatrixJsonlMode mode)
+        {
+            if (!_allRows.Any()) return;
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "JSONL Files|*.jsonl|GZip JSONL|*.jsonl.gz|All files (*.*)|*.*",
+                FileName = "DataMatrix.jsonl",
+                DefaultExt = ".jsonl"
+            };
+            if (dlg.ShowDialog() != true) return;
+
+            var rows = filtered ? _viewRows.ToList() : _allRows;
+            var columns = MatrixGrid.Columns
+                .Skip(1)
+                .Select(c => ((System.Windows.Data.Binding)((DataGridBoundColumn)c).Binding).Path.Path.Replace("Values[", string.Empty).TrimEnd(']'))
+                .Select(id => _attributes.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase)))
+                .Where(attr => attr != null)
+                .ToList();
+
+            var session = _currentSession ?? DataScraperCache.LastSession ?? DataScraperCache.AllSessions.FirstOrDefault();
+            if (session == null)
+            {
+                return;
+            }
+
+            try
+            {
+                _exporter.ExportJsonl(dlg.FileName, columns, rows, session, _currentPreset, mode);
                 ShowSnackbar("Export complete",
                     $"Wrote {rows.Count} row(s).",
                     WpfUiControls.ControlAppearance.Success,
@@ -452,7 +820,7 @@ namespace MicroEng.Navisworks
 
                 var ordered = currentVisibleOrder ?? attributes.Select(a => a.Id).ToList();
                 var orderedSet = new HashSet<string>(ordered ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                var sorted = attributes.OrderBy(a => a.Category).ThenBy(a => a.PropertyName).ToList();
+                var sorted = (attributes ?? Enumerable.Empty<DataMatrixAttributeDefinition>()).ToList();
 
                 _searchBox = new Wpf.Ui.Controls.TextBox
                 {

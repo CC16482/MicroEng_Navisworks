@@ -233,8 +233,6 @@
           <RowDefinition Height="Auto" />
           <RowDefinition Height="8" />
           <RowDefinition Height="Auto" />
-          <RowDefinition Height="8" />
-          <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Profile -->
@@ -463,18 +461,6 @@
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
         <StackPanel Grid.Row="2">
-          <StackPanel Orientation="Horizontal" Margin="0,0,0,8" VerticalAlignment="Center">
-            <TextBlock Text="Memory:" FontWeight="SemiBold" VerticalAlignment="Center" />
-            <CheckBox x:Name="KeepRawEntriesCheckBox"
-                      Content="Keep raw rows in memory (UI preview)"
-                      Margin="12,0,0,0"
-                      IsChecked="True"
-                      ToolTip="Keeps raw rows for the Raw Data tab." />
-            <TextBlock Text="Preview limit:" Margin="16,0,6,0" VerticalAlignment="Center" />
-            <TextBox x:Name="PreviewRawRowLimitBox" Width="80" Padding="6,2" Text="50000"
-                     ToolTip="Used when raw rows are not kept in memory." />
-          </StackPanel>
-
           <TabControl Background="Transparent"
                       BorderThickness="0"
                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
@@ -579,190 +565,7 @@
         </StackPanel>
       </Grid>
     </ui:Card>
-
-        <!-- Export -->
-        <ui:Card Grid.Row="8" Padding="10" Margin="0" HorizontalContentAlignment="Stretch">
-      <Grid>
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-
-        <StackPanel Grid.Row="0" Orientation="Vertical">
-          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <ui:TextBlock Text="5 Export" FontSize="13" FontWeight="SemiBold" />
-            <Button Style="{StaticResource HelpToggleButtonStyle}"
-                    ToolTip="Export JSONL for database workflows. Optional and independent of the UI preview.">
-              <ui:SymbolIcon Symbol="Info16" />
-            </Button>
-          </StackPanel>
-          <ui:TextBlock Text="Optional JSONL export for database workflows." Margin="0,2,0,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-        </StackPanel>
-
-        <TextBlock x:Name="ExportSummaryText"
-                   Grid.Row="1"
-                   Margin="0,8,0,8"
-                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-
-        <Grid Grid.Row="2">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-          </Grid.RowDefinitions>
-
-          <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,8">
-            <CheckBox x:Name="ExportEnabledCheckBox"
-                      Content="Enable JSONL export"
-                      ToolTip="Write line-delimited JSON during scrape."
-                      Margin="0,0,16,0" />
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
-              <TextBlock Text="Scope:" VerticalAlignment="Center" />
-              <Button Style="{StaticResource HelpToggleButtonStyle}"
-                      ToolTip="Preview Raw uses cached rows. Full Raw requires re-scrape. Property Summaries exports aggregated property stats.">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
-            </StackPanel>
-            <ComboBox x:Name="ExportSourceComboBox" Width="200" SelectedIndex="0" Margin="0,0,16,0"
-                      ToolTip="Preview Raw uses cached rows. Full Raw requires re-scrape. Property Summaries exports aggregated property stats.">
-              <ComboBoxItem Content="Preview Raw (cached)" Tag="PreviewRaw" />
-              <ComboBoxItem Content="Full Raw (re-scrape)" Tag="FullRaw" />
-              <ComboBoxItem Content="Property Summaries" Tag="PropertySummaries" />
-            </ComboBox>
-            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
-              <TextBlock Text="Export:" VerticalAlignment="Center" />
-              <Button Style="{StaticResource HelpToggleButtonStyle}"
-                      ToolTip="Choose Raw Rows (SQL/analytics), Item Documents (search indexing), or Both.">
-                <ui:SymbolIcon Symbol="Info16" />
-              </Button>
-            </StackPanel>
-            <ComboBox x:Name="ExportFormatComboBox" Width="170" SelectedIndex="0" Margin="0,0,12,0"
-                      ToolTip="Raw Rows = per-property rows. Item Documents = per-item JSON. Both writes two files.">
-              <ComboBoxItem Content="Raw Rows" Tag="RawOnly" />
-              <ComboBoxItem Content="Item Documents" Tag="ItemsOnly" />
-              <ComboBoxItem Content="Both" Tag="Both" />
-            </ComboBox>
-            <CheckBox x:Name="ExportStreamDuringScrapeCheckBox"
-                      Content="Stream during scrape"
-                      IsChecked="True"
-                      Margin="16,0,0,0"
-                      VerticalAlignment="Center"
-                      ToolTip="Best for huge models." />
-            <CheckBox x:Name="ExportGzipCheckBox"
-                      Content="gzip (.jsonl.gz)"
-                      Margin="16,0,0,0"
-                      VerticalAlignment="Center"
-                      ToolTip="Smaller and faster to move." />
-          </StackPanel>
-
-          <Grid Grid.Row="1" IsEnabled="{Binding IsChecked, ElementName=ExportEnabledCheckBox}">
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <Grid Grid.Row="0" Margin="0,0,0,8">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-              </Grid.ColumnDefinitions>
-              <TextBlock Text="Output:" VerticalAlignment="Center" Margin="0,0,6,0" />
-              <TextBox x:Name="ExportPathBox"
-                       Grid.Column="1"
-                       Padding="8,4"
-                       Margin="0,0,6,0"
-                       ToolTip="Leave blank to use the default folder in LocalAppData." />
-              <ui:Button Grid.Column="2" Content="Browse" Padding="10,4" Click="BrowseExport_Click"
-                         ToolTip="Choose where to write the JSONL file." />
-              <ui:Button x:Name="ExportNowButton"
-                         Grid.Column="3"
-                         Appearance="Primary"
-                         Background="White"
-                         Foreground="Black"
-                         Padding="12,4"
-                         Margin="8,0,0,0"
-                         ToolTip="Exports using the selected scope and format. Full Raw will re-scrape."
-                         Click="ExportNow_Click">
-                <Grid>
-                  <TextBlock x:Name="ExportNowLabel"
-                             Text="Export Now"
-                             Foreground="Black"
-                             VerticalAlignment="Center"
-                             HorizontalAlignment="Center" />
-                  <ui:SymbolIcon x:Name="ExportNowSpinnerIcon"
-                                 Symbol="ArrowSyncCircle24"
-                                 Filled="True"
-                                 FontSize="26"
-                                 Foreground="#F59E0B"
-                                 Visibility="Collapsed"
-                                 HorizontalAlignment="Center"
-                                 VerticalAlignment="Center" />
-                </Grid>
-              </ui:Button>
-            </Grid>
-
-            <Grid Grid.Row="1">
-              <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-              </Grid.ColumnDefinitions>
-
-              <StackPanel Grid.Column="0" Orientation="Vertical" Margin="0,0,16,0">
-                <ui:TextBlock Text="Identity and Keys" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                  <TextBlock Text="Primary key:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                  <ComboBox x:Name="PrimaryKeyComboBox"
-                            Width="210"
-                            SelectedIndex="2"
-                            ToolTip="Revit->NWC: SourceFile+BestExternalId. IFC: include IFC IDs. DWG: include DWG handle.">
-                    <ComboBoxItem Content="InstanceGuid" Tag="InstanceGuid" />
-                    <ComboBoxItem Content="BestExternalId" Tag="BestExternalId" />
-                    <ComboBoxItem Content="SourceFile+BestExternalId" Tag="SourceFilePlusBestExternalId" />
-                    <ComboBoxItem Content="ItemPath" Tag="ItemPath" />
-                  </ComboBox>
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                  <TextBlock Text="Source key:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                  <ComboBox x:Name="SourceFileKeyModeComboBox" Width="210" SelectedIndex="0"
-                            ToolTip="FileNameOnly keeps keys stable across machines. FullPath is more specific.">
-                    <ComboBoxItem Content="FileNameOnly" Tag="FileNameOnly" />
-                    <ComboBoxItem Content="FullPath" Tag="FullPath" />
-                  </ComboBox>
-                </StackPanel>
-
-                <CheckBox x:Name="NormalizeIdsCheckBox"
-                          Content="Normalize GUID-like IDs"
-                          IsChecked="True"
-                          ToolTip="Normalizes GUIDs but does not alter IFC GlobalId." />
-              </StackPanel>
-
-              <StackPanel Grid.Column="1" Orientation="Vertical">
-                <ui:TextBlock Text="Include" FontWeight="SemiBold" Margin="0,0,0,6" />
-                <CheckBox x:Name="IncludeDocumentFileCheckBox" Content="Document file" IsChecked="True"
-                          ToolTip="Include the Navisworks document file name." />
-                <CheckBox x:Name="IncludeSourceFileCheckBox" Content="Source file" IsChecked="True"
-                          ToolTip="Include the source file name for each item." />
-                <CheckBox x:Name="IncludeNavisInstanceGuidCheckBox" Content="Navis InstanceGuid" IsChecked="True"
-                          ToolTip="Include the Navisworks InstanceGuid identifier." />
-                <CheckBox x:Name="IncludeRevitIdsCheckBox"
-                          Content="Revit IDs (UniqueId / ElementId)"
-                          IsChecked="True"
-                          ToolTip="Revit UniqueId requires Convert element properties enabled." />
-                <CheckBox x:Name="IncludeIfcIdsCheckBox" Content="IFC GlobalId" IsChecked="True"
-                          ToolTip="Include IFC GlobalId when available." />
-                <CheckBox x:Name="IncludeDwgIdsCheckBox" Content="DWG Handle" IsChecked="True"
-                          ToolTip="Include DWG Handle when available." />
-              </StackPanel>
-            </Grid>
-          </Grid>
-        </Grid>
-      </Grid>
-    </ui:Card>
-      </Grid>
+</Grid>
     </ScrollViewer>
 
     <ui:SnackbarPresenter x:Name="SnackbarPresenter"
@@ -773,3 +576,4 @@
                           Panel.ZIndex="10" />
   </Grid>
 </Window>
+

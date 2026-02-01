@@ -1,0 +1,125 @@
+<Window x:Class="MicroEng.Navisworks.DataMatrixColumnBuilderWindow"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:system="clr-namespace:System;assembly=System"
+        xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:local="clr-namespace:MicroEng.Navisworks"
+        Title="Column Builder"
+        Width="980"
+        Height="640"
+        MinWidth="860"
+        MinHeight="560"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResize"
+        Background="{DynamicResource ApplicationBackgroundBrush}"
+        Foreground="{DynamicResource TextFillColorPrimaryBrush}"
+        FontSize="12">
+    <Window.Resources>
+        <ResourceDictionary>
+            <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <ui:TextBlock Text="Column Builder" FontSize="18" FontWeight="SemiBold" />
+            <ui:TextBlock Text="Choose columns by category and confirm which headers to include."
+                          Margin="0,4,0,0"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <ui:Card Grid.Column="0" Padding="10">
+                <DockPanel>
+                    <ui:TextBlock DockPanel.Dock="Top" Text="Choose Columns" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <ui:TextBox DockPanel.Dock="Top"
+                                Margin="0,0,0,8"
+                                PlaceholderText="Search category or property..."
+                                Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}" />
+                    <TreeView ItemsSource="{Binding Categories}"
+                              Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                        <TreeView.ItemContainerStyle>
+                            <Style TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
+                                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
+                            </Style>
+                        </TreeView.ItemContainerStyle>
+                        <TreeView.Resources>
+                            <HierarchicalDataTemplate DataType="{x:Type local:ColumnBuilderCategoryNode}" ItemsSource="{Binding Properties}">
+                                <CheckBox Content="{Binding Name}"
+                                          IsThreeState="True"
+                                          IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                          PreviewMouseLeftButtonDown="CategoryCheckBox_PreviewMouseLeftButtonDown"
+                                          PreviewKeyDown="CategoryCheckBox_PreviewKeyDown" />
+                            </HierarchicalDataTemplate>
+                            <DataTemplate DataType="{x:Type local:ColumnBuilderPropertyNode}">
+                                <CheckBox Content="{Binding PropertyName}"
+                                          IsThreeState="False"
+                                          IsChecked="{Binding IsChecked, Mode=TwoWay}" />
+                            </DataTemplate>
+                        </TreeView.Resources>
+                    </TreeView>
+                </DockPanel>
+            </ui:Card>
+
+            <ui:Card Grid.Column="2" Padding="10">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                        <ui:TextBlock Text="Chosen Columns" FontWeight="SemiBold"/>
+                        <ui:TextBlock Text="{Binding SelectedCountText}"
+                                      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                      Margin="0,4,0,0"/>
+                    </StackPanel>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding SelectedProperties}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:ColumnBuilderPropertyNode}">
+                                <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
+                                          IsThreeState="False"
+                                          Margin="0,2,0,2"
+                                          Style="{x:Null}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding PropertyName}" />
+                                        <TextBlock Text="{Binding CategoryName}"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </StackPanel>
+                                </CheckBox>
+                            </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </DockPanel>
+            </ui:Card>
+        </Grid>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <ui:Button Content="Cancel" Width="90" Margin="0,0,8,0" IsCancel="True" />
+            <ui:Button Content="Apply" Width="110" IsDefault="True" Click="Apply_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,962 @@
+Below is a clean “start fresh” plan + **Codex work order** + **drop‑in code** to refactor Data Matrix into a Revit‑Schedule style “column builder” that:
+
+* **Builds columns first** (schedule definition / “profile”) instead of dumping every property
+* **Culls available columns by scope** (Entire / Current Selection / Selection Set / Search Set / Single Item)
+* **Saves profiles to disk** (so they persist across Navisworks restarts)
+* **Exports JSONL only from Data Matrix** (and removes/avoids JSONL in Data Scraper)
+* Supports **two JSONL modes** + optional **.jsonl.gz**
+
+This is written to match your current codebase structure:
+
+* Data Scraper produces `ScrapeSession.Properties` and `ScrapeSession.RawEntries`【】
+* Data Matrix currently builds *everything* with `_builder.Build(session)`【】 and only exports CSV【】
+* Presets are currently **in-memory only** (`new InMemoryPresetManager()`)【】
+
+---
+
+## New plan (replace Phase 1 + Phase 2 with this single implementation)
+
+### A) Data Scraper becomes “raw capture only”
+
+* Keep scraping exactly as now (no JSONL export).
+* Add **Selection Set / Search Set scope support** (optional but strongly recommended because Data Matrix scope wants parity).
+
+  * This is currently stubbed (“not yet implemented”)【】.
+
+### B) Data Matrix becomes the “structured / schedule / export” stage
+
+1. **Schedule Profiles** (stored using the existing `DataMatrixViewPreset` concept)
+
+   * Persist to `%AppData%\MicroEng\Navisworks\DataMatrix\ViewPresets.json`
+   * Add scope fields to preset: `ScopeKind` + `ScopeSetName`
+   * Add multi-value handling options (join vs overwrite)
+
+2. **Schedule Builder UX**
+
+   * “Columns” dialog shows only columns *available in the current scope* (culling).
+   * Column order is stable and preserved (existing order first).
+
+3. **JSONL export (ONLY from Data Matrix)**
+
+   * Export uses the **current grid columns** (schedule columns).
+   * Two modes:
+
+     * **Item documents**: one JSON per model item (best for document stores / search indexing)
+     * **Raw rows**: property-per-line (best for DB tables)
+   * Optional gzip: `.jsonl.gz`
+
+---
+
+## Codex work order (single-pass, file-by-file)
+
+Copy/paste this into Codex exactly as-is:
+
+```text
+GOAL:
+Refactor MicroEng Data Matrix to behave like a Revit Schedule column builder with scope-based column culling, persistent saved profiles, and JSONL export (two modes + optional gzip). IMPORTANT: JSONL must be removed/not implemented in Data Scraper; JSONL export exists only in Data Matrix.
+
+CONSTRAINTS:
+- Stay on .NET Framework (project is Navisworks plugin).
+- Do not add new NuGet packages. Use DataContractJsonSerializer or manual JSON.
+- Keep existing CSV export.
+- Keep Wpf.Ui styling already used in DataMatrixControl ColumnsDialog.
+- Make scope selector parity with Navisworks Find Items “Search in”: Entire / Current Selection / Selection Set / Search Set / Single Item.
+
+WORK ORDER:
+
+1) ADD NEW UTILITY:
+Create new file NavisworksSelectionSetUtils.cs in MicroEng.Navisworks:
+- Enumerate all SelectionSets under doc.SelectionSets.RootItem (recursive through GroupItem children).
+- Provide:
+  - GetSelectionSetNames(Document doc)  // where set.HasSearch == false
+  - GetSearchSetNames(Document doc)     // where set.HasSearch == true
+  - GetItemsFromSet(Document doc, string setName, bool expectSearchSet, out string description) -> IEnumerable<ModelItem>
+  - IsSearchSet(SelectionSet set) using set.HasSearch
+  - Use SelectionSet.GetSelectedItems() to resolve items (works for both search and explicit sets).
+
+2) DATA SCRAPER: implement set scope resolution (NO JSONL):
+Edit DataScraperWindow.xaml.cs:
+- Replace LoadSets() stub with calls to NavisworksSelectionSetUtils.GetSelectionSetNames/GetSearchSetNames and bind combos.
+Edit DataScraperService.cs:
+- Implement ResolveScope for SelectionSet and SearchSet using NavisworksSelectionSetUtils.GetItemsFromSet(...).
+- Keep Scrape() unchanged. Do NOT add any JSONL export.
+
+3) DATA MATRIX MODELS:
+Edit DataMatrixModels.cs:
+- Add enum DataMatrixScopeKind { EntireSession, CurrentSelection, SingleItem, SelectionSet, SearchSet }
+- Add enum DataMatrixJsonlMode { ItemDocuments, RawRows }
+- Add DataContract/DataMember attributes to DataMatrixViewPreset, DataMatrixSortDefinition, DataMatrixColumnFilter, and the new enums.
+- Extend DataMatrixViewPreset with:
+  - ScopeKind (default EntireSession)
+  - ScopeSetName (string)
+  - JoinMultiValues (bool, default false)
+  - MultiValueSeparator (string, default "; ")
+
+4) PRESET PERSISTENCE:
+Edit DataMatrixPresetManager.cs:
+- Keep InMemoryPresetManager (optional).
+- Add FilePresetManager implementing IDataMatrixPresetManager:
+  - Store presets in %AppData%\MicroEng\Navisworks\DataMatrix\ViewPresets.json using DataContractJsonSerializer.
+  - Handle file missing/corrupt (return empty list; optionally backup corrupt file).
+- In DataMatrixControl.xaml.cs, replace new InMemoryPresetManager() with new FilePresetManager().
+
+5) ROW BUILDER: build only what the schedule needs:
+Edit DataMatrixRowBuilder.cs:
+- Add method BuildAttributeCatalog(ScrapeSession session) -> List<DataMatrixAttributeDefinition> from session.Properties only.
+- Add overload Build(session, attributeIdsWhitelist, itemKeyWhitelist, joinMultiValues, separator)
+  - If whitelist null/empty => behave like legacy (all attributes).
+  - If itemKeyWhitelist != null => only include rows for those item keys.
+  - Only materialize values for whitelisted attribute IDs (if provided).
+  - Preserve attribute order using whitelist order.
+  - If joinMultiValues enabled: if same attrId appears multiple times for an item, join strings with separator.
+
+6) DATA MATRIX UI + BEHAVIOUR:
+Edit DataMatrixControl.xaml:
+- Add a “Scope” section with:
+  - ComboBox x:Name="ScopeCombo" with items: EntireSession, CurrentSelection, SingleItem, SelectionSet, SearchSet
+  - ComboBox x:Name="ScopeSetCombo" (disabled unless SelectionSet/SearchSet)
+  - Button x:Name="RefreshScopeSetsButton" to reload set list
+  - Tooltips on each control explaining when to use it.
+- Add export menu items:
+  - “Export JSONL (Item docs) – Filtered”
+  - “Export JSONL (Item docs) – All”
+  - “Export JSONL (Raw rows) – Filtered”
+  - “Export JSONL (Raw rows) – All”
+  - SaveFileDialog filter should allow *.jsonl and *.jsonl.gz (gzip if .gz).
+Edit DataMatrixControl.xaml.cs:
+- Track _currentSession and _attributeCatalogAll (from BuildAttributeCatalog).
+- When profile loads: set _currentSession, _attributeCatalogAll, then build matrix based on current preset + scope.
+- When preset changes: rebuild rows using builder.Build(... whitelist columns ... itemKeyWhitelist from scope).
+- When scope changes: rebuild (also refresh the column picker culling).
+- ShowColumnsDialog:
+  - Use _attributeCatalogAll (NOT _attributes) so user can add columns not currently built.
+  - Cull available columns by scope: if scope is not EntireSession, scan _currentSession.RawEntries for matching item keys and only show those attrIds.
+  - Preserve existing column order by listing currentVisibleOrder first, then remaining.
+  - After user confirms, rebuild matrix for new visibleIds (so values exist), then rebuild DataGrid columns in that order.
+
+7) JSONL EXPORT IN DATA MATRIX ONLY:
+Edit DataMatrixExporter.cs:
+- Keep ExportCsv unchanged.
+- Add ExportJsonl(path, columns, rows, session, preset, mode):
+  - If path ends with .gz, wrap output in GZipStream.
+  - ItemDocuments mode: one JSON per row:
+    { profile, scope, sessionTimestamp, view, exportedAt, itemKey, itemPath, properties:{colId:typedValue,...} }
+  - RawRows mode: one JSON per (row,col) where value exists:
+    { profile, scope, sessionTimestamp, view, exportedAt, itemKey, itemPath, columnId, category, property, value, valueType }
+  - Implement safe JSON escaping (no external libs).
+Edit DataMatrixControl.xaml.cs:
+- Add ExportJsonl(filtered, mode) method, gather visible columns from grid, call exporter.
+
+8) DO NOT ADD JSONL EXPORT TO DATA SCRAPER.
+JSONL must exist only in Data Matrix.
+
+DELIVERABLE:
+All code compiles, UI has tooltips, schedules/presets persist across restarts, JSONL export works.
+```
+
+---
+
+## Code you can paste (new + modified sections)
+
+### 1) New file: `NavisworksSelectionSetUtils.cs`
+
+> Uses `SelectionSet.HasSearch` and `SelectionSet.GetSelectedItems()` (documented in Navisworks API). ([ApiDocs][1])
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Autodesk.Navisworks.Api;
+
+namespace MicroEng.Navisworks
+{
+    internal static class NavisworksSelectionSetUtils
+    {
+        public static IReadOnlyList<string> GetSelectionSetNames(Document doc)
+        {
+            return EnumerateSelectionSets(doc)
+                .Where(ss => !IsSearchSet(ss))
+                .Select(ss => SafeDisplayName(ss))
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n)
+                .ToList();
+        }
+
+        public static IReadOnlyList<string> GetSearchSetNames(Document doc)
+        {
+            return EnumerateSelectionSets(doc)
+                .Where(ss => IsSearchSet(ss))
+                .Select(ss => SafeDisplayName(ss))
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(n => n)
+                .ToList();
+        }
+
+        public static IEnumerable<ModelItem> GetItemsFromSet(
+            Document doc,
+            string setName,
+            bool expectSearchSet,
+            out string description)
+        {
+            description = string.Empty;
+
+            if (doc == null)
+            {
+                description = "No active document.";
+                return Enumerable.Empty<ModelItem>();
+            }
+
+            if (string.IsNullOrWhiteSpace(setName))
+            {
+                description = expectSearchSet ? "Search Set: (none selected)" : "Selection Set: (none selected)";
+                return Enumerable.Empty<ModelItem>();
+            }
+
+            var match = EnumerateSelectionSets(doc)
+                .FirstOrDefault(ss =>
+                    string.Equals(SafeDisplayName(ss), setName, StringComparison.OrdinalIgnoreCase) &&
+                    IsSearchSet(ss) == expectSearchSet);
+
+            if (match == null)
+            {
+                description = (expectSearchSet ? "Search Set" : "Selection Set") + $": {setName} (not found)";
+                return Enumerable.Empty<ModelItem>();
+            }
+
+            try
+            {
+                // SelectionSet.GetSelectedItems() returns the resolved items for the set
+                // (works for explicit selection sets and search sets).
+                var items = match.GetSelectedItems();
+                var count = items?.Count ?? 0;
+                description = (expectSearchSet ? "Search Set" : "Selection Set") + $": {SafeDisplayName(match)} ({count} items)";
+                return items?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
+            }
+            catch (Exception ex)
+            {
+                description = (expectSearchSet ? "Search Set" : "Selection Set") + $": {SafeDisplayName(match)} (failed: {ex.Message})";
+                return Enumerable.Empty<ModelItem>();
+            }
+        }
+
+        public static bool IsSearchSet(SelectionSet set)
+        {
+            try
+            {
+                return set?.HasSearch == true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static IEnumerable<SelectionSet> EnumerateSelectionSets(Document doc)
+        {
+            if (doc?.SelectionSets?.RootItem == null)
+                yield break;
+
+            foreach (var ss in EnumerateSelectionSets(doc.SelectionSets.RootItem))
+                yield return ss;
+        }
+
+        private static IEnumerable<SelectionSet> EnumerateSelectionSets(GroupItem group)
+        {
+            if (group?.Children == null)
+                yield break;
+
+            foreach (SavedItem child in group.Children)
+            {
+                if (child is GroupItem g)
+                {
+                    foreach (var ss in EnumerateSelectionSets(g))
+                        yield return ss;
+                }
+                else if (child is SelectionSet ss)
+                {
+                    yield return ss;
+                }
+            }
+        }
+
+        private static string SafeDisplayName(SavedItem item)
+        {
+            try { return item?.DisplayName ?? string.Empty; }
+            catch { return string.Empty; }
+        }
+    }
+}
+```
+
+---
+
+### 2) Update Data Scraper set support (no JSONL)
+
+#### `DataScraperWindow.xaml.cs` – replace `LoadSets()` stub
+
+Currently sets are empty【】. Replace with:
+
+```csharp
+private void LoadSets()
+{
+    try
+  :contentReference[oaicite:7]{index=7}utodesk.Navisworks.Api.Application.ActiveDocument;
+        if (doc == null)
+        {
+            SelectionSetCombo.ItemsSource = new List<string>();
+            SearchSetCombo.ItemsSource = new List<string>();
+            return;
+        }
+
+        SelectionSetCombo.ItemsSource = NavisworksSelectionSetUtils.GetSelectionSetNames(doc);
+        SearchSetCombo.ItemsSource = NavisworksSelectionSetUtils.GetSearchSetNames(doc);
+    }
+    catch (Exception ex)
+    {
+        MicroEngActions.Log($"DataScraper: failed to load sets: {ex.Message}");
+        SelectionSetCombo.ItemsSource = new List<string>();
+        SearchSetCombo.ItemsSource = new List<string>();
+    }
+}
+```
+
+#### `DataScraperService.cs` – implement SelectionSet/SearchSet in `ResolveScope`
+
+These cases are stubbed right now【】. Replace those cases with:
+
+```csharp
+case ScrapeScopeType.Sel:contentReference[oaicite:9]{index=9}ems = NavisworksSelectionSetUtils.GetItemsFromSet(doc, selectionSetName, expectSearchSet: false, out var desc);
+    description = desc;
+    return items;
+}
+case ScrapeScopeType.SearchSet:
+{
+    var items = NavisworksSelectionSetUtils.GetItemsFromSet(doc, searchSetName, expectSearchSet: true, out var desc);
+    description = desc;
+    return items;
+}
+```
+
+> Keep everything else as-is. **Do not add JSONL export**.
+
+---
+
+### 3) Data Matrix: extend models for scope + JSONL mode + persistence
+
+#### `DataMatrixModels.cs` (add these near the top)
+
+Current file shows no scope fields in presets【】.
+
+Add:
+
+```csharp
+using System.Runtime.Serialization;
+```
+
+Thene persisted classes:
+
+```csharp
+namespace MicroEng.Navisworks
+{
+    [DataContract]
+    internal enum DataMatrixScopeKind
+    {
+        [EnumMember] EntireSession,
+        [EnumMember] CurrentSelection,
+        [EnumMember] SingleItem,
+        [EnumMember] SelectionSet,
+        [EnumMember] SearchSet
+    }
+
+    [DataContract]
+    internal enum DataMatrixJsonlMode
+    {
+        [EnumMember] ItemDocuments,
+        [EnumMember] RawRows
+    }
+
+    [DataContract]
+    internal class DataMatrixSortDefinition
+    {
+        [DataMember(Order = 1)] public string AttributeId { get; set; }
+        [DataMember(Order = 2)] public SortDirection Direction { get; set; }
+        [DataMember(Order = 3)] public int Priority { get; set; }
+    }
+
+    [DataContract]
+    internal class DataMatrixColumnFilter
+    {
+        [DataMember(Order = 1)] public string AttributeId { get; set; }
+        [DataMember(Order = 2)] public DataMatrixFilterOperator Operator { get; set; }
+        [DataMember(Order = 3)] public string Value { get; set; }
+        [DataMember(Order = 4)] public List<string> ValuesList { get; set; } = new List<string>();
+    }
+
+    [DataContract]
+    internal class DataMatrixViewPreset
+    {
+        [DataMember(Order = 1)] public string Id { get; set; }
+        [DataMember(Order = 2)] public string Name { get; set; }
+        [DataMember(Order = 3)] public string ScraperProfileName { get; set; }
+
+        // NEW: “Search in” parity
+        [DataMember(Order = 4)] public DataMatrixScopeKind ScopeKind { get; set; } = DataMatrixScopeKind.EntireSession;
+        [DataMember(Order = 5)] public string ScopeSetName { get; set; } // only used for SelectionSet/SearchSet
+
+        // NEW: multi-value behaviour (optional)
+        [DataMember(Order = 6)] public bool JoinMultiValues { get; set; } = false;
+        [DataMember(Order = 7)] public string MultiValueSeparator { get; set; } = "; ";
+
+        [DataMember(Order = 8)] public List<string> VisibleAttributeIds { get; set; } = new List<string>();
+        [DataMember(Order = 9)] public List<DataMatrixSortDefinition> SortDefinitions { get; set; } = new List<DataMatrixSortDefinition>();
+        [DataMember(Order = 10)] public List<DataMatrixColumnFilter> Filters { get; set; } = new List<DataMatrixColumnFilter>();
+    }
+}
+```
+
+> Keep your existing `DataMatrixAttributeDefinition` and `DataMatrixRow` unchanged.
+
+---
+
+### 4) Data Matrix: preset persistence to disk
+
+#### `DataMatrixPresetManager.cs` – add `FilePresetManager`
+
+Keep your existing interface and `InMemoryPresetManager` (optional), then add:
+
+```csharp
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Json;
+
+namespace MicroEng.Navisworks
+{
+    [DataContract]
+    internal sealed class DataMatrixPresetStore
+    {
+        [DataMember(Order = 1)] public int Version { get; set; } = 1;
+        [DataMember(Order = 2)] public List<DataMatrixViewPreset> Presets { get; set; } = new List<DataMatrixViewPreset>();
+    }
+
+    internal sealed class FilePresetManager : IDataMatrixPresetManager
+    {
+        private readonly object _gate = new object();
+        private readonly string _path;
+
+        public FilePresetManager()
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "MicroEng", "Navisworks", "DataMatrix");
+
+            Directory.CreateDirectory(dir);
+            _path = Path.Combine(dir, "ViewPresets.json");
+        }
+
+        public IEnumerable<DataMatrixViewPreset> GetPresets(string profileName)
+        {
+            var profile = string.IsNullOrWhiteSpace(profileName) ? "Default" : profileName.Trim();
+
+            lock (_gate)
+            {
+                var store = LoadStore();
+                return store.Presets
+                    .Where(p => string.Equals(p.ScraperProfileName ?? "Default", profile, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(p => p.Name)
+                    .ToList();
+            }
+        }
+
+        public void SavePreset(DataMatrixViewPreset preset)
+        {
+            if (preset == null) return;
+
+            lock (_gate)
+            {
+                var store = LoadStore();
+
+                var existing = store.Presets.FirstOrDefault(p => string.Equals(p.Id, preset.Id, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                {
+                    store.Presets.Remove(existing);
+                }
+
+                store.Presets.Add(preset);
+                SaveStore(store);
+            }
+        }
+
+        public void DeletePreset(string presetId)
+        {
+            if (string.IsNullOrWhiteSpace(presetId)) return;
+
+            lock (_gate)
+            {
+                var store = LoadStore();
+                store.Presets.RemoveAll(p => string.Equals(p.Id, presetId, StringComparison.OrdinalIgnoreCase));
+                SaveStore(store);
+            }
+        }
+
+        private DataMatrixPresetStore LoadStore()
+        {
+            try
+            {
+                if (!File.Exists(_path))
+                    return new DataMatrixPresetStore();
+
+                using (var fs = File.OpenRead(_path))
+                {
+                    var ser = new DataContractJsonSerializer(typeof(DataMatrixPresetStore));
+                    var obj = ser.ReadObject(fs) as DataMatrixPresetStore;
+                    return obj ?? new DataMatrixPresetStore();
+                }
+            }
+            catch
+            {
+                // Backup corrupt file and start fresh
+                try
+                {
+                    if (File.Exists(_path))
+                    {
+                        var bak = _path + ".corrupt_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".bak";
+                        File.Copy(_path, bak, overwrite: true);
+                    }
+                }
+                catch { /* ignore */ }
+
+                return new DataMatrixPresetStore();
+            }
+        }
+
+        private void SaveStore(DataMatrixPresetStore store)
+        {
+            using (var fs = File.Create(_path))
+            {
+                var ser = new DataContractJsonSerializer(typeof(DataMatrixPresetStore));
+                ser.WriteObject(fs, store ?? new DataMatrixPresetStore());
+            }
+        }
+    }
+}
+```
+
+---
+
+### 5) Data Matrix: row builder overload (only build what schedule needs)
+
+Current builder always builds everything and overwrites values【】.
+
+Update `DataMatrixRowBuilder.cs` with:
+
+```csharp
+public List:contentReference[oaicite:13]{index=13}finition> BuildAttributeCatalog(ScrapeSession session)
+{
+    var list = new List<DataMatrixAttributeDefinition>();
+    if (session?.Properties == null) return list;
+
+    var order = 0;
+    foreach (var p in session.Properties)
+    {
+        list.Add(new DataMatrixAttributeDefinition
+        {
+            Id = $"{p.Category}|{p.Name}",
+            Category = p.Category,
+            PropertyName = p.Name,
+            DisplayName = p.Name,
+            DataType = MapType(p.DataType),
+            IsEditable = false,
+            IsVisibleByDefault = true,
+            DefaultWidth = 160,
+            DisplayOrder = order++
+        });
+    }
+    return list;
+}
+
+public (List<DataMatrixAttributeDefinition> Attributes, List<DataMatrixRow> Rows) Build(
+    ScrapeSession session,
+    IList<string> attributeWhitelist,
+    ISet<string> itemKeyWhitelist,
+    bool joinMultiValues,
+    string multiValueSeparator)
+{
+    if (session == null) return (new List<DataMatrixAttributeDefinition>(), new List<DataMatrixRow>());
+
+    var whitelist = (attributeWhitelist ?? new List<string>())
+        .Where(id => !string.IsNullOrWhiteSpace(id))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    var whitelistSet = whitelist.Count > 0
+        ? new HashSet<string>(whitelist, StringComparer.OrdinalIgnoreCase)
+        : null;
+
+    // Build attribute defs for whitelist (or all if none)
+    var propById = (session.Properties ?? new List<ScrapedProperty>())
+        .ToDictionary(p => $"{p.Category}|{p.Name}", StringComparer.OrdinalIgnoreCase);
+
+    var attributes = new Dictionary<string, DataMatrixAttributeDefinition>(StringComparer.OrdinalIgnoreCase);
+    var order = 0;
+
+    if (whitelistSet != null)
+    {
+        foreach (var id in whitelist)
+        {
+            if (propById.TryGetValue(id, out var p))
+            {
+                attributes[id] = new DataMatrixAttributeDefinition
+                {
+                    Id = id,
+                    Category = p.Category,
+                    PropertyName = p.Name,
+                    DisplayName = p.Name,
+                    DataType = MapType(p.DataType),
+                    IsEditable = false,
+                    IsVisibleByDefault = true,
+                    DefaultWidth = 160,
+                    DisplayOrder = order++
+                };
+            }
+        }
+    }
+    else
+    {
+        foreach (var p in session.Properties ?? Enumerable.Empty<ScrapedProperty>())
+        {
+            var id = $"{p.Category}|{p.Name}";
+            attributes[id] = new DataMatrixAttributeDefinition
+            {
+                Id = id,
+                Category = p.Category,
+                PropertyName = p.Name,
+                DisplayName = p.Name,
+                DataType = MapType(p.DataType),
+                IsEditable = false,
+                IsVisibleByDefault = true,
+                DefaultWidth = 160,
+                DisplayOrder = order++
+            };
+        }
+    }
+
+    // Build rows
+    var rows = new Dictionary<string, DataMatrixRow>(StringComparer.OrdinalIgnoreCase);
+    foreach (var entry in session.RawEntries ?? Enumerable.Empty<RawEntry>())
+    {
+        var rowKey = string.IsNullOrWhiteSpace(entry.ItemKey)
+            ? $"{entry.ItemPath}|{entry.Profile}"
+            : entry.ItemKey;
+
+        if (itemKeyWhitelist != null && !itemKeyWhitelist.Contains(rowKey))
+            continue;
+
+        var attrId = $"{entry.Category}|{entry.Name}";
+        if (whitelistSet != null && !whitelistSet.Contains(attrId))
+            continue;
+
+        if (!attributes.TryGetValue(attrId, out var attr))
+        {
+            // Rare fallback if session.Properties is missing something
+            attr = new DataMatrixAttributeDefinition
+            {
+                Id = attrId,
+                Category = entry.Category,
+                PropertyName = entry.Name,
+                DisplayName = entry.Name,
+                DataType = MapType(entry.DataType),
+                IsEditable = false,
+                IsVisibleByDefault = true,
+                DefaultWidth = 160,
+                DisplayOrder = order++
+            };
+            attributes[attrId] = attr;
+        }
+
+        if (!rows.TryGetValue(rowKey, out var row))
+        {
+            row = new DataMatrixRow
+            {
+                ItemKey = rowKey,
+                ElementDisplayName = entry.ItemPath
+            };
+            rows[rowKey] = row;
+        }
+
+        var converted = ConvertValue(entry.Value, attr.DataType);
+
+        if (joinMultiValues &&
+            row.Values.TryGetValue(attrId, out var existing) &&
+            existing != null && converted != null &&
+            !Equals(existing, converted))
+        {
+            row.Values[attrId] = (existing.ToString() ?? string.Empty)
+                + (multiValueSeparator ?? "; ")
+                + (converted.ToString() ?? string.Empty);
+        }
+        else
+        {
+            row.Values[attrId] = converted;
+        }
+    }
+
+    // Preserve whitelist order
+    List<DataMatrixAttributeDefinition> orderedAttrs;
+    if (whitelistSet != null)
+    {
+        orderedAttrs = whitelist.Where(id => attributes.ContainsKey(id)).Select(id => attributes[id]).ToList();
+    }
+    else
+    {
+        orderedAttrs = attributes.Values.OrderBy(a => a.DisplayOrder).ToList();
+    }
+
+    return (orderedAttrs, rows.Values.ToList());
+}
+```
+
+Keep your existing `Build(session)` and make it call this overload with nulls if you want.
+
+---
+
+### 6) Data Matrix: JSONL export (two modes + optional gzip)
+
+#### `DataMatrixExporter.cs` – add JSONL export next to CSV
+
+CSV exporter is here【】. Add:
+
+```csharp
+using System.Globalization;
+using System.IO.Co:contentReference[oaicite:15]{index=15}lass DataMatrixExporter
+{
+    // keep ExportCsv() as-is...
+
+    public void ExportJsonl(
+        string path,
+        IEnumerable<DataMatrixAttributeDefinition> columns,
+        IEnumerable<DataMatrixRow> rows,
+        ScrapeSession session,
+        DataMatrixViewPreset preset,
+        DataMatrixJsonlMode mode)
+    {
+        var gzip = path.EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
+        var colList = columns.ToList();
+
+        using (var fs = File.Create(path))
+        using (var stream = gzip ? (Stream)new GZipStream(fs, CompressionLevel.Optimal) : fs)
+        using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+        {
+            foreach (var row in rows)
+            {
+                if (mode == DataMatrixJsonlMode.ItemDocuments)
+                {
+                    writer.WriteLine(BuildItemDocJson(row, colList, session, preset));
+                }
+                else
+                {
+                    foreach (var col in colList)
+                    {
+                        if (!row.Values.TryGetValue(col.Id, out var val) || val == null) continue;
+                        writer.WriteLine(BuildRawRowJson(row, col, val, session, preset));
+                    }
+                }
+            }
+        }
+    }
+
+    private string BuildItemDocJson(DataMatrixRow row, List<DataMatrixAttributeDefinition> cols, ScrapeSession session, DataMatrixViewPreset preset)
+    {
+        var sb = new StringBuilder();
+        sb.Append('{');
+        AppendKV(sb, "profile", session?.ProfileName);
+        sb.Append(',');
+        AppendKV(sb, "scope", session?.ScopeDescription);
+        sb.Append(',');
+        AppendKV(sb, "sessionTimestamp", session?.Timestamp.ToString("o"));
+        sb.Append(',');
+        AppendKV(sb, "view", preset?.Name ?? "(Default)");
+        sb.Append(',');
+        AppendKV(sb, "exportedAt", DateTime.Now.ToString("o"));
+        sb.Append(',');
+        AppendKV(sb, "itemKey", row?.ItemKey);
+        sb.Append(',');
+        AppendKV(sb, "itemPath", row?.ElementDisplayName);
+        sb.Append(',');
+        sb.Append("\"properties\":{");
+
+        var first = true;
+        foreach (var col in cols)
+        {
+            if (!row.Values.TryGetValue(col.Id, out var val)) continue;
+
+            if (!first) sb.Append(',');
+            first = false;
+
+            sb.Append('\"').Append(JsonEscape(col.Id)).Append("\":");
+            AppendJsonValue(sb, val);
+        }
+
+        sb.Append("}}");
+        return sb.ToString();
+    }
+
+    private string BuildRawRowJson(DataMatrixRow row, DataMatrixAttributeDefinition col, object val, ScrapeSession session, DataMatrixViewPreset preset)
+    {
+        var sb = new StringBuilder();
+        sb.Append('{');
+        AppendKV(sb, "profile", session?.ProfileName);
+        sb.Append(',');
+        AppendKV(sb, "scope", session?.ScopeDescription);
+        sb.Append(',');
+        AppendKV(sb, "sessionTimestamp", session?.Timestamp.ToString("o"));
+        sb.Append(',');
+        AppendKV(sb, "view", preset?.Name ?? "(Default)");
+        sb.Append(',');
+        AppendKV(sb, "exportedAt", DateTime.Now.ToString("o"));
+        sb.Append(',');
+        AppendKV(sb, "itemKey", row?.ItemKey);
+        sb.Append(',');
+        AppendKV(sb, "itemPath", row?.ElementDisplayName);
+        sb.Append(',');
+        AppendKV(sb, "columnId", col?.Id);
+        sb.Append(',');
+        AppendKV(sb, "category", col?.Category);
+        sb.Append(',');
+        AppendKV(sb, "property", col?.PropertyName);
+        sb.Append(',');
+        sb.Append("\"value\":");
+        AppendJsonValue(sb, val);
+        sb.Append(',');
+        AppendKV(sb, "valueType", val?.GetType().Name);
+        sb.Append('}');
+        return sb.ToString();
+    }
+
+    private void AppendKV(StringBuilder sb, string key, string value)
+    {
+        sb.Append('\"').Append(JsonEscape(key)).Append("\":");
+        if (value == null) sb.Append("null");
+        else sb.Append('\"').Append(JsonEscape(value)).Append('\"');
+    }
+
+    private void AppendJsonValue(StringBuilder sb, object value)
+    {
+        if (value == null) { sb.Append("null"); return; }
+
+        switch (value)
+        {
+            case bool b:
+                sb.Append(b ? "true" : "false");
+                return;
+            case int i:
+                sb.Append(i.ToString(CultureInfo.InvariantCulture));
+                return;
+            case double d:
+                sb.Append(d.ToString(CultureInfo.InvariantCulture));
+                return;
+            case float f:
+                sb.Append(f.ToString(CultureInfo.InvariantCulture));
+                return;
+            case DateTime dt:
+                sb.Append('\"').Append(JsonEscape(dt.ToString("o"))).Append('\"');
+                return;
+            default:
+                sb.Append('\"').Append(JsonEscape(value.ToString())).Append('\"');
+                return;
+        }
+    }
+
+    private string JsonEscape(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+
+        var sb = new StringBuilder(s.Length + 16);
+        foreach (var ch in s)
+        {
+            switch (ch)
+            {
+                case '\\': sb.Append("\\\\"); break;
+                case '\"': sb.Append("\\\""); break;
+                case '\b': sb.Append("\\b"); break;
+                case '\f': sb.Append("\\f"); break;
+                case '\n': sb.Append("\\n"); break;
+                case '\r': sb.Append("\\r"); break;
+                case '\t': sb.Append("\\t"); break;
+                default:
+                    if (ch < 32) sb.Append("\\u").Append(((int)ch).ToString("x4"));
+                    else sb.Append(ch);
+                    break;
+            }
+        }
+        return sb.ToString();
+    }
+}
+```
+
+---
+
+### 7) Data Matrix Control: key behaviour changes (what to change)
+
+Your current control:
+
+* uses `InMemoryPresetManager`【】
+* builds everything: `_builder.Build(session)`【og only sees `_attributes` (so if you stop buildi keep a full catalog)
+* CSV export uses `DataScraperCache.LastSession` not necessarily the active session【】
+
+**Minimum changes you must make:**
+
+1. Replace preset manager:
+   only IDataMatrixPresetManager _presetManager = new FilePresetManager();
+
+````
+
+2) Track current session + full attribute catalog:
+```csharp
+private ScrapeSession _currentSession;
+private List<DataMatrixAttributeDefinition> _attributeCatalogAll = new();
+````
+
+3. On profile load:
+
+* set `_currentSession`
+* set `_attributeCatalogAll = _builder.BuildAttributeCatalog(session)`
+* call a new method `RebuildMatrixFromCurrentState()` which:
+
+  * resolves scope item keys (Entire/Selection/Set)
+  * determines visible columns (preset vs default)
+  * calls `_builder.Build(session, visibleIds, itemKeyWhitelist, preset.JoinMultiValues, preset.MultiValueSeparator)`
+  * sets `_attributes` and `_allRows`
+  * rebuilds grid columns in the visibleIds order
+
+4. ShowColumnsDialog must use `_attributeCatalogAll` **not** `_attributes`:
+
+* Cull it to “available in scope” by scanning `_currentSession.RawEntries` for selected item keys.
+* After user picks columns, rebuild using builder overload so values exist.
+
+5. Add export JSONL menu items & handler:
+
+* Gather visible column IDs from `MatrixGrid.Columns.Skip(1)` (same pattern as CSV)【】
+* Call `_exporter.ExportJsonl(...)`
+
+If you want, I can paste arixControl.xaml.cs`, but it will be long; the Codex work order above is designed to make Codex do that safely in one pass.
+
+---
+
+## Why this satisfies your “JSONL only from Data Matrix” constraint
+
+* Data Scraper remains a **raw capture/cache** tool (sessions + properties + raw rows)【】
+* Data Matrix becomes the **schedule definition + structured exchedule/profile defines columns and scope
+
+  * JSONL export is derived from *that schedule*, so the DB output is consistent and intentionally shaped
+* You avoid duplicating export logic or schema decisions in Data Scraper entirely
+
+---
+
+If you want the cleanest UX after this: rename “View Presets” in Data Matrix UI to **“Schedules / Profiles”** (because that’s what they become once scope + columns + export are attached).
+
+[1]: https://apidocs.co/apps/navisworks/2018/M_Autodesk_Navisworks_Api_SelectionSet_GetSelectedItems.htm "https://apidocs.co/apps/navisworks/2018/M_Autodesk_Navisworks_Api_SelectionSet_GetSelectedItems.htm"

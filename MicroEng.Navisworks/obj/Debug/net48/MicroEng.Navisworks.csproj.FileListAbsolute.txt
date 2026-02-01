@@ -25,7 +25,9 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\Assets\Theme\MicroEngWpfUiRoot.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SmartSets\PropertyPickerWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\AppendIntegrateDialog.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataMatrixColumnBuilderWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataMatrixControl.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataScraperRunProgressWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataScraperWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEngPanelControl.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEngSettingsWindow.g.cs
@@ -48,11 +50,15 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepResultsPage.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepSetupPage.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepZonesTargetsPage.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.g.cs
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\GeneratedInternalTypeHelper.g.cs
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks_MarkupCompile.cache
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks_MarkupCompile.lref
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\AppendIntegrateDialog.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataMatrixColumnBuilderWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataMatrixControl.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataScraperRunProgressWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\DataScraperWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEngPanelControl.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEngSettingsWindow.baml
@@ -74,6 +80,8 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepResultsPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepSetupPage.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\SpaceMapperStepZonesTargetsPage.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.baml
+C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.baml
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks.g.resources
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks.GeneratedMSBuildEditorConfig.editorconfig
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks.AssemblyInfoInputs.cache
@@ -83,7 +91,3 @@ C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debu
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.51BD3962.Up2Date
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks.dll
 C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\MicroEng.Navisworks.pdb
-C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.g.cs
-C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.g.cs
-C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorControl.baml
-C:\Users\Chris\Documents\GitHub\MicroEng_Navisworks\MicroEng.Navisworks\obj\Debug\net48\ViewpointsGenerator\ViewpointsGeneratorWindow.baml

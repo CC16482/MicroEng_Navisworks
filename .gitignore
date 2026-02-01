@@ -1,0 +1,43 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Aa]rtifacts/
+[Bb]uild/
+x64/
+x86/
+
+# Visual Studio / MSBuild
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.VC.opendb
+*.vcxproj.user
+*.vcxproj.filters
+*.csproj.user
+
+# Test results
+TestResults/
+*.trx
+
+# NuGet
+packages/
+*.nupkg
+*.snupkg
+
+# Logs / crash dumps
+*.log
+*.dmp
+NavisErrors/
+
+# Misc
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+.history/
+node_modules/

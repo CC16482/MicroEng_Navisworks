@@ -2341,12 +2341,17 @@ namespace MicroEng.Navisworks.QuickColour
             _lastHierarchyProfileId = profile.Id;
             var l1Category = profile.Generator?.CategoryName ?? "";
             var l1Property = profile.Generator?.PropertyName ?? "";
+            var l2Category = profile.Generator?.L2CategoryName ?? "";
+            var l2Property = profile.Generator?.L2PropertyName ?? "";
             var notes = profile.Generator?.Notes ?? "";
 
-            if (!TryParseHierarchyNotes(notes, out var l2Category, out var l2Property))
+            if (string.IsNullOrWhiteSpace(l2Category) || string.IsNullOrWhiteSpace(l2Property))
             {
-                error = "Hierarchy profile missing Level 2 property info.";
-                return false;
+                if (!TryParseHierarchyNotes(notes, out l2Category, out l2Property))
+                {
+                    error = "Hierarchy profile missing Level 2 property info.";
+                    return false;
+                }
             }
 
             if (string.IsNullOrWhiteSpace(l1Category) || string.IsNullOrWhiteSpace(l1Property))
@@ -2536,6 +2541,8 @@ namespace MicroEng.Navisworks.QuickColour
                 {
                     CategoryName = _hierarchyL1Category ?? "",
                     PropertyName = _hierarchyL1Property ?? "",
+                    L2CategoryName = _hierarchyL2Category ?? "",
+                    L2PropertyName = _hierarchyL2Property ?? "",
                     PaletteName = HierarchyPaletteKind.ToString(),
                     PaletteKind = HierarchyPaletteKind,
                     StableColors = false,

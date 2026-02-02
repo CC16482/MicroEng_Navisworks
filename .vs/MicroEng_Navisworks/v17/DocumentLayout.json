@@ -3,16 +3,37 @@
   "WorkspaceRootPath": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\b66ec82e910bf77128fdffd6eaa98448e06359d1f4369e66eee50599bd17d97e\\Application.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (4).DMP||{FF0A863B-6F9C-46BF-9684-DBE4C0A3ED6D}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\4dec9a41a8fefce05927ab3f467f2e20555c3d3613250e36e6ecf4b3dde2c36a\\Program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (3).DMP||{FF0A863B-6F9C-46BF-9684-DBE4C0A3ED6D}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.navisworks\\datamatrixcontrol.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|solutionrelative:microeng.navisworks\\datamatrixcontrol.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (2).DMP||{FF0A863B-6F9C-46BF-9684-DBE4C0A3ED6D}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\e795ea61732625e1525f91d9df08c09aca325db2048b2c6064bbe379fce29061\\HwndHost.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A2FE74E1-B743-11D0-AE1A-00A0C90FFFC3}|\u003CMiscFiles\u003E|C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer.DMP||{FF0A863B-6F9C-46BF-9684-DBE4C0A3ED6D}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{419D81E3-7331-4419-9094-D40ED653636D}|MicroEng.DesignHost\\MicroEng.DesignHost.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.designhost\\designwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
       "RelativeMoniker": "D:0:0:{419D81E3-7331-4419-9094-D40ED653636D}|MicroEng.DesignHost\\MicroEng.DesignHost.csproj|solutionrelative:microeng.designhost\\designwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.navisworks\\datamatrixcontrol.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
       "RelativeMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|solutionrelative:microeng.navisworks\\datamatrixcontrol.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.navisworks\\datamatrixcontrol.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|solutionrelative:microeng.navisworks\\datamatrixcontrol.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{FEC1D82D-DA2A-4CE5-AFD3-6E8F4DB4D0F7}|MicroEng.Navisworks\\MicroEng.Navisworks.csproj|c:\\users\\chris\\documents\\github\\microeng_navisworks\\microeng.navisworks\\datascraperwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
@@ -26,7 +47,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 2,
+          "SelectedChildIndex": 3,
           "Children": [
             {
               "$type": "Bookmark",
@@ -38,44 +59,123 @@
             },
             {
               "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "Program.cs",
+              "DocumentMoniker": "C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\4dec9a41a8fefce05927ab3f467f2e20555c3d3613250e36e6ecf4b3dde2c36a\\Program.cs",
+              "RelativeDocumentMoniker": "..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\4dec9a41a8fefce05927ab3f467f2e20555c3d3613250e36e6ecf4b3dde2c36a\\Program.cs",
+              "ToolTip": "C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\4dec9a41a8fefce05927ab3f467f2e20555c3d3613250e36e6ecf4b3dde2c36a\\Program.cs [Read Only]",
+              "RelativeToolTip": "..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\4dec9a41a8fefce05927ab3f467f2e20555c3d3613250e36e6ecf4b3dde2c36a\\Program.cs [Read Only]",
+              "ViewState": "AgIAABEAAAAAAAAAAAArwB0AAAACAAAAAQAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-02-02T11:37:41.839Z",
+              "EditorCaption": " [Read Only]"
+            },
+            {
+              "$type": "Document",
               "DocumentIndex": 0,
+              "Title": "Application.cs",
+              "DocumentMoniker": "C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\b66ec82e910bf77128fdffd6eaa98448e06359d1f4369e66eee50599bd17d97e\\Application.cs",
+              "RelativeDocumentMoniker": "..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\b66ec82e910bf77128fdffd6eaa98448e06359d1f4369e66eee50599bd17d97e\\Application.cs",
+              "ToolTip": "C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\b66ec82e910bf77128fdffd6eaa98448e06359d1f4369e66eee50599bd17d97e\\Application.cs",
+              "RelativeToolTip": "..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\b66ec82e910bf77128fdffd6eaa98448e06359d1f4369e66eee50599bd17d97e\\Application.cs",
+              "ViewState": "AgIAAAMBAAAAAAAAAAAAAA8BAAAFAAAAAQAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-02-02T05:00:42.1Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "Roamer (4).DMP",
+              "DocumentMoniker": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (4).DMP",
+              "RelativeDocumentMoniker": "..\\..\\..\\AppData\\Local\\Temp\\Roamer (4).DMP",
+              "ToolTip": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (4).DMP",
+              "RelativeToolTip": "..\\..\\..\\AppData\\Local\\Temp\\Roamer (4).DMP",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000712|",
+              "WhenOpened": "2026-02-02T11:42:17.634Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "Roamer (3).DMP",
+              "DocumentMoniker": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (3).DMP",
+              "RelativeDocumentMoniker": "..\\..\\..\\AppData\\Local\\Temp\\Roamer (3).DMP",
+              "ToolTip": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (3).DMP",
+              "RelativeToolTip": "..\\..\\..\\AppData\\Local\\Temp\\Roamer (3).DMP",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000712|",
+              "WhenOpened": "2026-02-02T04:59:58.562Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "Roamer (2).DMP",
+              "DocumentMoniker": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (2).DMP",
+              "RelativeDocumentMoniker": "..\\..\\..\\AppData\\Local\\Temp\\Roamer (2).DMP",
+              "ToolTip": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer (2).DMP",
+              "RelativeToolTip": "..\\..\\..\\AppData\\Local\\Temp\\Roamer (2).DMP",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000712|",
+              "WhenOpened": "2026-02-01T13:20:10.916Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "HwndHost.cs",
+              "DocumentMoniker": "C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\e795ea61732625e1525f91d9df08c09aca325db2048b2c6064bbe379fce29061\\HwndHost.cs",
+              "RelativeDocumentMoniker": "..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e795ea61732625e1525f91d9df08c09aca325db2048b2c6064bbe379fce29061\\HwndHost.cs",
+              "ToolTip": "C:\\Users\\Chris\\AppData\\Local\\Temp\\.vsdbgsrc\\e795ea61732625e1525f91d9df08c09aca325db2048b2c6064bbe379fce29061\\HwndHost.cs",
+              "RelativeToolTip": "..\\..\\..\\AppData\\Local\\Temp\\.vsdbgsrc\\e795ea61732625e1525f91d9df08c09aca325db2048b2c6064bbe379fce29061\\HwndHost.cs",
+              "ViewState": "AgIAAB4CAAAAAAAAAAAAwC4CAAADAAAAAQAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-02-01T12:59:35.233Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "Roamer.DMP",
+              "DocumentMoniker": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer.DMP",
+              "RelativeDocumentMoniker": "..\\..\\..\\AppData\\Local\\Temp\\Roamer.DMP",
+              "ToolTip": "C:\\Users\\Chris\\AppData\\Local\\Temp\\Roamer.DMP",
+              "RelativeToolTip": "..\\..\\..\\AppData\\Local\\Temp\\Roamer.DMP",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000712|",
+              "WhenOpened": "2026-02-01T12:57:33.385Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
               "Title": "DesignWindow.xaml",
               "DocumentMoniker": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.DesignHost\\DesignWindow.xaml",
               "RelativeDocumentMoniker": "MicroEng.DesignHost\\DesignWindow.xaml",
               "ToolTip": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.DesignHost\\DesignWindow.xaml",
               "RelativeToolTip": "MicroEng.DesignHost\\DesignWindow.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2025-12-15T09:10:58.838Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-12-15T09:10:58.838Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 4,
               "Title": "DataMatrixControl.xaml.cs",
               "DocumentMoniker": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\DataMatrixControl.xaml.cs",
               "RelativeDocumentMoniker": "MicroEng.Navisworks\\DataMatrixControl.xaml.cs",
               "ToolTip": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\DataMatrixControl.xaml.cs",
               "RelativeToolTip": "MicroEng.Navisworks\\DataMatrixControl.xaml.cs",
-              "ViewState": "AgIAAA4AAAAAAAAAAAAhwCIAAAAMAAAAAAAAAA==",
+              "ViewState": "AgIAAHMCAAAAAAAAAAAAAH8CAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2025-12-11T03:15:05.824Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-12-11T03:15:05.824Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 9,
               "Title": "DataMatrixControl.xaml",
               "DocumentMoniker": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\DataMatrixControl.xaml",
               "RelativeDocumentMoniker": "MicroEng.Navisworks\\DataMatrixControl.xaml",
               "ToolTip": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\DataMatrixControl.xaml",
               "RelativeToolTip": "MicroEng.Navisworks\\DataMatrixControl.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2025-12-11T03:14:32.458Z",
-              "EditorCaption": ""
+              "WhenOpened": "2025-12-11T03:14:32.458Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 10,
               "Title": "DataScraperWindow.xaml",
               "DocumentMoniker": "C:\\Users\\Chris\\Documents\\GitHub\\MicroEng_Navisworks\\MicroEng.Navisworks\\DataScraperWindow.xaml",
               "RelativeDocumentMoniker": "MicroEng.Navisworks\\DataScraperWindow.xaml",

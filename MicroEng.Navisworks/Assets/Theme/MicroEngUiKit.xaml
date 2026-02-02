@@ -1,6 +1,7 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+                    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                    xmlns:s="clr-namespace:System;assembly=mscorlib">
   <!--
     Legacy MicroEng style tokens.
     Kept for backwards compatibility with older XAML references.
@@ -137,6 +138,449 @@
     WPF-UI already provides Gallery-consistent styles (ComboBoxPage/RadioButtonPage/etc).
     Overriding them removes accents and breaks the WPF-UI look.
   -->
+  <!--
+    Exception: WPF-UI CheckBox animates ControlIcon.Tag, which can crash during template invalidation.
+    Override the default CheckBox style to animate ScaleTransform instead of Tag.
+  -->
+  <Style x:Key="DefaultCheckBoxStyle" TargetType="CheckBox">
+    <Setter Property="FrameworkElement.FocusVisualStyle">
+      <Setter.Value>
+        <DynamicResource ResourceKey="DefaultControlFocusVisualStyle" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Panel.Background">
+      <Setter.Value>
+        <DynamicResource ResourceKey="CheckBoxBackground" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="TextElement.Foreground">
+      <Setter.Value>
+        <DynamicResource ResourceKey="CheckBoxForeground" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Border.BorderBrush">
+      <Setter.Value>
+        <DynamicResource ResourceKey="CheckBoxBorderBrush" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Border.BorderThickness">
+      <Setter.Value>
+        <Thickness>1,1,1,1</Thickness>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Control.Padding">
+      <Setter.Value>
+        <Thickness>11,5,11,6</Thickness>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Border.CornerRadius">
+      <Setter.Value>
+        <DynamicResource ResourceKey="ControlCornerRadius" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="FrameworkElement.HorizontalAlignment">
+      <Setter.Value>
+        <x:Static Member="HorizontalAlignment.Left" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="FrameworkElement.VerticalAlignment">
+      <Setter.Value>
+        <x:Static Member="VerticalAlignment.Center" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Control.HorizontalContentAlignment">
+      <Setter.Value>
+        <x:Static Member="HorizontalAlignment.Left" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Control.VerticalContentAlignment">
+      <Setter.Value>
+        <x:Static Member="VerticalAlignment.Center" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="FrameworkElement.Cursor">
+      <Setter.Value>
+        <Cursor>Hand</Cursor>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="TextElement.FontSize">
+      <Setter.Value>
+        <DynamicResource ResourceKey="ControlContentThemeFontSize" />
+      </Setter.Value>
+    </Setter>
+    <Setter Property="TextElement.FontWeight">
+      <Setter.Value>
+        <FontWeight>Normal</FontWeight>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="KeyboardNavigation.IsTabStop">
+      <Setter.Value>
+        <s:Boolean>True</s:Boolean>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="UIElement.Focusable">
+      <Setter.Value>
+        <s:Boolean>True</s:Boolean>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="FrameworkElement.MinWidth">
+      <Setter.Value>
+        <s:Double>120</s:Double>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="FrameworkElement.MinHeight">
+      <Setter.Value>
+        <s:Double>32</s:Double>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="UIElement.SnapsToDevicePixels">
+      <Setter.Value>
+        <s:Boolean>True</s:Boolean>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="FrameworkElement.OverridesDefaultStyle">
+      <Setter.Value>
+        <s:Boolean>True</s:Boolean>
+      </Setter.Value>
+    </Setter>
+    <Setter Property="Control.Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="CheckBox">
+          <BulletDecorator Background="#00FFFFFF"
+                           Margin="{TemplateBinding Control.Padding}"
+                           HorizontalAlignment="{TemplateBinding FrameworkElement.HorizontalAlignment}"
+                           VerticalAlignment="{TemplateBinding FrameworkElement.VerticalAlignment}">
+            <BulletDecorator.Bullet>
+              <Border CornerRadius="{TemplateBinding Border.CornerRadius}"
+                      Background="{TemplateBinding Panel.Background}"
+                      Name="ControlBorderIconPresenter"
+                      Width="{DynamicResource CheckBoxHeight}"
+                      Height="{DynamicResource CheckBoxWidth}"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Center">
+                <Border BorderThickness="{TemplateBinding Border.BorderThickness}"
+                        CornerRadius="{TemplateBinding Border.CornerRadius}"
+                        BorderBrush="{TemplateBinding Border.BorderBrush}"
+                        Name="StrokeBorder">
+                  <ui:SymbolIcon Symbol="Checkmark48"
+                                 FontFamily="{DynamicResource FluentSystemIcons}"
+                                 FontSize="{DynamicResource CheckBoxIconSize}"
+                                 FontWeight="Bold"
+                                 Foreground="{DynamicResource CheckBoxCheckGlyphForeground}"
+                                 Name="ControlIcon"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"
+                                 Visibility="Collapsed"
+                                 RenderTransformOrigin="0.5,0.5">
+                    <ui:SymbolIcon.RenderTransform>
+                      <ScaleTransform ScaleX="1" ScaleY="1" />
+                    </ui:SymbolIcon.RenderTransform>
+                  </ui:SymbolIcon>
+                </Border>
+              </Border>
+            </BulletDecorator.Bullet>
+            <ContentPresenter RecognizesAccessKey="True"
+                              Content="{TemplateBinding ContentControl.Content}"
+                              ContentTemplate="{TemplateBinding ContentControl.ContentTemplate}"
+                              ContentStringFormat="{TemplateBinding ContentControl.ContentStringFormat}"
+                              Name="ContentPresenter"
+                              Margin="8,0,0,0"
+                              HorizontalAlignment="{TemplateBinding Control.HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding Control.VerticalContentAlignment}" />
+          </BulletDecorator>
+          <ControlTemplate.Triggers>
+            <Trigger Property="ContentControl.Content" Value="{x:Null}">
+              <Setter Property="FrameworkElement.Margin" TargetName="ContentPresenter">
+                <Setter.Value>
+                  <Thickness>0,0,0,0</Thickness>
+                </Setter.Value>
+              </Setter>
+              <Setter Property="FrameworkElement.MinWidth">
+                <Setter.Value>
+                  <s:Double>30</s:Double>
+                </Setter.Value>
+              </Setter>
+            </Trigger>
+            <Trigger Property="ContentControl.Content" Value="">
+              <Setter Property="FrameworkElement.Margin" TargetName="ContentPresenter">
+                <Setter.Value>
+                  <Thickness>0,0,0,0</Thickness>
+                </Setter.Value>
+              </Setter>
+              <Setter Property="FrameworkElement.MinWidth">
+                <Setter.Value>
+                  <s:Double>30</s:Double>
+                </Setter.Value>
+              </Setter>
+            </Trigger>
+            <Trigger Property="ToggleButton.IsChecked">
+              <Setter Property="ui:SymbolIcon.Symbol" TargetName="ControlIcon">
+                <Setter.Value>
+                  <x:Static Member="ui:SymbolRegular.Subtract16" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="UIElement.Visibility" TargetName="ControlIcon">
+                <Setter.Value>
+                  <x:Static Member="Visibility.Visible" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Panel.Background" TargetName="ControlBorderIconPresenter">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillChecked" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Border.BorderBrush" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBorderBrush" />
+                </Setter.Value>
+              </Setter>
+              <Trigger.Value>
+                <x:Null />
+              </Trigger.Value>
+            </Trigger>
+            <Trigger Property="ToggleButton.IsChecked">
+              <Trigger.EnterActions>
+                <BeginStoryboard Name="SlideIn">
+                  <Storyboard>
+                    <DoubleAnimation From="0"
+                                     To="1"
+                                     Duration="00:00:00.2500000"
+                                     Storyboard.TargetName="ControlIcon"
+                                     Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleX)">
+                      <DoubleAnimation.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                      </DoubleAnimation.EasingFunction>
+                    </DoubleAnimation>
+                    <DoubleAnimation From="0"
+                                     To="1"
+                                     Duration="00:00:00.2500000"
+                                     Storyboard.TargetName="ControlIcon"
+                                     Storyboard.TargetProperty="RenderTransform.(ScaleTransform.ScaleY)">
+                      <DoubleAnimation.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                      </DoubleAnimation.EasingFunction>
+                    </DoubleAnimation>
+                  </Storyboard>
+                </BeginStoryboard>
+              </Trigger.EnterActions>
+              <Setter Property="UIElement.Visibility" TargetName="ControlIcon">
+                <Setter.Value>
+                  <x:Static Member="Visibility.Visible" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Panel.Background" TargetName="ControlBorderIconPresenter">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillChecked" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Border.BorderBrush" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBorderBrush" />
+                </Setter.Value>
+              </Setter>
+              <Trigger.Value>
+                <s:Boolean>True</s:Boolean>
+              </Trigger.Value>
+            </Trigger>
+            <Trigger Property="UIElement.Visibility">
+              <Trigger.EnterActions>
+                <SeekStoryboard Offset="00:00:00.2500000" BeginStoryboardName="SlideIn" />
+              </Trigger.EnterActions>
+              <Trigger.Value>
+                <x:Static Member="Visibility.Visible" />
+              </Trigger.Value>
+            </Trigger>
+            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+              <SeekStoryboard Offset="00:00:00.2500000" BeginStoryboardName="SlideIn" />
+            </EventTrigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="UIElement.IsMouseOver">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ButtonBase.IsPressed">
+                  <Condition.Value>
+                    <s:Boolean>False</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ToggleButton.IsChecked">
+                  <Condition.Value>
+                    <s:Boolean>False</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+              </MultiTrigger.Conditions>
+              <Setter Property="Panel.Background" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillUncheckedPointerOver" />
+                </Setter.Value>
+              </Setter>
+            </MultiTrigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="UIElement.IsMouseOver">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ButtonBase.IsPressed">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ToggleButton.IsChecked">
+                  <Condition.Value>
+                    <s:Boolean>False</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+              </MultiTrigger.Conditions>
+              <Setter Property="Panel.Background" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillUncheckedPressed" />
+                </Setter.Value>
+              </Setter>
+            </MultiTrigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="UIElement.IsMouseOver">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ButtonBase.IsPressed">
+                  <Condition.Value>
+                    <s:Boolean>False</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ToggleButton.IsChecked" Value="{x:Null}" />
+              </MultiTrigger.Conditions>
+              <Setter Property="Panel.Background" TargetName="ControlBorderIconPresenter">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillCheckedPointerOver" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Border.BorderBrush" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBorderBrush" />
+                </Setter.Value>
+              </Setter>
+            </MultiTrigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="UIElement.IsMouseOver">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ButtonBase.IsPressed">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ToggleButton.IsChecked" Value="{x:Null}" />
+              </MultiTrigger.Conditions>
+              <Setter Property="Panel.Background" TargetName="ControlBorderIconPresenter">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillCheckedPressed" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Border.BorderBrush" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBorderBrush" />
+                </Setter.Value>
+              </Setter>
+            </MultiTrigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="UIElement.IsMouseOver">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ButtonBase.IsPressed">
+                  <Condition.Value>
+                    <s:Boolean>False</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ToggleButton.IsChecked">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+              </MultiTrigger.Conditions>
+              <Setter Property="Panel.Background" TargetName="ControlBorderIconPresenter">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillCheckedPointerOver" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Border.BorderBrush" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBorderBrush" />
+                </Setter.Value>
+              </Setter>
+            </MultiTrigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions>
+                <Condition Property="UIElement.IsMouseOver">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ButtonBase.IsPressed">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+                <Condition Property="ToggleButton.IsChecked">
+                  <Condition.Value>
+                    <s:Boolean>True</s:Boolean>
+                  </Condition.Value>
+                </Condition>
+              </MultiTrigger.Conditions>
+              <Setter Property="Panel.Background" TargetName="ControlBorderIconPresenter">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillCheckedPressed" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Border.BorderBrush" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBorderBrush" />
+                </Setter.Value>
+              </Setter>
+            </MultiTrigger>
+            <Trigger Property="UIElement.IsEnabled">
+              <Setter Property="Panel.Background" TargetName="ControlBorderIconPresenter">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundFillUncheckedDisabled" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="Border.BorderBrush" TargetName="StrokeBorder">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxCheckBackgroundStrokeUncheckedDisabled" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="TextElement.Foreground" TargetName="ControlIcon">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="CheckBoxForegroundUncheckedDisabled" />
+                </Setter.Value>
+              </Setter>
+              <Setter Property="TextElement.Foreground">
+                <Setter.Value>
+                  <DynamicResource ResourceKey="TextFillColorDisabledBrush" />
+                </Setter.Value>
+              </Setter>
+              <Trigger.Value>
+                <s:Boolean>False</s:Boolean>
+              </Trigger.Value>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style TargetType="CheckBox" BasedOn="{StaticResource DefaultCheckBoxStyle}" />
 
   <!--
     DataGrids:

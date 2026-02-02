@@ -1,0 +1,158 @@
+Got it — I’ve updated the task accordingly.
+
+
+You can keep the **WPF‑UI Tree styling** *and* make the left selection tree feel far less “clunky” by removing the biggest UX killer (template swapping while scrolling), reducing container churn, and avoiding the “collapsed items still cost you” virtualization trap.
+
+Below are **all 3**:
+
+1. **Codex instructions** (what to change + why)
+2. **Concrete code** (XAML + C# patches)
+3. **Optional WPF‑UI package upgrade path** (because your crash signature is a known WPF‑UI exception)
+
+---
+
+## 1) Codex instructions (do this in Column Builder only)
+
+### A. Stop the “style flips” during scroll (this is what feels clunky)
+
+**Problem:** your current `TreeViewItem` style swaps `Template` when `IsChooseTreeScrolling == true`. Even if it’s only twice per scroll gesture, it’s very noticeable visually and forces WPF to invalidate templates across recycled containers.
+
+**Change:**
+
+* Remove the `DataTrigger` that sets `Template = ChooseTreeItemLightTemplate` during scroll.
+* Keep the “disable hover highlight while scrolling” behavior, but do it **only** via background triggers (no template swap).
+
+**Outcome:** scrolling looks stable (no UI “morphing”), and virtualization has fewer template invalidations to deal with.
+
+---
+
+### B. Add virtualization cache (less container churn = smoother scroll)
+
+WPF recycling virtualization still creates/reattaches containers as you wheel through large lists. Adding a small cache keeps a “buffer” of realized items above/below the viewport.
+
+**Change:**
+
+* On the `TreeView` and on the item containers, set:
+
+  * `VirtualizingStackPanel.CacheLength="2"`
+  * `VirtualizingStackPanel.CacheLengthUnit="Page"`
+
+**Outcome:** fewer detach/attach cycles → less hitching.
+
+---
+
+### C. Don’t bind “hidden” items to `Visibility=Collapsed` in the tree without also filtering
+
+A common WPF perf trap: **collapsed children still get considered by the item generator/virtualization**, especially when counts are huge. This is why “filter by selection” often becomes sluggish when it hides most nodes. A practical pattern is to expose a `CollectionView` for children and filter the view. (This is a well-known approach for TreeView perf when hiding lots of items.) ([Stack Overflow][1])
+
+**Change:**
+
+* In `ColumnBuilderCategoryNode`, add `ICollectionView PropertiesView` with `Filter = node.IsVisible`.
+* Bind the `HierarchicalDataTemplate.ItemsSource` to `PropertiesView` instead of `Properties`.
+* After you update `IsVisible` flags in `ApplyFilter`, call `category.RefreshPropertiesView()`.
+
+**Outcome:** when selection filter hides 95% of properties, the UI only generates containers for the 5% that are visible.
+
+---
+
+### D. Replace WPF‑UI’s implicit CheckBox *for this tree only* with a lightweight (no-animation) template
+
+Even if you’re not crashing now, the default WPF‑UI CheckBox template/animations add overhead in huge virtualized lists—and historically this exact crash signature has occurred in WPF‑UI templates. ([GitHub][2])
+
+**Change:**
+
+* Add a **keyed** style: `ColumnBuilderTreeCheckBoxStyle`
+* Apply it only to the CheckBoxes inside the left tree + filtered list.
+
+**Outcome:** lower render cost; also eliminates the “DoubleAnimationBase.GetCurrentValue(defaultDestinationValue=null)” risk for this surface.
+
+---
+
+### E. Fix a subtle perf papercut: leaf nodes shouldn’t bind `IsExpanded`
+
+Your current single `TreeViewItem` style binds `IsExpanded` for *all* nodes. Leaf nodes don’t have `IsExpanded`, so you get constant binding failures in debug output and extra binding work.
+
+**Change:**
+
+* Use **two container styles**:
+
+  * Category nodes: bind `IsExpanded`
+  * Property nodes: don’t
+
+**Outcome:** less noise + less work per container.
+
+---
+
+## 2) Code (drop-in refined files)
+
+I created refined versions of your two files.
+
+* [Download DataMatrixColumnBuilderWindow.refined.xaml](sandbox:/mnt/data/DataMatrixColumnBuilderWindow.refined.xaml)
+* [Download DataMatrixColumnBuilderWindow.refined.xaml.cs](sandbox:/mnt/data/DataMatrixColumnBuilderWindow.refined.xaml.cs)
+
+### What’s inside these refined files
+
+**XAML**
+
+* Adds `ColumnBuilderTreeCheckBoxStyle` (no animations).
+* Adds two TreeViewItem styles:
+
+  * `ChooseTreeCategoryItemStyle`
+  * `ChooseTreePropertyItemStyle`
+* Uses `ItemContainerStyle="{StaticResource ChooseTreeCategoryItemStyle}"` on the `TreeView`
+* Uses `ItemsSource="{Binding PropertiesView}"` + `ItemContainerStyle="{StaticResource ChooseTreePropertyItemStyle}"` inside the `HierarchicalDataTemplate`
+* Removes the “swap template while scrolling” trigger.
+* Adds `VirtualizingStackPanel.CacheLength` and `CacheLengthUnit` to tree + filtered list.
+
+**C#**
+
+* Adds `PropertiesView` (an `ICollectionView`) to `ColumnBuilderCategoryNode`.
+* Adds `RefreshPropertiesView()`.
+* Updates the “no text filter” branch of `ApplyFilter()` to:
+
+  * only write `IsVisible` when it actually changes
+  * call `category.RefreshPropertiesView()` only when needed
+* Increases the scroll idle debounce from **150ms → 250ms** (reduces flickery “scrolling/not scrolling” toggles).
+
+---
+
+## 3) Optional: upgrade WPF‑UI instead of (or in addition to) local CheckBox override
+
+Your historical crash signature:
+
+> `System.ArgumentNullException: Value cannot be null. Parameter name: defaultDestinationValue`
+> from `System.Windows.Media.Animation.DoubleAnimationBase.GetCurrentValue(...)`
+
+…matches a WPF‑UI tracked issue/fix in their release notes. ([GitHub][2])
+
+### Codex steps for the upgrade option
+
+1. In `MicroEng.Navisworks.csproj`, bump:
+
+   * `WPF-UI` package reference from `4.1.0` → the latest stable you’re comfortable with.
+2. Re-test:
+
+   * Column Builder open/scroll/hover
+   * tri-state checking
+   * selection-filter live updates
+3. If the crash is gone with upgrade:
+
+   * you can choose to **keep** my lightweight tree-only checkbox style (for performance),
+   * or revert to WPF‑UI implicit CheckBox styles if you want 100% stock visuals.
+
+Also note: Microsoft’s guidance for TreeView perf focuses heavily on virtualization + recycling; you’re already doing that, but the big wins come from avoiding template invalidation churn and avoiding “hidden items still cost you.” ([Microsoft Learn][3])
+
+---
+
+## Why this should feel better immediately
+
+* No more “TreeView rows visually change style while scrolling” (this alone makes it feel *way* less clunky).
+* Virtualization cache reduces hitching.
+* Selection filtering stops paying the “collapsed items tax.”
+* CheckBox template becomes cheap + deterministic (no animations, no storyboard evaluation during recycling).
+
+If you apply the refined files and you still feel stutter, the next (deeper) lever would be **lazy child materialization** (only create `PropertyNode`s when a category expands), but that’s a bigger behavioral change; the patch above stays close to your current architecture.
+
+[1]: https://stackoverflow.com/questions/48413607/wpf-treeview-virtualization-performance-with-hidden-items "c# - WPF TreeView Virtualization performance with hidden items - Stack Overflow"
+[2]: https://github.com/lepoco/wpfui/releases "https://github.com/lepoco/wpfui/releases"
+[3]: https://learn.microsoft.com/en-us/dotnet/desktop/wpf/controls/how-to-improve-the-performance-of-a-treeview "https://learn.microsoft.com/en-us/dotnet/desktop/wpf/controls/how-to-improve-the-performance-of-a-treeview"

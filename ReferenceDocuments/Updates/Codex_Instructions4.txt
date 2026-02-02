@@ -1,0 +1,259 @@
+Got it — I’m on it and updating the process accordingly.
+
+
+The reason it “hard-freezes instantly” **and you get zero trace output** is in your current code path — the UI thread blocks **before any of your perf logs run**.
+
+### Where it hangs (in the code you shared)
+
+When you toggle **Filter by selection** ON:
+
+`ViewModel_PropertyChanged` → `UpdateSelectionFilterFromSelection()` → `EnsureSelectionIndexAsync(session)`
+
+And inside `EnsureSelectionIndexAsync`, you do this **on the UI thread**:
+
+```csharp
+var entriesSnapshot = session.RawEntries.ToList();   // <-- UI thread
+```
+
+That’s at **line ~808** in your file.
+
+Your first log line is only after that:
+
+```csharp
+ColumnBuilderDiagnostics.Log($"SelectionIndex build start entries={entriesSnapshot.Count}");
+```
+
+So if `ToList()` is slow/blocked (big session, lock contention, etc.), the UI is frozen and **you’ll never see the log** — exactly what you’re experiencing.
+
+---
+
+## Fix 1 (must-do): move RawEntries snapshot off the UI thread + avoid deadlocky Invoke
+
+### 1) Add a “cancel build” helper
+
+Add this method inside `DataMatrixColumnBuilderWindow`:
+
+```csharp
+private void CancelSelectionIndexBuild()
+{
+    _pendingSelectionKeys = null;
+
+    try
+    {
+        _selectionIndexCts?.Cancel();
+    }
+    catch { /* ignore */ }
+
+    _selectionIndexCts?.Dispose();
+    _selectionIndexCts = null;
+
+    _selectionIndexTask = null;
+    _selectionIndexSession = null;
+    _selectionIndex = null;
+}
+```
+
+### 2) Call it when the toggle is turned OFF
+
+Change your `ViewModel_PropertyChanged` else-branch:
+
+```csharp
+else
+{
+    StopSelectionWatcher();
+    CancelSelectionIndexBuild();        // <-- add this
+    _viewModel.SetSelectionFilterIds(null);
+}
+```
+
+### 3) Replace `EnsureSelectionIndexAsync` with this version
+
+This removes `ToList()` from the UI thread and replaces `Dispatcher.Invoke` with `BeginInvoke` (safer for hangs/deadlocks):
+
+```csharp
+private void EnsureSelectionIndexAsync(ScrapeSession session)
+{
+    if (session?.RawEntries == null)
+    {
+        CancelSelectionIndexBuild();
+        return;
+    }
+
+    if (_selectionIndexSession == session && _selectionIndex != null)
+    {
+        return; // already built
+    }
+
+    if (_selectionIndexTask != null && !_selectionIndexTask.IsCompleted && _selectionIndexSession == session)
+    {
+        return; // already building
+    }
+
+    _selectionIndexCts?.Cancel();
+    _selectionIndexCts?.Dispose();
+    _selectionIndexCts = new CancellationTokenSource();
+    _selectionIndexSession = session;
+
+    var token = _selectionIndexCts.Token;
+
+    // IMPORTANT: log BEFORE any heavy work
+    ColumnBuilderDiagnostics.Log("SelectionIndex build start (async)");
+
+    _selectionIndexTask = Task.Run(() =>
+    {
+        // Snapshot on background thread (so UI can't freeze here)
+        var raw = session.RawEntries;
+        if (raw == null) return null;
+
+        // If it's already a stable list, don't duplicate memory
+        var stable = raw as IReadOnlyList<RawEntry>;
+        var snapshot = stable ?? raw.ToList();
+
+        return BuildSelectionIndex(snapshot, token);
+    }, token);
+
+    _selectionIndexTask.ContinueWith(t =>
+    {
+        if (t.IsCanceled || t.IsFaulted) return;
+
+        var index = t.Result;
+        if (index == null) return;
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            // Window may have been closed or toggle switched off
+            if (!_viewModel.FilterBySelection) return;
+            if (_selectionIndexSession != session) return;
+
+            _selectionIndex = index;
+            ColumnBuilderDiagnostics.Log($"SelectionIndex build done keys={index.Count}");
+
+            var pendingKeys = _pendingSelectionKeys;
+            _pendingSelectionKeys = null;
+
+            if (pendingKeys == null || pendingKeys.Count == 0) return;
+
+            _viewModel.SetSelectionFilterIds(BuildSelectionFilterIds(pendingKeys));
+            ColumnBuilderDiagnostics.Log($"SelectionIndex applied pendingKeys={pendingKeys.Count}");
+        }), DispatcherPriority.Background);
+
+    }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+}
+```
+
+---
+
+## Fix 2 (very important): stop allocating a new `"Category|Name"` string per RawEntry
+
+Even if you move the work off the UI thread, your current `BuildSelectionIndex` creates a brand-new interpolated string for *every* raw entry:
+
+```csharp
+var id = $"{entry.Category}|{entry.Name}";
+```
+
+That can trigger massive GC pauses (GC is stop-the-world → your UI “freezes” even if work is on a background thread).
+
+Replace `BuildSelectionIndex` with this cached/canonicalised version:
+
+```csharp
+private static Dictionary<string, HashSet<string>> BuildSelectionIndex(IEnumerable<RawEntry> entries, CancellationToken token)
+{
+    var map = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+    // Cache canonical "Category|Name" strings so we allocate once per unique property.
+    var idCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var entry in entries ?? Enumerable.Empty<RawEntry>())
+    {
+        if (token.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        var itemKey = entry.ItemKey;
+        if (string.IsNullOrWhiteSpace(itemKey))
+        {
+            continue;
+        }
+
+        if (!map.TryGetValue(itemKey, out var set))
+        {
+            set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            map[itemKey] = set;
+        }
+
+        var category = entry.Category ?? string.Empty;
+        var name = entry.Name ?? string.Empty;
+
+        if (!idCache.TryGetValue(category, out var byName))
+        {
+            byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            idCache[category] = byName;
+        }
+
+        if (!byName.TryGetValue(name, out var id))
+        {
+            id = string.Concat(category, "|", name);
+            byName[name] = id;
+        }
+
+        set.Add(id);
+    }
+
+    return map;
+}
+```
+
+This change alone can turn “instant freeze” into “works normally” on large scrapes.
+
+---
+
+## Why your tracing “doesn’t show anything”
+
+Two separate reasons:
+
+1. **Your trace threshold**: `ColumnBuilderDiagnostics.End(...)` only logs if the measured section exceeds 120ms.
+2. **Your actual hang point**: you hang **before** `SelectionIndex build start` is called (because `ToList()` is before the log).
+
+After the patch above, you should at least see:
+
+* `[ColumnBuilder][Perf] enabled=true` (when the window opens)
+* `SelectionIndex build start (async)` (immediately when toggled)
+* later `SelectionIndex build done ...`
+
+If you *don’t* see `enabled=true`, then the env var isn’t reaching the `Roamer.exe` instance that is actually loading your add-in (wrong process / wrong launch path / different install). In your current code you always log that enabled line, so it’s a reliable check.
+
+---
+
+## If it STILL hard-freezes after these changes
+
+At that point, the next most likely blocking call is this loop:
+
+```csharp
+foreach (ModelItem item in doc.CurrentSelection.SelectedItems)
+{
+    keys.Add(item.InstanceGuid.ToString("D"));
+}
+```
+
+To prove it in one go (no guessing), do this:
+
+### Fast definitive diagnosis (Visual Studio)
+
+1. Start Navisworks normally.
+2. **Attach debugger** to `Roamer.exe`.
+3. Click the toggle to reproduce the hang.
+4. In VS: **Debug → Break All**.
+5. Look at the UI thread call stack.
+
+You’ll see exactly whether you’re stuck in:
+
+* `session.RawEntries.ToList()` (most common)
+* `doc.CurrentSelection.SelectedItems` enumeration
+* a lock inside your scraper cache/session objects
+
+If you paste that call stack, I can point to the exact line and the correct threading model for the Navisworks API call.
+
+---
+
+If you want the most scalable long-term design: don’t build a full `itemKey → HashSet(propertyId)` index at all; instead compute the **union of property IDs for just the current selection** in a cancellable background scan. But the two fixes above are the immediate blockers causing your “toggle = freeze” symptom.

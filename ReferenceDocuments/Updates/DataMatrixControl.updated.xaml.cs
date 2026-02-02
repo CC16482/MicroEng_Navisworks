@@ -37,7 +37,6 @@ namespace MicroEng.Navisworks
         private ScrapeSession _currentSession;
         private List<string> _visibleColumnOverride;
         private bool _updatingScope;
-        private DataMatrixColumnBuilderWindow _columnsWindow;
 
         public DataMatrixControl()
         {
@@ -142,6 +141,16 @@ namespace MicroEng.Navisworks
             var ids = (visibleIds ?? new List<string>())
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .ToList();
+
+            if (ids.Count > 0)
+            {
+                MatrixGrid.Columns.Add(new DataGridTextColumn
+                {
+                    Header = "Element",
+                    Binding = new System.Windows.Data.Binding("ElementDisplayName"),
+                    Width = TryGetElementColumnWidth()
+                });
+            }
 
             foreach (var id in ids)
             {
@@ -387,6 +396,12 @@ namespace MicroEng.Navisworks
         {
             if (SelectionStatus == null) return;
             SelectionStatus.Text = $"Selected: {MatrixGrid?.SelectedItems?.Count ?? 0}";
+        }
+
+        private double TryGetElementColumnWidth()
+        {
+            var w = _currentPreset?.ElementColumnWidth ?? 0;
+            return w > 20 ? w : 180;
         }
 
         private double? TryGetPresetWidth(string attributeId)
@@ -638,7 +653,7 @@ namespace MicroEng.Navisworks
             var rows = MatrixGrid.SelectedItems.Cast<DataMatrixRow>().ToList();
             if (rows.Count == 0) return;
 
-            var cols = GetGridColumnsInDisplayOrder(includeElement: false);
+            var cols = GetGridColumnsInDisplayOrder(includeElement: true);
 
             var sb = new StringBuilder();
             sb.AppendLine(string.Join(",", cols.Select(c => CsvEscape(c.Header?.ToString() ?? string.Empty))));
@@ -729,13 +744,13 @@ namespace MicroEng.Navisworks
             {
                 if (row.Values == null) return string.Empty;
 
-                if (row.Values.TryGetValue(id, out var v)) return v?.ToString() ?? string.Empty;
+                if (row.Values.TryGetValue(id, out var v)) return v ?? string.Empty;
 
                 foreach (var kv in row.Values)
                 {
                     if (string.Equals(kv.Key, id, StringComparison.OrdinalIgnoreCase))
                     {
-                        return kv.Value?.ToString() ?? string.Empty;
+                        return kv.Value ?? string.Empty;
                     }
                 }
             }
@@ -897,9 +912,19 @@ namespace MicroEng.Navisworks
             preset.VisibleAttributeIds = cols
                 .Select(GetColumnBindingPath)
                 .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Where(path => !string.Equals(path, "ElementDisplayName", StringComparison.OrdinalIgnoreCase))
                 .Select(path => TryExtractAttributeId(path, out var id) ? id : null)
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .ToList();
+
+            // Persist column widths (nice QoL when building schedules).
+            preset.ElementColumnWidth = GetColumnWidthForPersist(
+                cols.FirstOrDefault(c => string.Equals(GetColumnBindingPath(c), "ElementDisplayName", StringComparison.OrdinalIgnoreCase)));
+
+            if (preset.ElementColumnWidth <= 20)
+            {
+                preset.ElementColumnWidth = 180;
+            }
 
             preset.ColumnWidths = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in cols)
@@ -953,10 +978,6 @@ namespace MicroEng.Navisworks
         {
             if (_currentSession == null)
             {
-                ShowSnackbar("Column Builder unavailable",
-                    "No scrape session loaded. Run Data Scraper first.",
-                    WpfUiControls.ControlAppearance.Caution,
-                    WpfUiControls.SymbolRegular.Info24);
                 return;
             }
 
@@ -988,43 +1009,16 @@ namespace MicroEng.Navisworks
 
             ordered.AddRange(remaining);
 
-            if (_columnsWindow != null)
-            {
-                if (!_columnsWindow.IsVisible)
-                {
-                    _columnsWindow.Show();
-                }
-                if (_columnsWindow.WindowState == WindowState.Minimized)
-                {
-                    _columnsWindow.WindowState = WindowState.Normal;
-                }
-                _columnsWindow.Activate();
-                return;
-            }
-
-            _columnsWindow = new DataMatrixColumnBuilderWindow(ordered, currentOrder)
+            var dialog = new DataMatrixColumnBuilderWindow(ordered, currentOrder)
             {
                 Owner = Window.GetWindow(this)
             };
-
-            _columnsWindow.Applied += (_, __) =>
+            if (dialog.ShowDialog() == true)
             {
-                var visibleIds = _columnsWindow.VisibleAttributeIds.ToList();
+                var visibleIds = dialog.VisibleAttributeIds.ToList();
                 _visibleColumnOverride = visibleIds;
                 RebuildMatrixFromCurrentState();
-            };
-
-            _columnsWindow.Cancelled += (_, __) =>
-            {
-                _columnsWindow = null;
-            };
-
-            _columnsWindow.Closed += (_, __) =>
-            {
-                _columnsWindow = null;
-            };
-
-            _columnsWindow.Show();
+            }
         }
 
         private List<string> GetVisibleColumnIdsFromGrid()

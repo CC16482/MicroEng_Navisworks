@@ -1,0 +1,220 @@
+I went straight to the only place “Filter by selection” can hang the UI:
+
+### What actually runs when you toggle it
+
+In **`DataMatrixColumnBuilderWindow.xaml.cs`**:
+
+* Toggle updates `ColumnBuilderViewModel.FilterBySelection`
+* That raises `PropertyChanged`
+* `DataMatrixColumnBuilderWindow.ViewModel_PropertyChanged(...)` handles it and calls:
+
+```csharp
+StartSelectionWatcher();
+UpdateSelectionFilterFromSelection();
+```
+
+If there’s an active selection and a scrape session exists, `UpdateSelectionFilterFromSelection()` calls `EnsureSelectionIndexAsync(session)`.
+
+### Why it freezes now (2 separate problems)
+
+#### 1) You copy *all* RawEntries on the UI thread
+
+In `EnsureSelectionIndexAsync` you do this **before** `Task.Run`:
+
+```csharp
+var entriesSnapshot = session.RawEntries.ToList();   // <-- UI thread
+```
+
+If `RawEntries` is big (and in real jobs it often is), that **blocks the WPF dispatcher** long enough to look like a hard freeze.
+
+Even in your screenshot log, the scraper reports ~1291 items and 562 properties — raw rows can easily be hundreds of thousands+. Copying those on the UI thread will stall.
+
+#### 2) Your index builder allocates a *new string per RawEntry*
+
+In `BuildSelectionIndex`:
+
+```csharp
+var id = $"{entry.Category}|{entry.Name}";
+set.Add(id);
+```
+
+That creates a brand-new `id` string for every raw row.
+Even though each item set ends up with only one `"Category|Name"` per property, you still allocate **(items × properties)** strings overall because each item’s HashSet “keeps” its own first instance.
+
+That is *massive* allocation pressure → **stop-the-world GC pauses** → Navisworks “freezes” even though the work is on a background thread.
+
+This is the killer. It would “used to work fine” on small models, and suddenly start “freezing instantly” on bigger ones.
+
+---
+
+## Minimal fix that should stop the freeze
+
+### A) Don’t snapshot RawEntries on the UI thread
+
+Move the snapshot (if you still need one) **inside** the background task.
+
+### B) Canonicalise property IDs so you allocate only once per unique property
+
+Cache `"Category|Name"` strings per `(Category, Name)` instead of rebuilding for every raw entry.
+
+Here’s a drop-in replacement for the two methods.
+
+---
+
+### Patch: `EnsureSelectionIndexAsync`
+
+Replace your current method body with this pattern (same logic, just moved work off UI thread and uses BeginInvoke):
+
+```csharp
+private void EnsureSelectionIndexAsync(ScrapeSession session)
+{
+    if (session?.RawEntries == null)
+    {
+        _selectionIndexSession = null;
+        _selectionIndex = null;
+        return;
+    }
+
+    if (_selectionIndexSession == session && _selectionIndex != null)
+    {
+        return;
+    }
+
+    if (_selectionIndexTask != null && !_selectionIndexTask.IsCompleted && _selectionIndexSession == session)
+    {
+        return;
+    }
+
+    _selectionIndexCts?.Cancel();
+    _selectionIndexCts?.Dispose();
+    _selectionIndexCts = new CancellationTokenSource();
+    _selectionIndexSession = session;
+
+    var token = _selectionIndexCts.Token;
+
+    ColumnBuilderDiagnostics.Log("SelectionIndex build start (async)");
+
+    _selectionIndexTask = Task.Run(() =>
+    {
+        // Snapshot OFF the UI thread (only if needed).
+        // If RawEntries is already a List/array and never mutates post-scrape, you can skip ToList().
+        var snapshot = session.RawEntries as IList<RawEntry> ?? session.RawEntries.ToList();
+        return BuildSelectionIndex(snapshot, token);
+    }, token);
+
+    _selectionIndexTask.ContinueWith(t =>
+    {
+        if (t.IsCanceled || t.IsFaulted) return;
+        var index = t.Result;
+        if (index == null) return;
+
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_selectionIndexSession != session) return;
+
+            _selectionIndex = index;
+
+            var pendingKeys = _pendingSelectionKeys;
+            _pendingSelectionKeys = null;
+
+            if (pendingKeys == null || pendingKeys.Count == 0) return;
+
+            _viewModel.SetSelectionFilterIds(BuildSelectionFilterIds(pendingKeys));
+        }), DispatcherPriority.Background);
+
+    }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+}
+```
+
+---
+
+### Patch: `BuildSelectionIndex` with ID caching (big win)
+
+Replace your current `BuildSelectionIndex` with this:
+
+```csharp
+private static Dictionary<string, HashSet<string>> BuildSelectionIndex(IEnumerable<RawEntry> entries, CancellationToken token)
+{
+    var map = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+    // Cache canonical "Category|Name" strings so we allocate once per unique property.
+    // category -> (name -> "category|name")
+    var idCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var entry in entries ?? Enumerable.Empty<RawEntry>())
+    {
+        if (token.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        var itemKey = entry.ItemKey;
+        if (string.IsNullOrWhiteSpace(itemKey))
+        {
+            continue;
+        }
+
+        if (!map.TryGetValue(itemKey, out var set))
+        {
+            set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            map[itemKey] = set;
+        }
+
+        var category = entry.Category ?? string.Empty;
+        var name = entry.Name ?? string.Empty;
+
+        if (!idCache.TryGetValue(category, out var byName))
+        {
+            byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            idCache[category] = byName;
+        }
+
+        if (!byName.TryGetValue(name, out var id))
+        {
+            id = string.Concat(category, "|", name);
+            byName[name] = id;
+        }
+
+        set.Add(id);
+    }
+
+    return map;
+}
+```
+
+**Why this matters:**
+If you have 1,000 items and 600 properties, you were effectively allocating ~600,000 strings.
+With caching, you allocate ~600 strings.
+
+That alone can turn a “freeze instantly” into “works normally”.
+
+---
+
+## If you still have stalling on very large models
+
+Even with the fixes above, the index is still “item → set of properties”, which is memory-heavy at huge scale.
+
+If you hit that, the next step is to **not build a full index**. Instead, when selection changes, compute the property IDs for just the selected keys by scanning raw entries in a cancelable background task (no giant dictionary retained). That’s usually plenty fast for a UI toggle.
+
+But I’d apply the two patches above first — they’re the highest ROI and align exactly with your symptom (“freezes as soon as toggled”, “used to work fine”).
+
+---
+
+## Quick confirmation without attaching a debugger
+
+You already have a diagnostics switch:
+
+```csharp
+MICROENG_COLUMNBUILDER_TRACE=1
+```
+
+Set that env var for Navisworks, run again, and watch `MicroEng.log` for:
+
+* `SelectionIndex build start ...`
+* If logs stop right after toggling in your current build, it’s because the UI thread is stuck on `ToList()`/GC.
+
+After the patch, you should see the UI stay responsive while the index builds.
+
+---
+
+If you want, paste/attach the `ScrapeSession`, `RawEntry`, and `DataScraperCache` definitions too — I can then tell you whether you can safely **remove snapshotting entirely** (best case) or whether you need a lock/immutable handoff from the scraper to the UI.

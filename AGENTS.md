@@ -1,7 +1,7 @@
 # MicroEng Handoff
 
 ## Status
-- Last build: succeeded (`dotnet build "MicroEng_Navisworks.sln" /p:DeployToProgramData=false`).
+- Last build: succeeded (`dotnet build "MicroEng_Navisworks.sln" /p:DeployToProgramData=false`), **but latest Column Builder changes have not been rebuilt/tested yet**.
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
 - Working tree is dirty (build outputs in bin/obj + Data Matrix refactor/column builder + crash-report logging + Quick Colour profile apply fix).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
@@ -10,6 +10,10 @@
 - Crash reports saved under `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\CrashReports\`.
 
 ## Recent changes
+- Column Builder: Filter-by-selection now **scans only selected keys** (no full item→property index build) to avoid long GC/UI stalls; scan cancels/restarts on selection changes.
+- Column Builder: When selection filter is active, only **expanded categories** refresh their property view; collapsed categories are just hidden/shown.
+- Column Builder: When selection is empty, the tree is hidden and **no processing** should occur (fast path).
+- Column Builder (Data Matrix): left-side TreeView scrolling tuned with deferred scrolling + extra virtualization to reduce layout stalls on large categories.
 - Data Matrix: schedule-style refactor with scope culling, persistent view presets (AppData), and JSONL export (Item docs/Raw rows, optional .jsonl.gz).
 - Data Matrix: default view opens with no columns; "Columns..." replaced by "Column Builder".
 - Data Matrix Column Builder: split window with tri-state category tree + search on left, chosen columns list with two-state toggles on right.
@@ -80,6 +84,7 @@
 - Variation check: baseline CPU variant + GPU variant added for direct CPU vs GPU comparison.
 
 ## Open issues
+- **Column Builder filter-by-selection still freezing** after selection results appear in some runs. Previous logs showed UI stalls during selection index build; new selected-keys scan fix needs validation on new PC.
 - Data Scraper: verify Selection/Search set scopes populate and resolve items correctly.
 - Data Matrix Column Builder: confirm filtering + rapid toggles no longer crash (WPF-UI animations).
 - Data Matrix: verify scope-based column culling + JSONL export formatting across modes.
@@ -174,6 +179,9 @@
 - `Native/MicroEng.CudaBvhPointInMesh/microeng_cuda_bvh_point_in_mesh.cu`
 
 ## Verification ideas
+- Column Builder: set `MICROENG_COLUMNBUILDER_TRACE=1` to log perf; logs are at `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\MicroEng.log`.
+- Column Builder: filter-by-selection should do **no work** and show nothing when no items are selected.
+- Column Builder: filter-by-selection should scan selected items quickly without freezing; if it stalls, capture VS “Break All” call stack.
 - Data Matrix: default view opens with no columns; loading a preset restores columns/scope.
 - Data Matrix: Column Builder search filters the tree; tri-state parent reflects child state; right list toggles add/remove without crash.
 - Data Matrix: scope culling hides properties not present in selected scope; selection/search set scopes resolve items.

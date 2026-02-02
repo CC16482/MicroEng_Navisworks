@@ -27,81 +27,77 @@
                 <Setter Property="SnapsToDevicePixels" Value="True" />
                 <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
                 <Setter Property="Background" Value="Transparent" />
-                <Setter Property="HorizontalContentAlignment" Value="Left" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="VerticalContentAlignment" Value="Center" />
-                <Setter Property="MinHeight" Value="28" />
-                <Setter Property="Padding" Value="0" />
+                <Setter Property="Padding" Value="6,2,0,2" />
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="{x:Type CheckBox}">
-                            <Grid SnapsToDevicePixels="True" VerticalAlignment="Center">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="20" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid Grid.Column="0"
-                                      Width="20"
-                                      Height="20"
-                                      VerticalAlignment="Center"
-                                      HorizontalAlignment="Left">
-                                    <Border x:Name="Box"
-                                            CornerRadius="4"
-                                            BorderThickness="1"
-                                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                                            Background="{DynamicResource ControlFillColorDefaultBrush}" />
-                                    <Path x:Name="CheckMark"
-                                          Data="M 4 10 L 8.2 14 L 16 6"
-                                          Stroke="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
-                                          StrokeThickness="2.2"
-                                          StrokeStartLineCap="Round"
-                                          StrokeEndLineCap="Round"
-                                          Visibility="Collapsed" />
-                                    <Border x:Name="IndeterminateMark"
-                                            Width="12"
-                                            Height="2.6"
-                                            CornerRadius="2"
-                                            Background="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Visibility="Collapsed" />
-                                </Grid>
-                                <ContentPresenter x:Name="ContentPresenter"
-                                                  Grid.Column="1"
-                                                  Margin="8,0,0,0"
-                                                  RecognizesAccessKey="True"
-                                                  Content="{TemplateBinding Content}"
-                                                  ContentTemplate="{TemplateBinding ContentTemplate}"
-                                                  ContentStringFormat="{TemplateBinding ContentStringFormat}"
-                                                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                            <BulletDecorator Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                                <BulletDecorator.Bullet>
+                                    <Grid Width="16" Height="16" Margin="0,0,8,0">
+                                        <Border x:Name="Box"
+                                                CornerRadius="3"
+                                                BorderThickness="1"
+                                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                                                Background="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                        <Path x:Name="CheckMark"
+                                              Data="M 3 8 L 7 12 L 13 4"
+                                              Stroke="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                                              StrokeThickness="2"
+                                              StrokeStartLineCap="Round"
+                                              StrokeEndLineCap="Round"
+                                              Visibility="Collapsed" />
+                                        <Border x:Name="IndeterminateMark"
+                                                Width="10"
+                                                Height="2"
+                                                CornerRadius="1"
+                                                Background="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                Visibility="Collapsed" />
+                                    </Grid>
+                                </BulletDecorator.Bullet>
+
+                                <ContentPresenter RecognizesAccessKey="True"
+                                                  VerticalAlignment="Center"
                                                   SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
-                            </Grid>
+                            </BulletDecorator>
 
                             <ControlTemplate.Triggers>
-                                <Trigger Property="Content" Value="{x:Null}">
-                                    <Setter TargetName="ContentPresenter" Property="Margin" Value="0" />
-                                    <Setter TargetName="ContentPresenter" Property="Visibility" Value="Collapsed" />
-                                </Trigger>
-                                <Trigger Property="Content" Value="">
-                                    <Setter TargetName="ContentPresenter" Property="Margin" Value="0" />
-                                    <Setter TargetName="ContentPresenter" Property="Visibility" Value="Collapsed" />
-                                </Trigger>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
-                                </Trigger>
                                 <Trigger Property="IsChecked" Value="True">
                                     <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
                                     <Setter TargetName="CheckMark" Property="Visibility" Value="Visible" />
-                                    <Setter TargetName="IndeterminateMark" Property="Visibility" Value="Collapsed" />
                                 </Trigger>
+
                                 <Trigger Property="IsChecked" Value="{x:Null}">
                                     <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
                                     <Setter TargetName="IndeterminateMark" Property="Visibility" Value="Visible" />
-                                    <Setter TargetName="CheckMark" Property="Visibility" Value="Collapsed" />
                                 </Trigger>
+
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                                </Trigger>
+
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsMouseOver" Value="True" />
+                                        <Condition Property="IsChecked" Value="True" />
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                </MultiTrigger>
+
+                                <MultiTrigger>
+                                    <MultiTrigger.Conditions>
+                                        <Condition Property="IsMouseOver" Value="True" />
+                                        <Condition Property="IsChecked" Value="{x:Null}" />
+                                    </MultiTrigger.Conditions>
+                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                </MultiTrigger>
+
                                 <Trigger Property="IsEnabled" Value="False">
                                     <Setter Property="Opacity" Value="0.55" />
                                 </Trigger>
@@ -111,29 +107,69 @@
                 </Setter>
             </Style>
 
-            <!-- Column Builder tree expander: minimal toggle chrome (arrow is provided by content) -->
-            <Style x:Key="ExpandCollapseToggleStyle" TargetType="{x:Type ToggleButton}">
+            <!-- Tree styles: avoid binding errors on leaf nodes + keep scroll performance predictable -->
+            <Style x:Key="ChooseTreeCategoryItemStyle"
+                   TargetType="{x:Type TreeViewItem}"
+                   BasedOn="{DynamicResource {x:Type TreeViewItem}}">
+                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
+                <Setter Property="VirtualizingStackPanel.IsVirtualizing" Value="True" />
+                <Setter Property="VirtualizingStackPanel.VirtualizationMode" Value="Recycling" />
+                <Setter Property="VirtualizingStackPanel.ScrollUnit" Value="Item" />
+                <Setter Property="VirtualizingStackPanel.CacheLength" Value="2" />
+                <Setter Property="VirtualizingStackPanel.CacheLengthUnit" Value="Page" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Padding" Value="6,4" />
+                <Setter Property="Margin" Value="0,1,0,1" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
                 <Setter Property="Focusable" Value="False" />
                 <Setter Property="IsTabStop" Value="False" />
-                <Setter Property="Width" Value="16" />
-                <Setter Property="Height" Value="16" />
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="{x:Type ToggleButton}">
-                            <Border Background="{TemplateBinding Background}"
-                                    Width="{TemplateBinding Width}"
-                                    Height="{TemplateBinding Height}"
-                                    SnapsToDevicePixels="True">
-                                <ContentPresenter HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center" />
-                            </Border>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
+                <EventSetter Event="Selected" Handler="ChooseTreeItem_Selected" />
+                <Style.Triggers>
+                    <MultiDataTrigger>
+                        <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True" />
+                            <Condition Binding="{Binding DataContext.IsChooseTreeScrolling, RelativeSource={RelativeSource AncestorType=TreeView}}" Value="False" />
+                        </MultiDataTrigger.Conditions>
+                        <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                    </MultiDataTrigger>
+                </Style.Triggers>
             </Style>
 
-            <ControlTemplate x:Key="ChooseTreeItemTemplate" TargetType="{x:Type TreeViewItem}">
+            <Style x:Key="ChooseTreePropertyItemStyle"
+                   TargetType="{x:Type TreeViewItem}"
+                   BasedOn="{DynamicResource {x:Type TreeViewItem}}">
+                <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
+                <Setter Property="VirtualizingStackPanel.IsVirtualizing" Value="True" />
+                <Setter Property="VirtualizingStackPanel.VirtualizationMode" Value="Recycling" />
+                <Setter Property="VirtualizingStackPanel.ScrollUnit" Value="Item" />
+                <Setter Property="VirtualizingStackPanel.CacheLength" Value="2" />
+                <Setter Property="VirtualizingStackPanel.CacheLengthUnit" Value="Page" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="Padding" Value="6,2" />
+                <Setter Property="Margin" Value="0,1,0,1" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Focusable" Value="False" />
+                <Setter Property="IsTabStop" Value="False" />
+                <EventSetter Event="Selected" Handler="ChooseTreeItem_Selected" />
+                <Style.Triggers>
+                    <MultiDataTrigger>
+                        <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True" />
+                            <Condition Binding="{Binding DataContext.IsChooseTreeScrolling, RelativeSource={RelativeSource AncestorType=TreeView}}" Value="False" />
+                        </MultiDataTrigger.Conditions>
+                        <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                    </MultiDataTrigger>
+                </Style.Triggers>
+            </Style>
+
+            <ControlTemplate x:Key="ChooseTreeItemLightTemplate" TargetType="{x:Type TreeViewItem}">
                 <Grid SnapsToDevicePixels="True">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -146,26 +182,35 @@
                     <ToggleButton x:Name="Expander"
                                   Grid.Row="0"
                                   Grid.Column="0"
+                                  Width="14"
+                                  Height="14"
                                   Margin="0,0,6,0"
                                   VerticalAlignment="Center"
                                   Focusable="False"
-                                  ClickMode="Press"
-                                  IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
-                                  Style="{StaticResource ExpandCollapseToggleStyle}">
-                        <Grid x:Name="ArrowContainer"
-                              Width="16"
-                              Height="16"
-                              RenderTransformOrigin="0.5,0.5">
-                            <Grid.RenderTransform>
-                                <RotateTransform Angle="-90" />
-                            </Grid.RenderTransform>
-                            <ui:SymbolIcon x:Name="ArrowGlyph"
-                                          Symbol="ArrowSortDown16"
-                                          Filled="True"
-                                          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                          HorizontalAlignment="Center"
-                                          VerticalAlignment="Center" />
-                        </Grid>
+                                  IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}"
+                                  ClickMode="Press">
+                        <ToggleButton.Template>
+                            <ControlTemplate TargetType="ToggleButton">
+                                <Border Background="Transparent"
+                                        Width="{TemplateBinding Width}"
+                                        Height="{TemplateBinding Height}">
+                                    <TextBlock x:Name="Arrow"
+                                               Text=">"
+                                               FontSize="10"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsChecked" Value="True">
+                                        <Setter TargetName="Arrow" Property="Text" Value="v" />
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter TargetName="Arrow" Property="Opacity" Value="0.5" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </ToggleButton.Template>
                     </ToggleButton>
                     <Border x:Name="HeaderBorder"
                             Grid.Row="0"
@@ -181,96 +226,20 @@
                     <ItemsPresenter x:Name="ItemsHost"
                                     Grid.Row="1"
                                     Grid.Column="1"
-                                    Margin="18,0,0,0"
-                                    Visibility="Collapsed" />
+                                    Margin="18,0,0,0" />
                 </Grid>
                 <ControlTemplate.Triggers>
-                    <Trigger Property="HasItems" Value="False">
-                        <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
-                    </Trigger>
-                    <Trigger Property="IsExpanded" Value="True">
-                        <Setter TargetName="ItemsHost" Property="Visibility" Value="Visible" />
-                    </Trigger>
                     <Trigger Property="IsExpanded" Value="False">
                         <Setter TargetName="ItemsHost" Property="Visibility" Value="Collapsed" />
                     </Trigger>
+                    <Trigger Property="HasItems" Value="False">
+                        <Setter TargetName="Expander" Property="Visibility" Value="Hidden" />
+                    </Trigger>
                     <Trigger Property="IsEnabled" Value="False">
                         <Setter TargetName="HeaderBorder" Property="Opacity" Value="0.6" />
-                        <Setter TargetName="ArrowGlyph" Property="Opacity" Value="0.5" />
                     </Trigger>
                 </ControlTemplate.Triggers>
             </ControlTemplate>
-
-            <!-- Tree styles: avoid binding errors on leaf nodes + keep scroll performance predictable -->
-            <Style x:Key="ChooseTreeCategoryItemStyle"
-                   TargetType="{x:Type TreeViewItem}"
-                   BasedOn="{StaticResource {x:Type TreeViewItem}}">
-                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
-                <Setter Property="Visibility" Value="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
-                <Setter Property="VirtualizingStackPanel.IsVirtualizing" Value="True" />
-                <Setter Property="VirtualizingStackPanel.VirtualizationMode" Value="Recycling" />
-                <Setter Property="VirtualizingStackPanel.ScrollUnit" Value="Item" />
-                <Setter Property="VirtualizingStackPanel.CacheLength" Value="2" />
-                <Setter Property="VirtualizingStackPanel.CacheLengthUnit" Value="Page" />
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="Padding" Value="6,4" />
-                <Setter Property="Margin" Value="0,1,0,1" />
-                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                <Setter Property="VerticalContentAlignment" Value="Center" />
-                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-                <Setter Property="Focusable" Value="False" />
-                <Setter Property="IsTabStop" Value="False" />
-                <Setter Property="Template" Value="{StaticResource ChooseTreeItemTemplate}" />
-                <EventSetter Event="Selected" Handler="ChooseTreeItem_Selected" />
-                <EventSetter Event="Loaded" Handler="ChooseTreeItem_Loaded" />
-                <EventSetter Event="Expanded" Handler="ChooseTreeItem_Expanded" />
-                <EventSetter Event="Collapsed" Handler="ChooseTreeItem_Collapsed" />
-                <Style.Triggers>
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True" />
-                            <Condition Binding="{Binding DataContext.IsChooseTreeScrolling, RelativeSource={RelativeSource AncestorType=TreeView}}" Value="False" />
-                        </MultiDataTrigger.Conditions>
-                        <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
-                    </MultiDataTrigger>
-                </Style.Triggers>
-            </Style>
-
-            <Style x:Key="ChooseTreePropertyItemStyle"
-                   TargetType="{x:Type TreeViewItem}"
-                   BasedOn="{StaticResource {x:Type TreeViewItem}}">
-                <Setter Property="VirtualizingStackPanel.IsVirtualizing" Value="True" />
-                <Setter Property="VirtualizingStackPanel.VirtualizationMode" Value="Recycling" />
-                <Setter Property="VirtualizingStackPanel.ScrollUnit" Value="Item" />
-                <Setter Property="VirtualizingStackPanel.CacheLength" Value="2" />
-                <Setter Property="VirtualizingStackPanel.CacheLengthUnit" Value="Page" />
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="Padding" Value="6,2" />
-                <Setter Property="Margin" Value="0,1,0,1" />
-                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                <Setter Property="VerticalContentAlignment" Value="Center" />
-                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-                <Setter Property="Focusable" Value="False" />
-                <Setter Property="IsTabStop" Value="False" />
-                <Setter Property="Template" Value="{StaticResource ChooseTreeItemTemplate}" />
-                <EventSetter Event="Selected" Handler="ChooseTreeItem_Selected" />
-                <EventSetter Event="Loaded" Handler="ChooseTreeItem_Loaded" />
-                <EventSetter Event="Expanded" Handler="ChooseTreeItem_Expanded" />
-                <EventSetter Event="Collapsed" Handler="ChooseTreeItem_Collapsed" />
-                <Style.Triggers>
-                    <MultiDataTrigger>
-                        <MultiDataTrigger.Conditions>
-                            <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True" />
-                            <Condition Binding="{Binding DataContext.IsChooseTreeScrolling, RelativeSource={RelativeSource AncestorType=TreeView}}" Value="False" />
-                        </MultiDataTrigger.Conditions>
-                        <Setter Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
-                    </MultiDataTrigger>
-                </Style.Triggers>
-            </Style>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
             </ResourceDictionary.MergedDictionaries>
@@ -317,13 +286,11 @@
                             <ui:TextBox x:Name="ChooseCategoryFilterTextBox"
                                         Grid.Column="0"
                                         PlaceholderText="Search category..."
-                                        Text="{Binding CategoryFilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="ChooseFilterTextBox_TextChanged" />
+                                        Text="{Binding CategoryFilterText, UpdateSourceTrigger=PropertyChanged}" />
                             <ui:TextBox x:Name="ChoosePropertyFilterTextBox"
                                         Grid.Column="2"
                                         PlaceholderText="Search property..."
-                                        Text="{Binding PropertyFilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="ChooseFilterTextBox_TextChanged" />
+                                        Text="{Binding PropertyFilterText, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
                         <ui:ToggleSwitch x:Name="FilterBySelectionToggle"
                                          Content="Filter by selection"
@@ -428,7 +395,7 @@
                                         <TextBlock Text="{Binding CategoryName}"
                                                    FontSize="11"
                                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                                   Margin="28,0,0,0" />
+                                                   Margin="26,0,0,0" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -459,7 +426,7 @@
                                 <ui:SymbolIcon Symbol="ArrowSortDown16" Filled="True" />
                             </ui:Button>
                             <ui:Button x:Name="DeselectSelectedButton" Width="32" Height="28" Padding="0" Margin="0,0,6,0" ToolTip="Deselect">
-                                <ui:SymbolIcon Symbol="FilterDismiss16" Filled="True" />
+                                <ui:SymbolIcon Symbol="SelectAllOff16" Filled="True" />
                             </ui:Button>
                             <ui:Button x:Name="ClearAllSelectedButton" Width="32" Height="28" Padding="0" ToolTip="Clear all">
                                 <ui:SymbolIcon Symbol="Delete16" Filled="True" />
@@ -531,7 +498,6 @@
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
                                     <CheckBox Grid.Column="0"
-                                              Style="{StaticResource ColumnBuilderTreeCheckBoxStyle}"
                                               IsChecked="{Binding IsChecked, Mode=TwoWay}"
                                               IsThreeState="False"
                                               Margin="0,0,6,0"

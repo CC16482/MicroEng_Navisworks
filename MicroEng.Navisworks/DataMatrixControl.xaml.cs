@@ -1,12 +1,17 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows.Input;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Forms.Integration;
 using Autodesk.Navisworks.Api;
 using Microsoft.Win32;
 using NavisApp = Autodesk.Navisworks.Api.Application;
@@ -30,12 +35,17 @@ namespace MicroEng.Navisworks
         private List<DataMatrixRow> _allRows = new();
         private ObservableCollection<DataMatrixRow> _viewRows = new();
         private readonly Dictionary<Guid, ModelItem> _itemCache = new();
+        private List<DataMatrixColumnFilter> _columnFilters = new();
+        private List<CompiledFilter> _compiledFilters = new();
+        private bool _filterCaseSensitive;
+        private bool _filterTrimWhitespace = true;
 
         private bool _syncEnabled;
         private bool _suppressSelectionSync;
         private DataMatrixViewPreset _currentPreset;
         private ScrapeSession _currentSession;
         private List<string> _visibleColumnOverride;
+        private List<string> _requiredColumnOverride;
         private bool _updatingScope;
         private DataMatrixColumnBuilderWindow _columnsWindow;
 
@@ -50,6 +60,11 @@ namespace MicroEng.Navisworks
         {
             RefreshProfiles();
             RefreshProfilesButton.Click += (s, e) => RefreshProfiles();
+            OpenDataScraperButton.Click += (s, e) =>
+            {
+                var profile = ProfileCombo.SelectedItem?.ToString() ?? "Default";
+                MicroEngActions.TryShowDataScraper(profile, out _);
+            };
             ProfileCombo.SelectionChanged += (s, e) => LoadProfileSession();
 
             ScopeCombo.SelectedIndex = 0;
@@ -108,6 +123,10 @@ namespace MicroEng.Navisworks
                 _attributes.Clear();
                 _attributeCatalogAll.Clear();
                 _allRows.Clear();
+                _columnFilters = new List<DataMatrixColumnFilter>();
+                _compiledFilters = new List<CompiledFilter>();
+                _filterCaseSensitive = false;
+                _filterTrimWhitespace = true;
                 _currentSession = null;
                 _visibleColumnOverride = null;
                 RowsStatus.Text = "Rows: 0";
@@ -129,6 +148,7 @@ namespace MicroEng.Navisworks
         private void BuildGridColumns(IList<string> visibleIds)
         {
             MatrixGrid.Columns.Clear();
+            var headerTemplate = TryFindResource("DataMatrixColumnHeaderTemplate") as DataTemplate;
 
             if (visibleIds == null)
             {
@@ -147,9 +167,14 @@ namespace MicroEng.Navisworks
             {
                 var attr = _attributes.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase));
                 if (attr == null) continue;
+                var headerInfo = new ColumnHeaderInfo(
+                    attr.DisplayName ?? attr.PropertyName,
+                    attr.Id,
+                    HasActiveFilterForColumn(attr.Id));
                 MatrixGrid.Columns.Add(new DataGridTextColumn
                 {
-                    Header = attr.DisplayName ?? attr.PropertyName,
+                    Header = headerInfo,
+                    HeaderTemplate = headerTemplate,
                     Binding = new System.Windows.Data.Binding($"Values[{attr.Id}]"),
                     Width = TryGetPresetWidth(attr.Id) ?? (attr.DefaultWidth > 0 ? attr.DefaultWidth : 140)
                 });
@@ -211,10 +236,17 @@ namespace MicroEng.Navisworks
             var separator = string.IsNullOrWhiteSpace(_currentPreset?.MultiValueSeparator) ? "; " : _currentPreset.MultiValueSeparator;
 
             var built = _builder.Build(_currentSession, visibleIds, scopeKeys, joinMulti, separator);
+            if (_requiredColumnOverride != null && _requiredColumnOverride.Count > 0)
+            {
+                var required = new HashSet<string>(_requiredColumnOverride, StringComparer.OrdinalIgnoreCase);
+                built = (built.Attributes,
+                    built.Rows.Where(row => required.All(id => row.Values.ContainsKey(id))).ToList());
+            }
             _attributes = built.Attributes;
             _allRows = built.Rows;
             _itemCache.Clear();
 
+            PruneColumnFilters(visibleIds);
             BuildGridColumns(visibleIds);
             ApplyFiltersAndSorts();
         }
@@ -355,7 +387,6 @@ namespace MicroEng.Navisworks
                 }
 
                 var text = $"Scope: {label}";
-                if (ScopeBadgeText != null) ScopeBadgeText.Text = text;
                 if (ScopeStatus != null) ScopeStatus.Text = text;
             }
             catch
@@ -492,6 +523,11 @@ namespace MicroEng.Navisworks
         {
             IEnumerable<DataMatrixRow> rows = _allRows;
 
+            if (_compiledFilters.Count > 0)
+            {
+                rows = rows.Where(ColumnFiltersMatch);
+            }
+
             if (SelectedOnlyCheck.IsChecked == true && MatrixGrid.SelectedItems.Count > 0)
             {
                 var selectedKeys = MatrixGrid.SelectedItems.Cast<DataMatrixRow>().Select(r => r.ItemKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -505,6 +541,516 @@ namespace MicroEng.Navisworks
             ViewStatus.Text = $"View: {_currentPreset?.Name ?? "(Default)"}";
             UpdateScopeUiText();
             UpdateSelectionStatus();
+        }
+
+        private bool ColumnFiltersMatch(DataMatrixRow row)
+        {
+            if (_compiledFilters.Count == 0) return true;
+
+            foreach (var group in _compiledFilters.GroupBy(f => f.AttributeId, StringComparer.OrdinalIgnoreCase))
+            {
+                var list = group.Where(f => f.IsValid).ToList();
+                if (list.Count == 0)
+                {
+                    continue;
+                }
+
+                var result = FilterMatches(row, list[0]);
+                for (var i = 1; i < list.Count; i++)
+                {
+                    var current = FilterMatches(row, list[i]);
+                    result = list[i].Join == DataMatrixFilterJoin.And
+                        ? result && current
+                        : result || current;
+                }
+
+                if (!result)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private void LoadFiltersFromPreset()
+        {
+            _columnFilters = _currentPreset?.Filters != null
+                ? CloneFilters(_currentPreset.Filters)
+                : new List<DataMatrixColumnFilter>();
+            _filterCaseSensitive = _currentPreset?.FilterCaseSensitive ?? false;
+            _filterTrimWhitespace = _currentPreset?.FilterTrimWhitespace ?? true;
+            RefreshCompiledFilters();
+        }
+
+        private static List<DataMatrixColumnFilter> CloneFilters(IEnumerable<DataMatrixColumnFilter> filters)
+        {
+            if (filters == null) return new List<DataMatrixColumnFilter>();
+
+            return filters
+                .Where(f => f != null)
+                .Select(f => new DataMatrixColumnFilter
+                {
+                    AttributeId = f.AttributeId,
+                    Operator = f.Operator,
+                    Value = f.Value,
+                    ValuesList = f.ValuesList != null ? new List<string>(f.ValuesList) : new List<string>(),
+                    IsEnabled = f.IsEnabled,
+                    CaseSensitive = f.CaseSensitive,
+                    TrimWhitespace = f.TrimWhitespace,
+                    Join = f.Join
+                })
+                .ToList();
+        }
+
+        private void RefreshCompiledFilters()
+        {
+            _compiledFilters = _columnFilters
+                .Where(f => f != null && f.IsEnabled && !string.IsNullOrWhiteSpace(f.AttributeId))
+                .Select(f => CompiledFilter.Create(f))
+                .ToList();
+        }
+
+        private void PruneColumnFilters(IList<string> visibleIds)
+        {
+            if (_columnFilters == null)
+            {
+                _columnFilters = new List<DataMatrixColumnFilter>();
+            }
+
+            if (visibleIds == null || visibleIds.Count == 0)
+            {
+                if (_columnFilters.Count > 0)
+                {
+                    _columnFilters.Clear();
+                    RefreshCompiledFilters();
+                    UpdateColumnHeaderFilterIndicators();
+                }
+                return;
+            }
+
+            var visible = new HashSet<string>(visibleIds, StringComparer.OrdinalIgnoreCase);
+            var removed = _columnFilters.RemoveAll(f => f == null
+                || string.IsNullOrWhiteSpace(f.AttributeId)
+                || !visible.Contains(f.AttributeId));
+            if (removed > 0)
+            {
+                RefreshCompiledFilters();
+                UpdateColumnHeaderFilterIndicators();
+            }
+        }
+
+        private bool HasActiveFilterForColumn(string columnId)
+        {
+            if (string.IsNullOrWhiteSpace(columnId)) return false;
+            return _columnFilters.Any(f => f != null
+                && f.IsEnabled
+                && string.Equals(f.AttributeId, columnId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void UpdateColumnHeaderFilterIndicators()
+        {
+            foreach (var col in MatrixGrid.Columns)
+            {
+                if (col.Header is ColumnHeaderInfo header)
+                {
+                    header.IsFiltered = HasActiveFilterForColumn(header.ColumnId);
+                }
+            }
+        }
+
+        private bool FilterMatches(DataMatrixRow row, CompiledFilter filter)
+        {
+            if (filter == null) return true;
+
+            var hasValue = TryGetRawValue(row, filter.AttributeId, out var rawValue);
+
+            switch (filter.Operator)
+            {
+                case DataMatrixFilterOperator.IsNull:
+                    return !hasValue || rawValue == null;
+                case DataMatrixFilterOperator.IsNotNull:
+                    return hasValue && rawValue != null;
+                case DataMatrixFilterOperator.IsEmpty:
+                case DataMatrixFilterOperator.Blank:
+                    return hasValue && rawValue != null && IsEmptyString(rawValue, filter.TrimWhitespace);
+                case DataMatrixFilterOperator.IsNotEmpty:
+                case DataMatrixFilterOperator.NotBlank:
+                    return hasValue && rawValue != null && !IsEmptyString(rawValue, filter.TrimWhitespace);
+            }
+
+            if (!hasValue || rawValue == null)
+            {
+                return filter.Operator == DataMatrixFilterOperator.NotContains
+                       || filter.Operator == DataMatrixFilterOperator.NotEquals;
+            }
+
+            if (IsNumericOperator(filter.Operator))
+            {
+                if (!TryGetNumber(rawValue, out var number)) return false;
+                return filter.Operator switch
+                {
+                    DataMatrixFilterOperator.GreaterThan => number > filter.NumberValue.Value,
+                    DataMatrixFilterOperator.GreaterOrEqual => number >= filter.NumberValue.Value,
+                    DataMatrixFilterOperator.LessThan => number < filter.NumberValue.Value,
+                    DataMatrixFilterOperator.LessOrEqual => number <= filter.NumberValue.Value,
+                    DataMatrixFilterOperator.Between => number >= filter.NumberMin.Value && number <= filter.NumberMax.Value,
+                    _ => false
+                };
+            }
+
+            if (IsDateOperator(filter.Operator))
+            {
+                if (!TryGetDate(rawValue, out var date)) return false;
+                var dateOnly = date.Date;
+                return filter.Operator switch
+                {
+                    DataMatrixFilterOperator.DateBefore => dateOnly < filter.DateValue.Value.Date,
+                    DataMatrixFilterOperator.DateAfter => dateOnly > filter.DateValue.Value.Date,
+                    DataMatrixFilterOperator.DateOn => dateOnly == filter.DateValue.Value.Date,
+                    DataMatrixFilterOperator.DateBetween => dateOnly >= filter.DateMin.Value.Date && dateOnly <= filter.DateMax.Value.Date,
+                    _ => false
+                };
+            }
+
+            var text = NormalizeText(rawValue, filter.TrimWhitespace);
+            var comparison = filter.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+            switch (filter.Operator)
+            {
+                case DataMatrixFilterOperator.Contains:
+                    return text.IndexOf(filter.TextValue, comparison) >= 0;
+                case DataMatrixFilterOperator.NotContains:
+                    return text.IndexOf(filter.TextValue, comparison) < 0;
+                case DataMatrixFilterOperator.StartsWith:
+                    return text.StartsWith(filter.TextValue, comparison);
+                case DataMatrixFilterOperator.EndsWith:
+                    return text.EndsWith(filter.TextValue, comparison);
+                case DataMatrixFilterOperator.Equals:
+                case DataMatrixFilterOperator.NotEquals:
+                    if (filter.NumberValue.HasValue && TryGetNumber(rawValue, out var numValue))
+                    {
+                        var eq = Math.Abs(numValue - filter.NumberValue.Value) < 0.0000001;
+                        return filter.Operator == DataMatrixFilterOperator.Equals ? eq : !eq;
+                    }
+                    if (filter.DateValue.HasValue && TryGetDate(rawValue, out var dateValue))
+                    {
+                        var eq = dateValue.Date == filter.DateValue.Value.Date;
+                        return filter.Operator == DataMatrixFilterOperator.Equals ? eq : !eq;
+                    }
+                    var equal = string.Equals(text, filter.TextValue, comparison);
+                    return filter.Operator == DataMatrixFilterOperator.Equals ? equal : !equal;
+                case DataMatrixFilterOperator.Wildcard:
+                case DataMatrixFilterOperator.Regex:
+                    return filter.Regex != null && filter.Regex.IsMatch(text);
+                case DataMatrixFilterOperator.InList:
+                    if (filter.TextList != null && filter.TextList.Count > 0)
+                    {
+                        return filter.TextList.Any(val => string.Equals(text, val, comparison));
+                    }
+                    return false;
+                default:
+                    return true;
+            }
+        }
+
+        private bool TryGetRawValue(DataMatrixRow row, string attributeId, out object value)
+        {
+            value = null;
+            if (row == null || string.IsNullOrWhiteSpace(attributeId)) return false;
+
+            if (string.Equals(attributeId, "ElementDisplayName", StringComparison.OrdinalIgnoreCase))
+            {
+                value = row.ElementDisplayName;
+                return true;
+            }
+
+            if (row.Values == null) return false;
+            if (row.Values.TryGetValue(attributeId, out var val))
+            {
+                value = val;
+                return true;
+            }
+
+            foreach (var kv in row.Values)
+            {
+                if (string.Equals(kv.Key, attributeId, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = kv.Value;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private string NormalizeText(object value, bool trim)
+        {
+            var text = Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
+            return trim ? text.Trim() : text;
+        }
+
+        private bool IsEmptyString(object value, bool trim)
+        {
+            var text = Convert.ToString(value, CultureInfo.CurrentCulture) ?? string.Empty;
+            if (trim)
+            {
+                text = text.Trim();
+            }
+            return text.Length == 0;
+        }
+
+        private static bool IsNumericOperator(DataMatrixFilterOperator op)
+        {
+            return op == DataMatrixFilterOperator.GreaterThan
+                   || op == DataMatrixFilterOperator.GreaterOrEqual
+                   || op == DataMatrixFilterOperator.LessThan
+                   || op == DataMatrixFilterOperator.LessOrEqual
+                   || op == DataMatrixFilterOperator.Between;
+        }
+
+        private static bool IsDateOperator(DataMatrixFilterOperator op)
+        {
+            return op == DataMatrixFilterOperator.DateBefore
+                   || op == DataMatrixFilterOperator.DateAfter
+                   || op == DataMatrixFilterOperator.DateOn
+                   || op == DataMatrixFilterOperator.DateBetween;
+        }
+
+        private static bool TryGetNumber(object raw, out double value)
+        {
+            value = 0d;
+            if (raw == null) return false;
+
+            if (raw is IConvertible && !(raw is string))
+            {
+                try
+                {
+                    value = Convert.ToDouble(raw, CultureInfo.InvariantCulture);
+                    return true;
+                }
+                catch
+                {
+                    // fall through to string parsing
+                }
+            }
+
+            var text = Convert.ToString(raw, CultureInfo.CurrentCulture);
+            return TryParseNumber(text, out value);
+        }
+
+        private static bool TryGetDate(object raw, out DateTime value)
+        {
+            value = default;
+            if (raw == null) return false;
+
+            if (raw is DateTime time)
+            {
+                value = time;
+                return true;
+            }
+
+            var text = Convert.ToString(raw, CultureInfo.CurrentCulture);
+            return TryParseDate(text, out value);
+        }
+
+        private static bool TryParseNumber(string text, out double value)
+        {
+            value = 0d;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            return double.TryParse(text, NumberStyles.Any, CultureInfo.CurrentCulture, out value)
+                   || double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool TryParseNumberRange(string text, out double min, out double max)
+        {
+            min = 0d;
+            max = 0d;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            var parts = text.Split(new[] { ".." }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            return TryParseNumber(parts[0], out min) && TryParseNumber(parts[1], out max);
+        }
+
+        private static bool TryParseDate(string text, out DateTime value)
+        {
+            value = default;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            return DateTime.TryParse(text, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out value)
+                   || DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AllowWhiteSpaces, out value);
+        }
+
+        private static bool TryParseDateRange(string text, out DateTime min, out DateTime max)
+        {
+            min = default;
+            max = default;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            var parts = text.Split(new[] { ".." }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            return TryParseDate(parts[0], out min) && TryParseDate(parts[1], out max);
+        }
+
+        private static string WildcardToRegex(string pattern)
+        {
+            if (string.IsNullOrEmpty(pattern)) return "^$";
+            return "^" + Regex.Escape(pattern)
+                .Replace("\\*", ".*")
+                .Replace("\\?", ".") + "$";
+        }
+
+        private sealed class CompiledFilter
+        {
+            private CompiledFilter() { }
+
+            public string AttributeId { get; private set; }
+            public DataMatrixFilterOperator Operator { get; private set; }
+            public DataMatrixFilterJoin Join { get; private set; }
+            public bool CaseSensitive { get; private set; }
+            public bool TrimWhitespace { get; private set; } = true;
+            public string TextValue { get; private set; } = string.Empty;
+            public IReadOnlyList<string> TextList { get; private set; }
+            public Regex Regex { get; private set; }
+            public double? NumberValue { get; private set; }
+            public double? NumberMin { get; private set; }
+            public double? NumberMax { get; private set; }
+            public DateTime? DateValue { get; private set; }
+            public DateTime? DateMin { get; private set; }
+            public DateTime? DateMax { get; private set; }
+            public bool IsValid { get; private set; }
+
+            public static CompiledFilter Create(DataMatrixColumnFilter filter)
+            {
+                var compiled = new CompiledFilter
+                {
+                    AttributeId = filter.AttributeId ?? string.Empty,
+                    Operator = filter.Operator,
+                    Join = filter.Join,
+                    CaseSensitive = filter.CaseSensitive,
+                    TrimWhitespace = filter.TrimWhitespace,
+                    IsValid = true
+                };
+
+                var value = filter.Value ?? string.Empty;
+                if (compiled.TrimWhitespace)
+                {
+                    value = value.Trim();
+                }
+
+                compiled.TextValue = value;
+
+                switch (filter.Operator)
+                {
+                    case DataMatrixFilterOperator.Regex:
+                        compiled.Regex = BuildRegex(value, compiled.CaseSensitive);
+                        compiled.IsValid = compiled.Regex != null;
+                        break;
+                    case DataMatrixFilterOperator.Wildcard:
+                        compiled.Regex = BuildRegex(WildcardToRegex(value), compiled.CaseSensitive);
+                        compiled.IsValid = compiled.Regex != null;
+                        break;
+                    case DataMatrixFilterOperator.GreaterThan:
+                    case DataMatrixFilterOperator.GreaterOrEqual:
+                    case DataMatrixFilterOperator.LessThan:
+                    case DataMatrixFilterOperator.LessOrEqual:
+                        compiled.IsValid = TryParseNumber(value, out var number);
+                        compiled.NumberValue = number;
+                        break;
+                    case DataMatrixFilterOperator.Between:
+                        compiled.IsValid = TryParseNumberRange(value, out var min, out var max);
+                        compiled.NumberMin = min;
+                        compiled.NumberMax = max;
+                        break;
+                    case DataMatrixFilterOperator.DateBefore:
+                    case DataMatrixFilterOperator.DateAfter:
+                    case DataMatrixFilterOperator.DateOn:
+                        compiled.IsValid = TryParseDate(value, out var date);
+                        compiled.DateValue = date;
+                        break;
+                    case DataMatrixFilterOperator.DateBetween:
+                        compiled.IsValid = TryParseDateRange(value, out var start, out var end);
+                        compiled.DateMin = start;
+                        compiled.DateMax = end;
+                        break;
+                    case DataMatrixFilterOperator.Equals:
+                    case DataMatrixFilterOperator.NotEquals:
+                        if (TryParseNumber(value, out var eqNum))
+                        {
+                            compiled.NumberValue = eqNum;
+                        }
+                        if (TryParseDate(value, out var eqDate))
+                        {
+                            compiled.DateValue = eqDate;
+                        }
+                        break;
+                    case DataMatrixFilterOperator.InList:
+                        compiled.TextList = BuildTextList(filter, compiled.TrimWhitespace);
+                        break;
+                }
+
+                return compiled;
+            }
+
+            private static Regex BuildRegex(string pattern, bool caseSensitive)
+            {
+                if (string.IsNullOrWhiteSpace(pattern))
+                {
+                    return null;
+                }
+
+                try
+                {
+                    var options = caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase;
+                    return new Regex(pattern, options);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            private static IReadOnlyList<string> BuildTextList(DataMatrixColumnFilter filter, bool trimWhitespace)
+            {
+                var list = new List<string>();
+                if (filter.ValuesList != null && filter.ValuesList.Count > 0)
+                {
+                    list.AddRange(filter.ValuesList);
+                }
+                else if (!string.IsNullOrWhiteSpace(filter.Value))
+                {
+                    var parts = filter.Value.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+                    list.AddRange(parts);
+                }
+
+                if (trimWhitespace)
+                {
+                    for (var i = list.Count - 1; i >= 0; i--)
+                    {
+                        var trimmed = list[i]?.Trim();
+                        if (string.IsNullOrWhiteSpace(trimmed))
+                        {
+                            list.RemoveAt(i);
+                        }
+                        else
+                        {
+                            list[i] = trimmed;
+                        }
+                    }
+                }
+
+                return list;
+            }
         }
 
         private void MatrixGrid_Sorting(object sender, DataGridSortingEventArgs e)
@@ -867,6 +1413,7 @@ namespace MicroEng.Navisworks
             }
 
             _visibleColumnOverride = null;
+            LoadFiltersFromPreset();
 
             if (_currentPreset != null)
             {
@@ -923,6 +1470,10 @@ namespace MicroEng.Navisworks
 
             preset.JoinMultiValues = _currentPreset?.JoinMultiValues ?? preset.JoinMultiValues;
             preset.MultiValueSeparator = _currentPreset?.MultiValueSeparator ?? preset.MultiValueSeparator;
+
+            preset.Filters = CloneFilters(_columnFilters);
+            preset.FilterCaseSensitive = _filterCaseSensitive;
+            preset.FilterTrimWhitespace = _filterTrimWhitespace;
 
             _presetManager.SavePreset(preset);
             LoadPresets(profile);
@@ -990,6 +1541,7 @@ namespace MicroEng.Navisworks
 
             if (_columnsWindow != null)
             {
+                ElementHost.EnableModelessKeyboardInterop(_columnsWindow);
                 if (!_columnsWindow.IsVisible)
                 {
                     _columnsWindow.Show();
@@ -1002,7 +1554,7 @@ namespace MicroEng.Navisworks
                 return;
             }
 
-            _columnsWindow = new DataMatrixColumnBuilderWindow(ordered, currentOrder)
+            _columnsWindow = new DataMatrixColumnBuilderWindow(ordered, currentOrder, _requiredColumnOverride)
             {
                 Owner = Window.GetWindow(this)
             };
@@ -1011,6 +1563,7 @@ namespace MicroEng.Navisworks
             {
                 var visibleIds = _columnsWindow.VisibleAttributeIds.ToList();
                 _visibleColumnOverride = visibleIds;
+                _requiredColumnOverride = _columnsWindow.RequiredAttributeIds?.ToList() ?? new List<string>();
                 RebuildMatrixFromCurrentState();
             };
 
@@ -1024,6 +1577,7 @@ namespace MicroEng.Navisworks
                 _columnsWindow = null;
             };
 
+            ElementHost.EnableModelessKeyboardInterop(_columnsWindow);
             _columnsWindow.Show();
         }
 
@@ -1120,6 +1674,11 @@ namespace MicroEng.Navisworks
 
         private static string PromptText(string caption, string title)
         {
+            return PromptText(caption, title, null);
+        }
+
+        private static string PromptText(string caption, string title, string defaultValue)
+        {
             var window = new Window
             {
                 Title = title,
@@ -1130,6 +1689,8 @@ namespace MicroEng.Navisworks
                 ResizeMode = ResizeMode.NoResize
             };
             MicroEngWpfUiTheme.ApplyTo(window);
+            window.SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
+            window.SetResourceReference(ForegroundProperty, "TextFillColorPrimaryBrush");
 
             var panel = new Grid { Margin = new Thickness(12) };
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -1137,7 +1698,7 @@ namespace MicroEng.Navisworks
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             var label = new TextBlock { Text = caption, Margin = new Thickness(0, 0, 0, 6) };
-            var box = new Wpf.Ui.Controls.TextBox();
+            var box = new Wpf.Ui.Controls.TextBox { Text = defaultValue ?? string.Empty };
             var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
             var ok = new Wpf.Ui.Controls.Button { Content = "OK", Width = 70, Margin = new Thickness(4), IsDefault = true };
             var cancel = new Wpf.Ui.Controls.Button { Content = "Cancel", Width = 70, Margin = new Thickness(4), IsCancel = true };
@@ -1155,6 +1716,96 @@ namespace MicroEng.Navisworks
 
             window.Content = panel;
             return window.ShowDialog() == true ? box.Text : null;
+        }
+
+        private void ColumnFilterButton_Click(object sender, RoutedEventArgs e)
+        {
+            e.Handled = true;
+            if (sender is not Button button || button.DataContext is not ColumnHeaderInfo header)
+            {
+                return;
+            }
+
+            ShowFilterBuilder(header.ColumnId);
+        }
+
+        private void ShowFilterBuilder(string defaultColumnId)
+        {
+            if (_attributes == null || _attributes.Count == 0)
+            {
+                ShowSnackbar("Filter Builder unavailable",
+                    "Choose columns before adding filters.",
+                    WpfUiControls.ControlAppearance.Caution,
+                    WpfUiControls.SymbolRegular.Info24);
+                return;
+            }
+
+            var window = new DataMatrixFilterBuilderWindow(
+                _columnFilters.Where(f => f != null && string.Equals(f.AttributeId, defaultColumnId, StringComparison.OrdinalIgnoreCase)),
+                _filterCaseSensitive,
+                _filterTrimWhitespace,
+                defaultColumnId,
+                GetColumnDisplayName(defaultColumnId))
+            {
+                Owner = Window.GetWindow(this)
+            };
+
+            if (window.ShowDialog() == true)
+            {
+                var nextFilters = window.Filters ?? new List<DataMatrixColumnFilter>();
+                _columnFilters.RemoveAll(f => f != null && string.Equals(f.AttributeId, defaultColumnId, StringComparison.OrdinalIgnoreCase));
+                foreach (var filter in nextFilters)
+                {
+                    if (filter == null) continue;
+                    filter.AttributeId = defaultColumnId;
+                    _columnFilters.Add(filter);
+                }
+                _filterCaseSensitive = window.FilterCaseSensitive;
+                _filterTrimWhitespace = window.FilterTrimWhitespace;
+                RefreshCompiledFilters();
+                UpdateColumnHeaderFilterIndicators();
+                ApplyFiltersAndSorts();
+            }
+        }
+
+        private string GetColumnDisplayName(string columnId)
+        {
+            if (string.IsNullOrWhiteSpace(columnId)) return string.Empty;
+            var attr = _attributes?.FirstOrDefault(a => string.Equals(a.Id, columnId, StringComparison.OrdinalIgnoreCase));
+            return attr?.DisplayName ?? attr?.PropertyName ?? columnId;
+        }
+
+        private sealed class ColumnHeaderInfo : INotifyPropertyChanged
+        {
+            private bool _isFiltered;
+
+            public ColumnHeaderInfo(string title, string columnId, bool isFiltered)
+            {
+                Title = title ?? string.Empty;
+                ColumnId = columnId ?? string.Empty;
+                _isFiltered = isFiltered;
+            }
+
+            public string Title { get; }
+            public string ColumnId { get; }
+
+            public bool IsFiltered
+            {
+                get => _isFiltered;
+                set
+                {
+                    if (_isFiltered == value) return;
+                    _isFiltered = value;
+                    OnPropertyChanged();
+                }
+            }
+
+            public event PropertyChangedEventHandler PropertyChanged;
+
+            private void OnPropertyChanged([CallerMemberName] string name = null)
+            {
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            }
         }
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)

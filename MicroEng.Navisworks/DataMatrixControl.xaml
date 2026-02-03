@@ -16,6 +16,81 @@
     <UserControl.Resources>
         <ResourceDictionary>
             <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
+            <Style x:Key="ColumnHeaderFilterButtonStyle" TargetType="{x:Type ui:Button}">
+                <Setter Property="Width" Value="22" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="MinWidth" Value="22" />
+                <Setter Property="MinHeight" Value="22" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="6,0,0,0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="{x:Type ui:Button}">
+                            <Border x:Name="ButtonBorder"
+                                    CornerRadius="4"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Opacity" Value="0.5" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <DataTemplate x:Key="DataMatrixColumnHeaderTemplate">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding Title}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               Margin="0,0,4,0"
+                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <ui:Button Grid.Column="1"
+                               Style="{StaticResource ColumnHeaderFilterButtonStyle}"
+                               Click="ColumnFilterButton_Click"
+                               ToolTip="Filter column">
+                        <ui:SymbolIcon RenderTransformOrigin="0.5,0.5">
+                            <ui:SymbolIcon.RenderTransform>
+                                <RotateTransform Angle="180" />
+                            </ui:SymbolIcon.RenderTransform>
+                            <ui:SymbolIcon.Style>
+                                <Style TargetType="{x:Type ui:SymbolIcon}">
+                                    <Setter Property="Symbol" Value="BeakerOff20" />
+                                    <Setter Property="Filled" Value="False" />
+                                    <Setter Property="FontSize" Value="14" />
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsFiltered}" Value="True">
+                                            <Setter Property="Symbol" Value="Beaker20" />
+                                            <Setter Property="Filled" Value="True" />
+                                            <Setter Property="Foreground" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ui:SymbolIcon.Style>
+                        </ui:SymbolIcon>
+                    </ui:Button>
+                </Grid>
+            </DataTemplate>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="{x:Static local:MicroEngResourceUris.WpfUiRoot}" />
             </ResourceDictionary.MergedDictionaries>
@@ -58,28 +133,29 @@
                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
-                <!-- Scope pill -->
-                <Border Grid.Row="0"
-                        Grid.Column="1"
-                        Padding="10,4"
-                        Margin="12,0,0,0"
-                        CornerRadius="999"
-                        Background="{DynamicResource ControlFillColorSecondaryBrush}"
-                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        VerticalAlignment="Center">
-                    <TextBlock x:Name="ScopeBadgeText"
-                               Text="Scope: Entire session"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                </Border>
+                <!-- Scope pill removed -->
 
-                <!-- Toolbar row 1: Data Source / Scope (left) + View (right) -->
-                <DockPanel Grid.Row="1" Grid.ColumnSpan="2" LastChildFill="True" Margin="0,10,0,0">
-
-                    <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                <!-- Toolbar: three single-column rows -->
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0">
+                    <WrapPanel VerticalAlignment="Center" Margin="0,0,0,6">
                         <TextBlock Text="Data Source:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <ComboBox x:Name="ProfileCombo" Width="180" Margin="0,0,8,0" />
-                        <ui:Button x:Name="RefreshProfilesButton" Content="Refresh" Margin="0,0,14,0" />
+                        <ui:Button x:Name="RefreshProfilesButton"
+                                   Width="36"
+                                   Height="30"
+                                   Padding="0"
+                                   Margin="0,0,6,0"
+                                   ToolTip="Refresh">
+                            <ui:SymbolIcon Symbol="ArrowSync20" FontSize="20" />
+                        </ui:Button>
+                        <ui:Button x:Name="OpenDataScraperButton"
+                                   Width="36"
+                                   Height="30"
+                                   Padding="0"
+                                   Margin="0,0,14,0"
+                                   ToolTip="Open Data Scraper">
+                            <ui:SymbolIcon Symbol="DatabaseLightning20" FontSize="18" />
+                        </ui:Button>
 
                         <TextBlock Text="Scope:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <ComboBox x:Name="ScopeCombo"
@@ -113,29 +189,27 @@
                                    ToolTip="Reload Selection/Search set names from the model." />
                     </WrapPanel>
 
-                    <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center" HorizontalAlignment="Right">
+                    <WrapPanel VerticalAlignment="Center" Margin="0,0,0,6">
                         <TextBlock Text="View:" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <ComboBox x:Name="ViewPresetCombo" Width="170" Margin="0,0,8,0" />
-                        <ui:Button x:Name="SaveViewButton" Content="Save" />
-                    </WrapPanel>
-                </DockPanel>
-
-                <!-- Toolbar row 2: Actions (left) + Export (right) -->
-                <DockPanel Grid.Row="2" Grid.ColumnSpan="2" LastChildFill="True" Margin="0,6,0,0">
-
-                    <WrapPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                        <ui:Button x:Name="SaveViewButton" Content="Save" Margin="0,0,8,0"/>
                         <ui:Button x:Name="SaveViewAsButton" Content="Save As" Margin="0,0,8,0"/>
                         <ui:Button x:Name="DeleteViewButton" Content="Delete" Margin="0,0,14,0"/>
+                    </WrapPanel>
 
-                        <ui:Button x:Name="ColumnsButton" Content="Column Builder" Margin="0,0,14,0"/>
+                    <WrapPanel VerticalAlignment="Center">
+                        <ui:Button x:Name="ColumnsButton"
+                                   Content="Column Builder"
+                                   Appearance="Primary"
+                                   Background="White"
+                                   Foreground="Black"
+                                   Padding="12,6"
+                                   Margin="0,0,14,0"/>
                         <ui:ToggleSwitch x:Name="SyncToggle" OffContent="Sync selection" OnContent="Sync selection" Margin="0,0,14,0" />
                         <CheckBox x:Name="SelectedOnlyCheck"
                                   Content="Selected only"
                                   Margin="0,0,14,0"
                                   IsThreeState="False" />
-                    </WrapPanel>
-
-                    <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center" HorizontalAlignment="Right">
                         <ui:DropDownButton Content="Export">
                             <ui:DropDownButton.Flyout>
                                 <ContextMenu>
@@ -150,8 +224,7 @@
                             </ui:DropDownButton.Flyout>
                         </ui:DropDownButton>
                     </WrapPanel>
-
-                </DockPanel>
+                </StackPanel>
 
             </Grid>
         </ui:Card>
@@ -188,6 +261,58 @@
                          Sorting="MatrixGrid_Sorting"
                          SelectionChanged="MatrixGrid_SelectionChanged"
                          PreviewMouseRightButtonDown="MatrixGrid_PreviewMouseRightButtonDown">
+                <ui:DataGrid.ColumnHeaderStyle>
+                    <Style TargetType="DataGridColumnHeader">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="VerticalContentAlignment" Value="Center" />
+                        <Setter Property="Padding" Value="6,0,4,0" />
+                        <Setter Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
+                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                        <Setter Property="SnapsToDevicePixels" Value="True" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="DataGridColumnHeader">
+                                    <Grid SnapsToDevicePixels="True">
+                                        <Border x:Name="HeaderBorder"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}">
+                                            <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                                              RecognizesAccessKey="True" />
+                                        </Border>
+                                        <Thumb x:Name="PART_LeftHeaderGripper"
+                                               HorizontalAlignment="Left"
+                                               Background="Transparent"
+                                               Width="6"
+                                               Cursor="SizeWE"
+                                               Opacity="0" />
+                                        <Thumb x:Name="PART_RightHeaderGripper"
+                                               HorizontalAlignment="Right"
+                                               Background="Transparent"
+                                               Width="6"
+                                               Cursor="SizeWE"
+                                               Opacity="0" />
+                                    </Grid>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource ControlFillColorTertiaryBrush}" />
+                                        </Trigger>
+                                        <Trigger Property="IsPressed" Value="True">
+                                            <Setter TargetName="HeaderBorder" Property="Background" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                        </Trigger>
+                                        <Trigger Property="IsEnabled" Value="False">
+                                            <Setter Property="Opacity" Value="0.6" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ui:DataGrid.ColumnHeaderStyle>
 
                 <ui:DataGrid.ContextMenu>
                     <ContextMenu Opened="MatrixGrid_ContextMenu_Opened">

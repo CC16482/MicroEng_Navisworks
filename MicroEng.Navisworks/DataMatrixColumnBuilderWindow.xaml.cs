@@ -62,11 +62,14 @@ namespace MicroEng.Navisworks
         private readonly HashSet<string> _debugBreakpointsHit = new HashSet<string>(StringComparer.Ordinal);
         private readonly object _debugBreakLock = new object();
 
-        public DataMatrixColumnBuilderWindow(IEnumerable<DataMatrixAttributeDefinition> attributes, IList<string> currentVisibleOrder)
+        public DataMatrixColumnBuilderWindow(
+            IEnumerable<DataMatrixAttributeDefinition> attributes,
+            IList<string> currentVisibleOrder,
+            IEnumerable<string> requiredAttributeIds = null)
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
-            _viewModel = new ColumnBuilderViewModel(attributes, currentVisibleOrder);
+            _viewModel = new ColumnBuilderViewModel(attributes, currentVisibleOrder, requiredAttributeIds);
             DataContext = _viewModel;
 
             MoveSelectedUpButton.Click += (_, __) => _viewModel.MoveSelectedBy(-1);
@@ -105,6 +108,7 @@ namespace MicroEng.Navisworks
         }
 
         public IReadOnlyList<string> VisibleAttributeIds => _viewModel.VisibleAttributeIds;
+        public IReadOnlyList<string> RequiredAttributeIds => _viewModel.RequiredAttributeIds;
 
         private void Apply_Click(object sender, RoutedEventArgs e)
         {
@@ -213,7 +217,6 @@ namespace MicroEng.Navisworks
             }
         }
 
-
         private void SelectedListBox_MouseMove(object sender, MouseEventArgs e)
         {
             if (e.LeftButton != MouseButtonState.Pressed) return;
@@ -321,7 +324,7 @@ namespace MicroEng.Navisworks
             var current = source;
             while (current != null)
             {
-                if (current is CheckBox) return true;
+                if (current is ToggleButton) return true;
                 current = VisualTreeHelper.GetParent(current);
             }
             return false;
@@ -1125,6 +1128,9 @@ namespace MicroEng.Navisworks
         private string _propertyFilterText;
         private string _selectedFilterText;
         private string _selectedCountText = "0 selected";
+        private int _selectedCountValue;
+        private string _selectedCountSuffix = " selected";
+        private int _availableCount;
         private ColumnBuilderPropertyNode _selectedItem;
         private readonly DispatcherTimer _rebuildTimer;
         private readonly DispatcherTimer _filterTimer;
@@ -1135,7 +1141,10 @@ namespace MicroEng.Navisworks
         private bool _selectionEmpty;
         private bool _isChooseTreeScrolling;
 
-        public ColumnBuilderViewModel(IEnumerable<DataMatrixAttributeDefinition> attributes, IList<string> currentVisibleOrder)
+        public ColumnBuilderViewModel(
+            IEnumerable<DataMatrixAttributeDefinition> attributes,
+            IList<string> currentVisibleOrder,
+            IEnumerable<string> requiredAttributeIds)
         {
             Categories = new ObservableCollection<ColumnBuilderCategoryNode>();
             SelectedProperties = new ObservableCollection<ColumnBuilderPropertyNode>();
@@ -1174,6 +1183,9 @@ namespace MicroEng.Navisworks
             }
 
             var available = attributes?.ToList() ?? new List<DataMatrixAttributeDefinition>();
+            var requiredSet = new HashSet<string>(
+                requiredAttributeIds ?? Enumerable.Empty<string>(),
+                StringComparer.OrdinalIgnoreCase);
             var byCategory = available
                 .GroupBy(a => a.Category ?? string.Empty, StringComparer.OrdinalIgnoreCase)
                 .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
@@ -1195,6 +1207,14 @@ namespace MicroEng.Navisworks
                         SortIndex = orderMap.TryGetValue(id, out var index) ? index : int.MaxValue,
                         IsChecked = orderMap.ContainsKey(id)
                     };
+                    if (requiredSet.Contains(id))
+                    {
+                        node.IsRequired = true;
+                        if (node.IsChecked != true)
+                        {
+                            node.IsChecked = true;
+                        }
+                    }
                     node.SelectionChanged += OnSelectionChanged;
                     node.Parent = category;
                     category.Properties.Add(node);
@@ -1246,6 +1266,11 @@ namespace MicroEng.Navisworks
         }
 
         public IReadOnlyList<string> VisibleAttributeIds => SelectedProperties.Select(p => p.Id).ToList();
+        public IReadOnlyList<string> RequiredAttributeIds =>
+            _allProperties
+                .Where(p => p.IsChecked == true && p.IsRequired)
+                .Select(p => p.Id)
+                .ToList();
 
         public string SelectedCountText
         {
@@ -1254,6 +1279,39 @@ namespace MicroEng.Navisworks
             {
                 if (_selectedCountText == value) return;
                 _selectedCountText = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public int SelectedCountValue
+        {
+            get => _selectedCountValue;
+            private set
+            {
+                if (_selectedCountValue == value) return;
+                _selectedCountValue = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public string SelectedCountSuffix
+        {
+            get => _selectedCountSuffix;
+            private set
+            {
+                if (_selectedCountSuffix == value) return;
+                _selectedCountSuffix = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public int AvailableCount
+        {
+            get => _availableCount;
+            private set
+            {
+                if (_availableCount == value) return;
+                _availableCount = value;
                 OnPropertyChanged();
             }
         }
@@ -1503,6 +1561,12 @@ namespace MicroEng.Navisworks
             SelectedCountText = string.IsNullOrWhiteSpace(text)
                 ? $"{_selectedAll.Count} selected"
                 : $"{list.Count} selected (of {_selectedAll.Count})";
+            SelectedCountValue = string.IsNullOrWhiteSpace(text)
+                ? _selectedAll.Count
+                : list.Count;
+            SelectedCountSuffix = string.IsNullOrWhiteSpace(text)
+                ? " selected"
+                : $" selected (of {_selectedAll.Count})";
             ColumnBuilderDiagnostics.End(sw, "ApplySelectedFilter", $"count={list.Count}");
         }
 
@@ -1537,6 +1601,7 @@ namespace MicroEng.Navisworks
                 {
                     FilteredProperties = new ObservableCollection<ColumnBuilderPropertyNode>();
                 }
+                AvailableCount = 0;
                 ColumnBuilderDiagnostics.End(sw, "ApplyFilter", "selection empty");
                 return;
             }
@@ -1558,6 +1623,8 @@ namespace MicroEng.Navisworks
                 {
                     FilteredProperties = new ObservableCollection<ColumnBuilderPropertyNode>();
                 }
+
+                AvailableCount = GetAvailableCount();
 
                 if (_filterBySelection && _selectionFilteredCategories != null)
                 {
@@ -1614,9 +1681,34 @@ namespace MicroEng.Navisworks
                 .ToList();
 
             FilteredProperties = new ObservableCollection<ColumnBuilderPropertyNode>(filtered);
+            AvailableCount = filtered.Count;
 
             // Skip TreeView visibility changes while filtering to avoid heavy layout churn.
             ColumnBuilderDiagnostics.End(sw, "ApplyFilter", $"filtered={filtered.Count}");
+        }
+
+        private int GetAvailableCount()
+        {
+            if (_filterBySelection)
+            {
+                if (_selectionFilteredIds == null || _selectionFilteredIds.Count == 0)
+                {
+                    return 0;
+                }
+
+                var count = 0;
+                foreach (var prop in _allProperties)
+                {
+                    if (_selectionFilteredIds.Contains(prop.Id))
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+
+            return _allProperties.Count;
         }
 
         public void SetSelectionFilterIds(HashSet<string> ids)
@@ -1634,6 +1726,7 @@ namespace MicroEng.Navisworks
                 {
                     FilteredProperties = new ObservableCollection<ColumnBuilderPropertyNode>();
                 }
+                AvailableCount = 0;
                 return;
             }
 
@@ -1847,6 +1940,7 @@ namespace MicroEng.Navisworks
     public sealed class ColumnBuilderPropertyNode : INotifyPropertyChanged
     {
         private bool? _isChecked;
+        private bool _isRequired;
         private bool _isVisible = true;
         private int _orderIndex;
 
@@ -1882,10 +1976,20 @@ namespace MicroEng.Navisworks
                 var normalized = value == true;
                 if (SetField(ref _isChecked, normalized))
                 {
+                    if (!normalized && _isRequired)
+                    {
+                        SetField(ref _isRequired, false, nameof(IsRequired));
+                    }
                     Parent?.RefreshFromChildren();
                     SelectionChanged?.Invoke();
                 }
             }
+        }
+
+        public bool IsRequired
+        {
+            get => _isRequired;
+            set => SetField(ref _isRequired, value);
         }
 
         public event Action SelectionChanged;

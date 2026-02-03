@@ -44,13 +44,35 @@ namespace MicroEng.Navisworks
     {
         None,
         Contains,
+        NotContains,
         Equals,
         NotEquals,
+        StartsWith,
+        EndsWith,
+        Wildcard,
+        Regex,
         GreaterThan,
+        GreaterOrEqual,
         LessThan,
+        LessOrEqual,
+        Between,
+        DateBefore,
+        DateAfter,
+        DateOn,
+        DateBetween,
         Blank,
         NotBlank,
+        IsEmpty,
+        IsNotEmpty,
+        IsNull,
+        IsNotNull,
         InList
+    }
+
+    internal enum DataMatrixFilterJoin
+    {
+        Or,
+        And
     }
 
     [DataContract]
@@ -60,6 +82,10 @@ namespace MicroEng.Navisworks
         [DataMember(Order = 2)] public DataMatrixFilterOperator Operator { get; set; }
         [DataMember(Order = 3)] public string Value { get; set; }
         [DataMember(Order = 4)] public List<string> ValuesList { get; set; } = new List<string>();
+        [DataMember(Order = 5)] public bool IsEnabled { get; set; } = true;
+        [DataMember(Order = 6)] public bool CaseSensitive { get; set; } = false;
+        [DataMember(Order = 7)] public bool TrimWhitespace { get; set; } = true;
+        [DataMember(Order = 8)] public DataMatrixFilterJoin Join { get; set; } = DataMatrixFilterJoin.Or;
     }
 
     [DataContract]
@@ -97,5 +123,7 @@ namespace MicroEng.Navisworks
 
         [DataMember(Order = 11)] public double ElementColumnWidth { get; set; } = 180;
         [DataMember(Order = 12)] public Dictionary<string, double> ColumnWidths { get; set; } = new Dictionary<string, double>();
+        [DataMember(Order = 13)] public bool FilterCaseSensitive { get; set; } = false;
+        [DataMember(Order = 14)] public bool FilterTrimWhitespace { get; set; } = true;
     }
 }

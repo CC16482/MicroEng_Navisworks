@@ -2,6 +2,7 @@
 
 ## Status
 - Last build: succeeded (`dotnet build "MicroEng_Navisworks.sln" /p:DeployToProgramData=false`), **but latest Column Builder changes have not been rebuilt/tested yet**.
+- Latest build has not been rerun since the Data Matrix Filter Builder changes.
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
 - Working tree is dirty (build outputs in bin/obj + Data Matrix refactor/column builder + crash-report logging + Quick Colour profile apply fix).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
@@ -16,6 +17,11 @@
 - Column Builder (Data Matrix): left-side TreeView scrolling tuned with deferred scrolling + extra virtualization to reduce layout stalls on large categories.
 - Data Matrix: schedule-style refactor with scope culling, persistent view presets (AppData), and JSONL export (Item docs/Raw rows, optional .jsonl.gz).
 - Data Matrix: default view opens with no columns; "Columns..." replaced by "Column Builder".
+- Data Matrix: column header beaker filter implemented with per-column filter builder (AND/OR joins, text/numeric/date/regex operators, per-rule case/trim).
+- Data Matrix: filter rules persist in View presets; beaker icons reflect active filters.
+- Data Matrix: filter evaluation updated to honor per-rule join, case sensitivity, and trim settings.
+- Data Matrix: column header hover/pressed styling forced to dark mode; filter prompt dialog forced to dark theme.
+- Data Matrix Filter Builder window added (WPF Window): compact layout, Add Rule button, inline rule editing, delete (Dismiss12), join disabled when no enabled rule above.
 - Data Matrix Column Builder: split window with tri-state category tree + search on left, chosen columns list with two-state toggles on right.
 - Data Matrix Column Builder: right list uses ItemsControl + plain CheckBox to avoid WPF-UI animation crashes when toggling filtered items.
 - Data Matrix: dedupe attribute IDs during build to avoid duplicate Category|Property collisions.
@@ -82,12 +88,14 @@
 - GPU backend selection: CUDA BVH -> D3D11 batched -> CUDA brute -> CPU fallback.
 - GPU diagnostics: batch metrics and per-zone GPU eligibility table (skip reasons, thresholds) in run reports.
 - Variation check: baseline CPU variant + GPU variant added for direct CPU vs GPU comparison.
+- Column Builder: modeless keyboard input fixed by calling `ElementHost.EnableModelessKeyboardInterop` when showing the Column Builder window from the Data Matrix dock pane.
 
 ## Open issues
 - **Column Builder filter-by-selection still freezing** after selection results appear in some runs. Previous logs showed UI stalls during selection index build; new selected-keys scan fix needs validation on new PC.
 - Data Scraper: verify Selection/Search set scopes populate and resolve items correctly.
 - Data Matrix Column Builder: confirm filtering + rapid toggles no longer crash (WPF-UI animations).
 - Data Matrix: verify scope-based column culling + JSONL export formatting across modes.
+- Data Matrix: validate Filter Builder behavior (join enablement, per-rule case/trim, regex/numeric/date validation, layout spacing).
 - Quick Colour: verify Profiles tab apply no longer asks for category/property when a saved profile is selected.
 - Smart Grouping: preview uses Data Scraper cache and does not apply grouping scope (generation does apply scope).
 - Quick Colour: scope filtering + profile scope encoding need verification across selection set/tree/property filter.
@@ -106,6 +114,8 @@
 - `MicroEng.Navisworks/DataMatrixControl.xaml.cs`
 - `MicroEng.Navisworks/DataMatrixColumnBuilderWindow.xaml`
 - `MicroEng.Navisworks/DataMatrixColumnBuilderWindow.xaml.cs`
+- `MicroEng.Navisworks/DataMatrixFilterBuilderWindow.xaml`
+- `MicroEng.Navisworks/DataMatrixFilterBuilderWindow.xaml.cs`
 - `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorModels.cs`
 - `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorNavisworksService.cs`
 - `MicroEng.Navisworks/ViewpointsGenerator/ViewpointsGeneratorControl.xaml`

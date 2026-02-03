@@ -8,7 +8,7 @@
         Title="Column Builder"
         Width="980"
         Height="640"
-        MinWidth="860"
+        MinWidth="750"
         MinHeight="560"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
@@ -20,6 +20,8 @@
         <ResourceDictionary>
             <system:Double x:Key="ControlContentThemeFontSize">12</system:Double>
             <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+            <SolidColorBrush x:Key="ColumnBuilderCountBrush" Color="#2F80FF" />
+            <SolidColorBrush x:Key="ColumnBuilderRequiredBrush" Color="#FF8C00" />
             <!-- Column Builder only: lightweight CheckBox template (no animations) to avoid WPF-UI animation crashes and reduce scroll overhead -->
             <Style x:Key="ColumnBuilderTreeCheckBoxStyle" TargetType="{x:Type CheckBox}">
                 <Setter Property="Focusable" Value="False" />
@@ -30,7 +32,7 @@
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
-                <Setter Property="MinHeight" Value="28" />
+                <Setter Property="MinHeight" Value="22" />
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="Template">
                     <Setter.Value>
@@ -215,8 +217,8 @@
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="Padding" Value="6,4" />
-                <Setter Property="Margin" Value="0,1,0,1" />
+                <Setter Property="Padding" Value="6,2" />
+                <Setter Property="Margin" Value="0" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -249,8 +251,8 @@
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="Padding" Value="6,2" />
-                <Setter Property="Margin" Value="0,1,0,1" />
+                <Setter Property="Padding" Value="6,1" />
+                <Setter Property="Margin" Value="0" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalContentAlignment" Value="Center" />
                 <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -306,24 +308,71 @@
                      VerticalContentAlignment="Top"
                      VerticalAlignment="Stretch">
                 <DockPanel>
-                    <ui:TextBlock DockPanel.Dock="Top" Text="Choose Columns" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                        <ui:TextBlock Text="Choose Columns" FontWeight="SemiBold" />
+                        <ui:TextBlock Text=" - " Margin="8,0,0,0" FontWeight="SemiBold" />
+                        <ui:TextBlock Text="{Binding AvailableCount}"
+                                      FontWeight="SemiBold"
+                                      Foreground="{StaticResource ColumnBuilderCountBrush}" />
+                        <ui:TextBlock Text=" Available" FontWeight="SemiBold" />
+                    </StackPanel>
                     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <ui:TextBox x:Name="ChooseCategoryFilterTextBox"
-                                        Grid.Column="0"
-                                        PlaceholderText="Search category..."
-                                        Text="{Binding CategoryFilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="ChooseFilterTextBox_TextChanged" />
-                            <ui:TextBox x:Name="ChoosePropertyFilterTextBox"
-                                        Grid.Column="2"
-                                        PlaceholderText="Search property..."
-                                        Text="{Binding PropertyFilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="ChooseFilterTextBox_TextChanged" />
+                            <Grid Grid.Column="0">
+                                <TextBox x:Name="ChooseCategoryFilterTextBox"
+                                         Padding="8,4"
+                                         Text="{Binding CategoryFilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         TextChanged="ChooseFilterTextBox_TextChanged" />
+                                <TextBlock Text="Search category..."
+                                           Margin="12,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextPlaceholderColorBrush}"
+                                           IsHitTestVisible="False">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <MultiDataTrigger>
+                                                    <MultiDataTrigger.Conditions>
+                                                        <Condition Binding="{Binding Text, ElementName=ChooseCategoryFilterTextBox}" Value="" />
+                                                        <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=ChooseCategoryFilterTextBox}" Value="False" />
+                                                    </MultiDataTrigger.Conditions>
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </MultiDataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </Grid>
+                        <Grid Margin="0,6,0,0">
+                            <TextBox x:Name="ChoosePropertyFilterTextBox"
+                                     Padding="8,4"
+                                     Text="{Binding PropertyFilterText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     TextChanged="ChooseFilterTextBox_TextChanged" />
+                            <TextBlock Text="Search property..."
+                                       Margin="12,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextPlaceholderColorBrush}"
+                                       IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Text, ElementName=ChoosePropertyFilterTextBox}" Value="" />
+                                                    <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=ChoosePropertyFilterTextBox}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </Grid>
                         <ui:ToggleSwitch x:Name="FilterBySelectionToggle"
                                          Content="Filter by selection"
@@ -402,8 +451,8 @@
                                     <Setter Property="BorderBrush" Value="Transparent" />
                                     <Setter Property="BorderThickness" Value="0" />
                                     <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
-                                    <Setter Property="Padding" Value="6,4" />
-                                    <Setter Property="Margin" Value="0,1,0,1" />
+                                    <Setter Property="Padding" Value="6,2" />
+                                    <Setter Property="Margin" Value="0" />
                                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                     <Setter Property="FocusVisualStyle" Value="{x:Null}" />
                                     <Style.Triggers>
@@ -428,7 +477,7 @@
                                         <TextBlock Text="{Binding CategoryName}"
                                                    FontSize="11"
                                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                                   Margin="28,0,0,0" />
+                                                   Margin="22,0,0,0" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
@@ -444,14 +493,40 @@
                      VerticalAlignment="Stretch">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                        <ui:TextBlock Text="Chosen Columns" FontWeight="SemiBold"/>
-                        <ui:TextBlock Text="{Binding SelectedCountText}"
-                                      Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                                      Margin="0,4,0,0"/>
-                        <ui:TextBox Margin="0,8,0,0"
-                                    PlaceholderText="Search chosen columns..."
-                                    Text="{Binding SelectedFilterText, UpdateSourceTrigger=PropertyChanged}" />
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBlock Text="Chosen Columns" FontWeight="SemiBold" />
+                            <ui:TextBlock Text=" - " Margin="8,0,0,0" FontWeight="SemiBold" />
+                            <ui:TextBlock Text="{Binding SelectedCountValue}"
+                                          FontWeight="SemiBold"
+                                          Foreground="{StaticResource ColumnBuilderCountBrush}" />
+                            <ui:TextBlock Text="{Binding SelectedCountSuffix}" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <Grid Margin="0,8,0,0">
+                            <TextBox x:Name="SelectedFilterTextBox"
+                                     Padding="8,4"
+                                     Text="{Binding SelectedFilterText, UpdateSourceTrigger=PropertyChanged}" />
+                            <TextBlock Text="Search chosen columns..."
+                                       Margin="12,0,0,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextPlaceholderColorBrush}"
+                                       IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding Text, ElementName=SelectedFilterTextBox}" Value="" />
+                                                    <Condition Binding="{Binding IsKeyboardFocusWithin, ElementName=SelectedFilterTextBox}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,8,0,0">
                             <ui:Button x:Name="MoveSelectedUpButton" Width="32" Height="28" Padding="0" Margin="0,0,6,0" ToolTip="Move up">
                                 <ui:SymbolIcon Symbol="ArrowSortUp16" Filled="True" />
                             </ui:Button>
@@ -472,6 +547,7 @@
                              SelectedItem="{Binding SelectedItem, Mode=TwoWay}"
                              SelectionMode="Single"
                              AllowDrop="True"
+                             Padding="0,0,10,0"
                              ScrollViewer.VerticalScrollBarVisibility="Auto"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              PreviewMouseLeftButtonUp="SelectedListBox_PreviewMouseLeftButtonUp"
@@ -529,18 +605,19 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <CheckBox Grid.Column="0"
                                               Style="{StaticResource ColumnBuilderTreeCheckBoxStyle}"
                                               IsChecked="{Binding IsChecked, Mode=TwoWay}"
                                               IsThreeState="False"
-                                              Margin="0,0,6,0"
+                                              Margin="4,0,8,0"
                                               VerticalAlignment="Center" />
                                     <Border Grid.Column="1"
                                             Width="22"
                                             Height="18"
                                             CornerRadius="3"
-                                            Margin="0,0,6,0"
+                                            Margin="0,0,8,0"
                                             Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                                             BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                                             BorderThickness="1"
@@ -551,12 +628,32 @@
                                                    FontSize="11"
                                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                     </Border>
-                                    <StackPanel Grid.Column="2" Margin="0">
-                                        <TextBlock Text="{Binding PropertyName}" Margin="0" />
+                                    <StackPanel Grid.Column="2" Margin="0,0,6,0" Orientation="Horizontal">
+                                        <TextBlock Text="{Binding PropertyName}"
+                                                   Margin="0,0,6,0"
+                                                   VerticalAlignment="Center"
+                                                   FontSize="12">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{StaticResource ColumnBuilderCountBrush}" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsRequired}" Value="True">
+                                                            <Setter Property="Foreground" Value="{StaticResource ColumnBuilderRequiredBrush}" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                         <TextBlock Text="{Binding CategoryName}"
-                                                   FontSize="11"
+                                                   FontSize="12"
+                                                   VerticalAlignment="Center"
                                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
+                                    <ui:ToggleSwitch Grid.Column="3"
+                                                     Margin="16,0,16,0"
+                                                     VerticalAlignment="Center"
+                                                     Content="Required"
+                                                     IsChecked="{Binding IsRequired, Mode=TwoWay}" />
                                 </Grid>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

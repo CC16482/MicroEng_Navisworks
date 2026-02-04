@@ -445,12 +445,6 @@ namespace MicroEng.Navisworks
             }
         }
 
-        // Back-compat helper for any call sites still using the old name.
-        private static IEnumerable<ResourceDictionary> EnumerateMergedDictionaries(ResourceDictionary resourceDictionary)
-        {
-            return EnumerateAllDictionaries(resourceDictionary);
-        }
-
         private static IEnumerable<ResourceDictionary> EnumerateAllDictionariesCore(
             ResourceDictionary resourceDictionary,
             HashSet<ResourceDictionary> visited)

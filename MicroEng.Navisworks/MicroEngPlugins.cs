@@ -16,6 +16,7 @@ using DrawingColorTranslator = System.Drawing.ColorTranslator;
 using ElementHost = System.Windows.Forms.Integration.ElementHost;
 using MicroEng.Navisworks.SmartSets;
 using MicroEng.Navisworks.QuickColour;
+using MicroEng.Navisworks.TreeMapper;
 
 namespace MicroEng.Navisworks
 {
@@ -58,6 +59,7 @@ namespace MicroEng.Navisworks
         private static MicroEngSettingsWindow _settingsWindow;
         private static SmartSetGeneratorWindow _smartSetGeneratorWindow;
         private static QuickColourWindow _quickColourWindow;
+        private static TreeMapperWindow _treeMapperWindow;
 
         internal static event Action ToolWindowStateChanged;
 
@@ -361,6 +363,7 @@ namespace MicroEng.Navisworks
         internal static bool IsDataMapperOpen => _dataMapperWindow?.IsVisible == true;
         internal static bool IsSmartSetGeneratorOpen => _smartSetGeneratorWindow?.IsVisible == true;
         internal static bool IsQuickColourOpen => _quickColourWindow?.IsVisible == true;
+        internal static bool IsTreeMapperOpen => _treeMapperWindow?.IsVisible == true;
 
         private static bool TryActivateWindow(WpfWindow window)
         {
@@ -536,6 +539,42 @@ namespace MicroEng.Navisworks
             }
         }
 
+        internal static bool TryShowTreeMapper(out TreeMapperWindow window)
+        {
+            window = _treeMapperWindow;
+            if (TryActivateWindow(window))
+            {
+                return true;
+            }
+
+            try
+            {
+                var createdWindow = new TreeMapperWindow();
+                _treeMapperWindow = createdWindow;
+                window = createdWindow;
+                createdWindow.Closed += (_, __) =>
+                {
+                    if (ReferenceEquals(_treeMapperWindow, createdWindow))
+                    {
+                        _treeMapperWindow = null;
+                    }
+                    RaiseToolWindowStateChanged();
+                };
+                ElementHost.EnableModelessKeyboardInterop(createdWindow);
+                createdWindow.Show();
+                TryActivateWindow(createdWindow);
+                RaiseToolWindowStateChanged();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"Tree Mapper failed: {ex}");
+                MessageBox.Show($"Tree Mapper failed: {ex.Message}", "MicroEng",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return false;
+            }
+        }
+
         internal static bool TryShowQuickColour(out QuickColourWindow window)
         {
             window = _quickColourWindow;
@@ -570,37 +609,6 @@ namespace MicroEng.Navisworks
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return false;
             }
-        }
-
-        public static void Reconstruct()
-        {
-            var doc = NavisApp.ActiveDocument;
-            if (doc == null)
-            {
-                ShowInfo("No active document.");
-                return;
-            }
-
-            // TODO: implement your "Reconstruct" logic here
-            ShowInfo("[Reconstruct] Placeholder - hook up your reconstruction logic.");
-        }
-
-        public static void ZoneFinder()
-        {
-            var doc = NavisApp.ActiveDocument;
-            if (doc == null)
-            {
-                ShowInfo("No active document.");
-                return;
-            }
-
-            // TODO: implement "Zone Finder" logic here
-            ShowInfo("[Zone Finder] Placeholder - implement your zone logic here.");
-        }
-
-        private static void ShowInfo(string message)
-        {
-            MessageBox.Show(message, "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         internal static void Log(string message)
@@ -725,6 +733,11 @@ namespace MicroEng.Navisworks
             TryShowSmartSetGenerator(out _);
         }
 
+        public static void TreeMapper()
+        {
+            TryShowTreeMapper(out _);
+        }
+
         public static void QuickColour()
         {
             TryShowQuickColour(out _);
@@ -767,32 +780,6 @@ namespace MicroEng.Navisworks
         public override int Execute(params string[] parameters)
         {
             MicroEngActions.AppendData();
-            return 0;
-        }
-    }
-
-    [Plugin("MicroEng.Reconstruct", "MENG",
-        DisplayName = "MicroEng Reconstruct",
-        ToolTip = "Reconstruct / rebuild MicroEng structures.")]
-    [AddInPlugin(AddInLocation.AddIn)]
-    public class ReconstructAddIn : AddInPlugin
-    {
-        public override int Execute(params string[] parameters)
-        {
-            MicroEngActions.Reconstruct();
-            return 0;
-        }
-    }
-
-    [Plugin("MicroEng.ZoneFinder", "MENG",
-        DisplayName = "MicroEng Zone Finder",
-        ToolTip = "Find and analyse zones in the model.")]
-    [AddInPlugin(AddInLocation.AddIn)]
-    public class ZoneFinderAddIn : AddInPlugin
-    {
-        public override int Execute(params string[] parameters)
-        {
-            MicroEngActions.ZoneFinder();
             return 0;
         }
     }

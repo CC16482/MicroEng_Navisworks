@@ -1,0 +1,262 @@
+Yep — that’s the fastest way to settle it: **instrument Navisworks at runtime and see if there’s any real “Selection Tree tab/provider” extensibility surface exposed to managed plugins.** Autodesk help claims it exists (“Additional customized Selection Tree options can be added…”). ([Autodesk Help][1])
+
+Because Autodesk don’t publish an obvious .NET sample for this (and the public API docs don’t show an obvious “SelectionTreeTabPlugin” type), the most reliable approach is:
+
+1. **Probe** Navisworks’ loaded assemblies for any types/methods that look like “SelectionTree tab/provider registration”.
+2. If we find a candidate API, implement the minimal provider and test whether it adds an entry to the dropdown.
+
+Below is a **Codex prompt** + a **drop-in probe plugin** you can compile immediately in your MicroEng project.
+
+---
+
+## Codex prompt (paste this into Codex)
+
+> **Goal:** test whether Navisworks supports adding a *new option* in the built-in **Selection Tree** dropdown (“Standard / Compact / Properties / Sets …”) via public API. Autodesk help claims custom options can be added.
+>
+> **Project:** `MicroEng.Navisworks` (net48, existing plugin deployment already set up).
+>
+> **Task:**
+>
+> 1. Add a new `AddInPlugin` command called **“MicroEng Dev: Selection Tree Extensibility Probe”** that runs from Add-Ins.
+> 2. When executed, it must **dump diagnostics to a text file** under:
+>    `%LOCALAPPDATA%\MicroEng.Navisworks\Diagnostics\SelectionTreeProbe_<timestamp>.txt`
+> 3. The dump should include:
+>
+>    * All loaded assemblies (name + location if available)
+>    * All types whose FullName contains any of: `SelectionTree`, `ViewTree`, `ModelTree`, `TreeView`, `TreeTab`, `TreeProvider`
+>    * For those types: base type, interfaces, public methods (signature), public properties
+>    * Additionally: scan for any public methods anywhere whose name contains `SelectionTree` and `Add` or `Register` (log declaring type + method)
+> 4. Show a `MessageBox` with the output file path when finished.
+> 5. Use `MicroEngActions.Log(...)` for high-level logging.
+> 6. Do **not** crash Navisworks if reflection fails on any assembly/type — catch and continue.
+>
+> **Deliverable:** a new `.cs` file in the project. No UI changes required.
+
+---
+
+## Example code (drop into your project as a new .cs file)
+
+Create: `DevSelectionTreeProbeAddIn.cs` (any folder is fine; namespace should be `MicroEng.Navisworks`)
+
+```csharp
+using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Text;
+using System.Windows.Forms;
+using Autodesk.Navisworks.Api.Plugins;
+
+namespace MicroEng.Navisworks
+{
+    [Plugin("MicroEng.Dev.SelectionTreeProbe", "MENG",
+        DisplayName = "MicroEng Dev: Selection Tree Extensibility Probe",
+        ToolTip = "Dumps runtime type information to discover whether Navisworks exposes a custom Selection Tree dropdown/tab API.")]
+    [AddInPlugin(AddInLocation.AddIn)]
+    public class DevSelectionTreeProbeAddIn : AddInPlugin
+    {
+        public override int Execute(params string[] parameters)
+        {
+            MicroEngActions.Init();
+
+            try
+            {
+                var diagDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MicroEng.Navisworks",
+                    "Diagnostics");
+
+                Directory.CreateDirectory(diagDir);
+
+                var filePath = Path.Combine(
+                    diagDir,
+                    $"SelectionTreeProbe_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
+
+                var sb = new StringBuilder();
+                sb.AppendLine("=== MicroEng Selection Tree Extensibility Probe ===");
+                sb.AppendLine($"Timestamp: {DateTime.Now:u}");
+                sb.AppendLine($"Process: {Environment.ProcessPath ?? "<unknown>"}");
+                sb.AppendLine();
+
+                var assemblies = AppDomain.CurrentDomain.GetAssemblies()
+                    .OrderBy(a => a.FullName, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                sb.AppendLine("=== Loaded assemblies ===");
+                foreach (var a in assemblies)
+                {
+                    string loc = "<dynamic>";
+                    try { loc = string.IsNullOrWhiteSpace(a.Location) ? "<dynamic>" : a.Location; } catch { /* ignore */ }
+                    sb.AppendLine($"- {a.FullName}");
+                    sb.AppendLine($"  Location: {loc}");
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("=== Candidate types (name match) ===");
+
+                string[] typeNeedles =
+                {
+                    "SelectionTree",
+                    "ViewTree",
+                    "ModelTree",
+                    "TreeView",
+                    "TreeTab",
+                    "TreeProvider"
+                };
+
+                foreach (var a in assemblies)
+                {
+                    Type[] types;
+                    try { types = a.GetTypes(); }
+                    catch (ReflectionTypeLoadException rtle) { types = rtle.Types.Where(t => t != null).ToArray(); }
+                    catch { continue; }
+
+                    foreach (var t in types)
+                    {
+                        var fullName = t.FullName ?? t.Name;
+                        if (!typeNeedles.Any(n => fullName.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0))
+                            continue;
+
+                        sb.AppendLine();
+                        sb.AppendLine($"TYPE: {fullName}");
+                        sb.AppendLine($"  Assembly: {a.GetName().Name}");
+                        sb.AppendLine($"  Base: {t.BaseType?.FullName ?? "<none>"}");
+
+                        try
+                        {
+                            var ifaces = t.GetInterfaces().Select(i => i.FullName).OrderBy(s => s).ToArray();
+                            sb.AppendLine($"  Interfaces: {(ifaces.Length == 0 ? "<none>" : string.Join(", ", ifaces))}");
+                        }
+                        catch { sb.AppendLine("  Interfaces: <error>"); }
+
+                        try
+                        {
+                            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
+                                .Select(p => $"{p.PropertyType.Name} {p.Name}")
+                                .OrderBy(s => s)
+                                .ToArray();
+                            sb.AppendLine("  Public Properties:");
+                            if (props.Length == 0) sb.AppendLine("    <none>");
+                            foreach (var p in props) sb.AppendLine($"    {p}");
+                        }
+                        catch { sb.AppendLine("  Public Properties: <error>"); }
+
+                        try
+                        {
+                            var methods = t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                                .Where(m => !m.IsSpecialName)
+                                .Select(m => MethodSig(m))
+                                .OrderBy(s => s)
+                                .ToArray();
+                            sb.AppendLine("  Public Methods (declared only):");
+                            if (methods.Length == 0) sb.AppendLine("    <none>");
+                            foreach (var m in methods) sb.AppendLine($"    {m}");
+                        }
+                        catch { sb.AppendLine("  Public Methods: <error>"); }
+                    }
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("=== Candidate methods (global scan) ===");
+                sb.AppendLine("Looking for method names containing 'SelectionTree' and ('Add' or 'Register')");
+
+                foreach (var a in assemblies)
+                {
+                    Type[] types;
+                    try { types = a.GetTypes(); }
+                    catch (ReflectionTypeLoadException rtle) { types = rtle.Types.Where(t => t != null).ToArray(); }
+                    catch { continue; }
+
+                    foreach (var t in types)
+                    {
+                        MethodInfo[] methods;
+                        try { methods = t.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static); }
+                        catch { continue; }
+
+                        foreach (var m in methods)
+                        {
+                            var name = m.Name ?? "";
+                            if (name.IndexOf("SelectionTree", StringComparison.OrdinalIgnoreCase) < 0)
+                                continue;
+
+                            var hasAdd = name.IndexOf("Add", StringComparison.OrdinalIgnoreCase) >= 0;
+                            var hasReg = name.IndexOf("Register", StringComparison.OrdinalIgnoreCase) >= 0;
+                            if (!hasAdd && !hasReg)
+                                continue;
+
+                            sb.AppendLine($"{t.FullName} :: {MethodSig(m)}");
+                        }
+                    }
+                }
+
+                File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
+                MicroEngActions.Log($"SelectionTreeProbe wrote: {filePath}");
+
+                MessageBox.Show(
+                    Autodesk.Navisworks.Api.Application.Gui?.MainWindow,
+                    $"Selection Tree probe complete.\n\nOutput:\n{filePath}",
+                    "MicroEng",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"SelectionTreeProbe failed: {ex}");
+                MessageBox.Show(
+                    Autodesk.Navisworks.Api.Application.Gui?.MainWindow,
+                    $"Selection Tree probe failed:\n{ex.Message}",
+                    "MicroEng",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return 0;
+            }
+        }
+
+        private static string MethodSig(MethodInfo m)
+        {
+            try
+            {
+                var pars = m.GetParameters()
+                    .Select(p => $"{p.ParameterType.Name} {p.Name}")
+                    .ToArray();
+                return $"{m.ReturnType.Name} {m.Name}({string.Join(", ", pars)})";
+            }
+            catch
+            {
+                return m.Name ?? "<unknown>";
+            }
+        }
+    }
+}
+```
+
+---
+
+## How to use it
+
+1. Build MicroEng as normal (your project already copies to the Navisworks Plugins folder).
+2. Launch Navisworks.
+3. Go to **Add-Ins** → run **“MicroEng Dev: Selection Tree Extensibility Probe”**.
+4. Open the output file it tells you (in `%LOCALAPPDATA%\MicroEng.Navisworks\Diagnostics\...`).
+
+---
+
+## What this test tells us
+
+* If the dump reveals a public type that clearly looks like a **Selection Tree provider/tab API**, we’ll implement a minimal “TreeMapper” provider next and see if it appears in the dropdown.
+* If **nothing** shows up (very possible), then the help line is either:
+
+  * referring to **Sets** (which are a real dropdown option when sets exist), or
+  * relying on **internal/unsupported UI hooks** not exposed in public .NET API.
+
+Autodesk’s help does explicitly mention custom options can be added. ([Autodesk Help][1])
+But the public .NET API namespaces shown in common reference docs don’t obviously expose a “SelectionTree tab” surface. ([ApiDocs][2])
+
+---
+
+If you run this once and paste back the **top ~50 lines of “Candidate types”** (or just tell me whether anything like `SelectionTree...Provider/Tab` appeared), I’ll give you the exact next “real implementation” Codex prompt for adding the **TreeMapper** option.
+
+[1]: https://help.autodesk.com/cloudhelp/2017/ENU/Navisworks-Manage/files/GUID-AF4CFA5C-1455-4444-982A-34FBA2AE4608.htm "https://help.autodesk.com/cloudhelp/2017/ENU/Navisworks-Manage/files/GUID-AF4CFA5C-1455-4444-982A-34FBA2AE4608.htm"
+[2]: https://apidocs.co/apps/navisworks/2018/N_Autodesk_Navisworks_Api_ApplicationParts.htm "https://apidocs.co/apps/navisworks/2018/N_Autodesk_Navisworks_Api_ApplicationParts.htm"

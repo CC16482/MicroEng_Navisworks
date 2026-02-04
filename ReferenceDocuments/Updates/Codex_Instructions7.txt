@@ -1,0 +1,254 @@
+Perfect — you’ve cleared the hardest unknown: **Navisworks will accept a custom Selection Tree dropdown entry backed by a COM plugin + user TreeSpec registration**. Your debugging notes also pin the “gotchas” that make this reliable:
+
+* **COM Plugin license key must be `REG_DWORD=1`** under **HKCU/HKLM `…\22.0\COM Plugins\<ProgID>`** (REG_SZ silently fails).
+* **TreeSpec must live in Roaming**: `%APPDATA%\Autodesk\Navisworks Manage 2025\TreeSpec\`
+* **Navisworks actually reads 22.0** for this flow (even if you also write 23.0).
+* Once keys + paths are correct, you don’t need to rerun the installer.
+
+That’s enough to build TreeMapper as a real tool now.
+
+Below is the **recommended next build milestone**, plus **Codex prompts** that will move you forward in the cleanest order.
+
+---
+
+# What to build next (TreeMapper MVP that becomes real value)
+
+## MVP behaviour
+
+1. **TreeMapper Builder UI (WPF)**
+
+   * Define a **Tree Profile**:
+
+     * Profile Name
+     * Levels: each level has:
+
+       * **Node Type** (Model / Layer / Group / Composite / Geometry / …) ← icon/semantic only for MVP
+       * **Group By**: Category + Property (from Data Scraper cache)
+       * Missing label (“(Missing)”)
+       * Sort option (alpha / numeric-ish)
+   * Show a live **Preview Tree** (counts per node)
+   * Save/load profiles (AppData JSON)
+
+2. **Publish**
+
+   * User clicks **Publish** → TreeMapper becomes visible in the **Selection Tree dropdown** and displays the current profile’s generated tree.
+   * For MVP, I recommend **single dropdown entry “TreeMapper”** that always shows the **Active Profile**.
+
+     * You can still have **many profiles**; the dropdown entry always reflects whichever profile is “Active/Published”.
+     * This avoids the “multiple dropdown entries need per-entry identification” problem until we prove how Navisworks passes spec identity to the COM plugin.
+
+3. **COM Selection Tree plugin renders the published tree**
+
+   * The COM plugin reads the **published profile (or a published snapshot)** and provides nodes + icons + selection.
+
+---
+
+# Key design decision (do this, it keeps you moving)
+
+## Use a “Published Snapshot” file for the COM plugin
+
+Don’t make the COM plugin rebuild the tree from RawEntries on demand — Selection Tree calls are UI-thread hot-path and you’ll get stalls on large models.
+
+**Better:** Builder computes the tree (it’s already doing preview), then Publish writes:
+
+* `ActiveProfile.json` (profile definition)
+* `PublishedTree.json` (flattened node graph + child lists + leaf GUIDs)
+
+COM plugin only loads `PublishedTree.json` and answers `iGetNumChildren/iGetName/iGetSelection` fast.
+
+This also decouples the COM plugin from needing `DataScraperCache` in memory.
+
+---
+
+# Codex prompts (best order)
+
+## Prompt 1 — Build TreeMapper Builder UI + Profile Store + Preview Engine (no COM integration yet)
+
+Paste this as-is into Codex:
+
+> **Implement TreeMapper MVP Builder (WPF) inside MicroEng.Navisworks (net48).**
+>
+> **Goal:** Create a new tool “Tree Mapper” that builds a hierarchy preview from `DataScraperCache.LastSession.RawEntries` (entire model scrape). No selection sets/search sets/viewpoints.
+>
+> ### UI
+>
+> 1. Add a new WPF Window: `TreeMapperWindow.xaml` + `.xaml.cs`
+>
+>    * Apply MicroEng theme: `MicroEngWpfUiTheme.ApplyTo(this)`
+>    * Apply positioning: `MicroEngWindowPositioning.ApplyTopMostTopCenter(this)` (or matching existing window patterns)
+>    * IMPORTANT: when showing modeless, call `ElementHost.EnableModelessKeyboardInterop(window)` (same fix as Column Builder).
+> 2. Layout: split view similar to Data Matrix Column Builder:
+>
+>    * Left: Levels editor
+>
+>      * Profile Name textbox
+>      * Levels list (ItemsControl or ListBox) with Add / Remove / Move Up / Move Down
+>      * Each level row shows:
+>
+>        * NodeType dropdown (enum)
+>        * Category dropdown
+>        * Property dropdown (filtered by selected category)
+>        * Missing label textbox (default “(Missing)”)
+>        * Sort dropdown (Alpha / Numeric-like)
+>    * Right: Preview TreeView (virtualized)
+>
+>      * Node label: `{Value} ({Count})`
+>      * Expand/collapse
+> 3. Header status:
+>
+>    * show scrape timestamp + ItemsScanned from `DataScraperCache.LastSession`
+>    * if no cache: show a “Run Data Scraper (Entire Model)” button calling existing `DataScraperService.ResolveScope(EntireModel)` + `Scrape(...)`
+>
+> ### Data + Engine
+>
+> 4. Create folder `TreeMapper/` with:
+>
+>    * `TreeMapperModels.cs`:
+>
+>      * `TreeMapperProfile` (Id, Name, UpdatedUtc, Levels, ActiveProfileId)
+>      * `TreeMapperLevel` (NodeType, Category, PropertyName, MissingLabel, SortMode)
+>      * `TreeMapperNodeType` enum (Model, Layer, Group, Composite, Geometry, Collection, Item, …)
+>      * `TreeMapperSortMode` enum
+>    * `TreeMapperProfileStore.cs`: save/load profiles to
+>      `%APPDATA%\MicroEng\Navisworks\TreeMapper\Profiles.json` using DataContractJsonSerializer (follow `FilePresetManager` pattern from DataMatrix).
+>    * `TreeMapperEngine.cs`: builds a tree from `ScrapeSession.RawEntries` using only the level selectors.
+>
+>      * Scan RawEntries once; build `itemKey(Guid) -> string[levelCount]` values
+>      * Missing → MissingLabel
+>      * Build hierarchical nodes with Count and child nodes
+>      * Debounce rebuild on UI changes (DispatcherTimer ~250ms) and cancel previous rebuild if changes occur.
+> 5. Integrate into MicroEng panel:
+>
+>    * Add a “Tree Mapper” card button in `MicroEngPanelControl.xaml` consistent with other tools
+>    * Add click handler that calls `MicroEngActions.TreeMapper()`
+>    * Add window management in `MicroEngActions` similar to `TryShowDataScraper` / `QuickColour` patterns (track open/closed state).
+>
+> ### Acceptance
+>
+> * TreeMapperWindow opens, typing works (keyboard interop).
+> * Can add levels and select Category/Property from DataScraper cache.
+> * Preview builds and updates with counts.
+> * Profiles persist between runs.
+
+This gives you a tangible tool immediately, and sets up the output contract the COM plugin will consume.
+
+---
+
+## Prompt 2 — Add “Publish Snapshot” output (still no COM work)
+
+Paste this next:
+
+> **Add TreeMapper publishing to a snapshot file for fast COM rendering.**
+>
+> In TreeMapper:
+>
+> 1. Add a “Publish” button.
+> 2. When clicked:
+>
+>    * Save the current profile to the profile store.
+>    * Mark it as the ActiveProfileId.
+>    * Serialize the current preview tree to a new file:
+>      `%APPDATA%\MicroEng\Navisworks\TreeMapper\PublishedTree.json`
+> 3. Snapshot schema (DataContract):
+>
+>    * Version
+>    * GeneratedUtc
+>    * ProfileId + ProfileName
+>    * Nodes flattened array: each node has Id, Name, NodeType, Count, ChildIds[], LeafItemKeys[] (GUID strings only for leaf nodes; parent nodes can omit leaf lists).
+>    * RootIds[]
+> 4. Add “Open publish folder” link/button (optional).
+> 5. Add logging to `MicroEngActions.Log(...)`.
+>
+> **Acceptance:** after Publish, `PublishedTree.json` exists and can be reloaded to reconstruct the preview tree.
+
+Now you have a stable, fast artifact the COM side can render.
+
+---
+
+## Prompt 3 — Upgrade the COM Selection Tree plugin to render PublishedTree.json
+
+This is the “make it real in the dropdown” step.
+
+Paste this:
+
+> **Update MicroEng.SelectionTreeCom (COM Selection Tree plugin) to render the published TreeMapper snapshot.**
+>
+> Current state: TreeMapper appears in Selection Tree dropdown and shows a stub node. Replace stub with real rendering from:
+> `%APPDATA%\MicroEng\Navisworks\TreeMapper\PublishedTree.json`
+>
+> ### Requirements
+>
+> 1. Load PublishedTree.json once per plugin instance (lazy), cache it.
+> 2. Implement node traversal using `InwUInt32Vector path`:
+>
+>    * Determine whether indices are 0- or 1-based by logging first calls; then normalize.
+>    * Convert path → nodeId by walking RootIds/ChildIds.
+> 3. Implement:
+>
+>    * `iGetNumRootChildren()`
+>    * `iGetNumChildren(path, handle)`
+>    * `iGetName(path, handle)`
+>    * `iGetIcon(path, handle)` + `iGetSelectedIcon`
+>    * `iGetSelection(path, handle, selection)`
+> 4. `iGetSelection`:
+>
+>    * If the node has leaf GUIDs (or can resolve to leaf GUIDs), select those items in Navisworks.
+>    * Use managed API mapping Guid → ModelItem by traversing `Application.ActiveDocument.Models.RootItems` once and caching a dictionary.
+>    * Then use `ComApiBridge.ToInwOaPath(modelItem)` and add paths to the COM selection object (use the same COM selection patterns used elsewhere in MicroEng for selection/property operations).
+> 5. Icons: create a mapping from `TreeMapperNodeType` → `nwESelTreeIcon` values.
+>
+>    * Add a DEV dump function that logs all names/values of `nwESelTreeIcon` to make mapping correct.
+> 6. If PublishedTree.json missing: show 1 root node: “No published TreeMapper tree. Open TreeMapper and Publish.”
+> 7. Add robust logging to `MicroEng.SelectionTreeCom.log` for constructor + key interface calls.
+>
+> **Acceptance:** Selecting TreeMapper in Selection Tree dropdown shows the generated hierarchy and selecting nodes selects the correct model items.
+
+This is the step that converts your working stub into the real deliverable.
+
+---
+
+# Prompt 4 — “Repair/Install TreeMapper Selection Tree entry” (make your debugging notes permanent)
+
+This locks your hard-earned registry + path knowledge into a button so nobody repeats ProcMon hell.
+
+Paste:
+
+> **Add a “Repair TreeMapper Selection Tree” action in MicroEng.Navisworks.**
+>
+> Implement a dev tool / settings action that enforces the known-good configuration:
+>
+> * TreeSpec dir: `%APPDATA%\Autodesk\Navisworks Manage 2025\TreeSpec\`
+> * Registry: ensure under both HKCU and HKLM (best effort) for `22.0` (and also write `23.0` for safety):
+>
+>   * `Software\Autodesk\Navisworks Manage\<ver>\COM Plugins\MicroEng.TreeMapperSelectionTreePlugin` = DWORD 1
+>   * `Software\Autodesk\Navisworks Manage\<ver>\User Tree Specs\TreeMapper` = full path to TreeMapper.spc (or whatever spec file is required)
+> * Write/update the .spc file(s) into the Roaming TreeSpec dir.
+> * All HKLM writes must be try/catch and non-fatal (no admin).
+> * Log every action + show a summary MessageBox with “Restart Navisworks if dropdown doesn’t refresh.”
+>
+> **Acceptance:** one click restores TreeMapper dropdown entry on a broken machine.
+
+---
+
+# Notes on “multiple trees in the dropdown”
+
+You *can* support “TreeMapper / TreeMapper2 / …” later, but don’t block MVP on it.
+
+To do it properly you need one of:
+
+* Proof that Navisworks passes the **selected TreeSpec identity** to the COM plugin (so one COM ProgID can serve multiple tree specs), **or**
+* A controlled strategy that creates multiple ProgIDs/CLSIDs (not recommended), **or**
+* Use Navisworks’ built-in **UserFindSpecs** spec tree system (if it’s powerful enough to represent your grouping rules) instead of a custom COM provider.
+
+Once MVP works, the quickest experiment is:
+
+* create two User Tree Specs registry entries pointing at two .spc files referencing the same COM ProgID,
+* see if selecting each results in distinct plugin instances / any detectable context (log state, constructors, etc.).
+
+---
+
+# If you want the “best single Codex prompt” to start today
+
+Do **Prompt 1** first. It’s the foundation, and it immediately gives you momentum: UI + levels + preview + persistence. Then Prompt 2 + 3 make it show up in the Selection Tree dropdown with real data.
+
+If you want, paste back your current COM plugin project structure (just the project names / paths) and I’ll tailor Prompt 3 to your exact filenames (`MicroEng.SelectionTreeCom.dll`, registrar class names, etc.).

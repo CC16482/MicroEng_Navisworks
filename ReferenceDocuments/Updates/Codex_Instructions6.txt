@@ -1,0 +1,303 @@
+Your probe basically answered the key question: **the Selection Tree dropdown extensibility surface exists via COM**, not via the managed `Autodesk.Navisworks.Api.Plugins` layer. The COM interfaces you found are exactly what Navisworks would need to call into a custom provider: `InwSelectionTreePlugin` → returns an `InwOpSelectionTreeInterface` that supplies node count/name/icon/selection, etc. 
+
+Also crucial: Navisworks exposes **user selection tree spec/plugin** objects (`InwOpUserSelectionTreeSpec`, `InwOpUserSelectionTreePlugin`) including a “save to app spec dir” method. That’s a strong hint that the dropdown is driven by these “user selection tree plugin” spec files. 
+Autodesk Help explicitly claims “Additional customized Selection Tree options can be added by using the Autodesk Navisworks API.” ([Autodesk Help][1])
+
+## What Codex should do next
+
+**Implement a minimal COM Selection Tree provider (stub)** *and* a **managed dev command** that writes a `UserSelectionTreePlugin` spec into the app spec dir.
+
+This is the fastest “yes/no” test:
+
+* If it works, you’ll see **TreeMapper** appear in the Selection Tree dropdown and selecting it will show a stub tree.
+* If it doesn’t, we then inspect what spec file gets created and whether Navisworks expects a different `name`/ProgID/registration path.
+
+---
+
+# Codex prompt (copy/paste)
+
+> **Objective:** Add a minimal COM-based Selection Tree provider and attempt to register it so “TreeMapper” appears in Navisworks’ Selection Tree dropdown (Standard/Compact/Properties/… + TreeMapper).
+>
+> **Known COM interfaces & methods (from probe):**
+> `Autodesk.Navisworks.Api.Interop.ComApi.InwSelectionTreePlugin` has `InitialisePlugin(ref int capbits, ref int ver)`, `string iGetUserString()`, `InwOpSelectionTreeInterface iCreateInterface(InwOpState state)` 
+> `InwOpSelectionTreeInterface` methods include `iGetNumRootChildren`, `iGetNum:contentReference[oaicite:4]{index=4}n`, `iGetSelection`, etc. 
+> There are also `InwOpUserSelectionTreeSpec` and `InwOpUserSelectionTreePlugin:contentReference[oaicite:6]{index=6}ttom`, `name`, `Version`, `SetTreeSpec(...)`, `SaveFileToAppSpecDir()`. 
+>
+> **Tasks:**
+>
+> 1. In the existing `MicroEng.Navisworks` project (net48), add a lectionTreePlugin`implementing`InwSelectionTreePlugin`and returning a COM-visible class`TreeMapperSelectionTreeInterface`implementing`InwOpSelectionTreeInterface`.
+>
+>    * Stub behaviour: show 1 root node named “TreeMapper (stub)”, no children. Selection can be empty.
+>    * Add `[ComVisible(true)]`, `[Guid(...)]`, `[ProgId("MicroEng.TreeMapperSelectionTreePlugin")]`, and `[ClassInterface(ClassInterfaceType.None)]`.
+> 2. Add two **dev-only** AddIn commands:
+>
+>    * **“MicroEng Dev: COM Register TreeMapper SelectionTree”**: uses `RegistrationServices.RegisterAssembly(..., SetCodeBase)` to self-register COM classes.
+>    * **“MicroEng Dev: Install TreeMapper SelectionTree Option”**: creates `InwOpUserSelectionTreeSpec` + `InwOpUserSelectionTreePlugin` via `ComApiBridge.State.ObjectFactory`, sets `spec.UserString = "TreeMapper"`, sets `plugin.name = "MicroEng.TreeMapperSelectionTreePlugin"`, sets version=1, `plugin.SetTreeSpec(spec)`, and calls `plugin.SaveFileToAppSpecDir()`. Then shows a MessageBox instructing to restart Navisworks.
+> 3. Logging: use `MicroEngActions.Log(...)` throughout and show MessageBoxes with success/failure.
+> 4. Make sure nothing crashes if any COM call fails—catch exceptions and log.
+>
+> **Deliverable:** add the new `.cs` files only (no UI changes elsewhere). Keep it minimal and reversible.
+
+---
+
+# Example code (you can paste these as new .cs files)
+
+## 1) COM provider stub
+
+Create `SelectionTreeCom/TreeMapperSelectionTreeCom.cs`
+
+```csharp
+using System;
+using System.Runtime.InteropServices;
+using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
+
+namespace MicroEng.Navisworks.SelectionTreeCom
+{
+    // This is the COM plugin that Navisworks would instantiate for the Selection Tree dropdown entry.
+    [ComVisible(true)]
+    [Guid("9D4B2B3D-36B5-4A4E-8B79-9D8E6B7D6C01")]
+    [ProgId("MicroEng.TreeMapperSelectionTreePlugin")]
+    [ClassInterface(ClassInterfaceType.None)]
+    public sealed class TreeMapperSelectionTreePlugin : ComApi.InwSelectionTreePlugin
+    {
+        public void InitialisePlugin(ref int capbits, ref int ver)
+        {
+            // Keep minimal: no special capabilities.
+            capbits = 0;
+            ver = 1;
+        }
+
+        public string iGetUserString()
+        {
+            // This is the label users should see.
+            return "TreeMapper";
+        }
+
+        public ComApi.InwOpSelectionTreeInterface iCreateInterface(ComApi.InwOpState State)
+        {
+            // Return the interface Navisworks calls to populate the tree.
+            return new TreeMapperSelectionTreeInterface(State);
+        }
+    }
+
+    [ComVisible(true)]
+    [Guid("C1B33BE9-9A6D-4B44-9D06-7E8F7B0A2F02")]
+    [ClassInterface(ClassInterfaceType.None)]
+    public sealed class TreeMapperSelectionTreeInterface : ComApi.InwOpSelectionTreeInterface
+    {
+        private readonly ComApi.InwOpState _state;
+
+        public TreeMapperSelectionTreeInterface(ComApi.InwOpState state)
+        {
+            _state = state;
+        }
+
+        // One root node
+        public int iGetNumRootChildren() => 1;
+
+        // No children in stub
+        public int iGetNumChildren(ComApi.InwUInt32Vector path, int user_handle) => 0;
+
+        // Always return the same name for stub root node
+        public string iGetName(ComApi.InwUInt32Vector path, int user_handle) => "TreeMapper (stub)";
+
+        // Handle/cache methods (not used in stub)
+        public int iCreateHandle(ComApi.InwUInt32Vector path) => 0;
+        public void iDestroyHandle(ComApi.InwUInt32Vector path, int user_handle) { }
+
+        // Icons/text formatting: return defaults
+        public ComApi.nwESelTreeIcon iGetIcon(ComApi.InwUInt32Vector path, int user_handle) => (ComApi.nwESelTreeIcon)0;
+        public ComApi.nwESelTreeIcon iGetSelectedIcon(ComApi.InwUInt32Vector path, int user_handle) => (ComApi.nwESelTreeIcon)0;
+        public ComApi.nwESelTreeTextFormat iGetTextFormat(ComApi.InwUInt32Vector path, int user_handle) => (ComApi.nwESelTreeTextFormat)0;
+
+        // Selection: leave empty for stub
+        public void iGetSelection(ComApi.InwUInt32Vector path, int user_handle, ComApi.InwOpSelection selection)
+        {
+            try
+            {
+                // Some COM selection objects expose Clear(); if it exists, call it.
+                selection?.GetType().GetMethod("Clear")?.Invoke(selection, null);
+            }
+            catch { /* swallow */ }
+        }
+
+        public void iGetTextColor(ComApi.InwUInt32Vector path, int user_handle, ComApi.InwLVec3f txt_color)
+        {
+            // Leave default (do nothing)
+        }
+
+        // UI hooks - no-op for stub
+        public void iOnBeginContextMenu(ComApi.InwUInt32Vector path, int user_handle) { }
+        public void iOnEndContextMenu(ComApi.InwUInt32Vector path, int user_handle) { }
+        public void iOnCollapsed(ComApi.InwUInt32Vector path, int user_handle) { }
+        public void iOnLButtonDown(ComApi.InwUInt32Vector path, int user_handle, bool is_selected, bool is_shift, bool is_ctrl) { }
+    }
+}
+```
+
+---
+
+## 2) Dev command: register COM classes + install Selection Tree option
+
+Create `SelectionTreeCom/DevTreeMapperSelectionTreeInstaller.cs`
+
+```csharp
+using System;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+using Autodesk.Navisworks.Api.Plugins;
+using ComBridge = Autodesk.Navisworks.Api.ComApi.ComApiBridge;
+using ComApi = Autodesk.Navisworks.Api.Interop.ComApi;
+using MicroEng.Navisworks.SelectionTreeCom;
+
+namespace MicroEng.Navisworks.SelectionTreeCom
+{
+    [Plugin("MicroEng.Dev.TreeMapperSelectionTree.Install", "MENG",
+        DisplayName = "MicroEng Dev: Install TreeMapper Selection Tree Option",
+        ToolTip = "Registers COM classes (if possible) and writes a UserSelectionTree spec so TreeMapper appears in the Selection Tree dropdown.")]
+    [AddInPlugin(AddInLocation.AddIn)]
+    public class DevInstallTreeMapperSelectionTreeOption : AddInPlugin
+    {
+        public override int Execute(params string[] parameters)
+        {
+            MicroEngActions.Init();
+
+            try
+            {
+                // 1) Try COM self-registration (best-effort).
+                TryRegisterCom();
+
+                // 2) Create spec + plugin wrapper and save to app spec dir.
+                var state = ComBridge.State;
+
+                var spec = (ComApi.InwOpUserSelectionTreeSpec)state.ObjectFactory(
+                    ComApi.nwEObjectType.eObjectType_nwOpUserSelectionTreeSpec, null, null);
+
+                spec.UserString = "TreeMapper";
+
+                // Leave these defaults for now (stub test). If you want, we can tune later.
+                // spec.Top = (ComApi.nwESelTreeTop)0;
+                // spec.Bottom = (ComApi.nwESelTreeBottom)0;
+
+                var plugin = (ComApi.InwOpUserSelectionTreePlugin)state.ObjectFactory(
+                    ComApi.nwEObjectType.eObjectType_nwOpUserSelectionTreePlugin, null, null);
+
+                // IMPORTANT: try binding by ProgId (matches [ProgId(...)] above)
+                plugin.name = "MicroEng.TreeMapperSelectionTreePlugin";
+                plugin.Version = 1;
+                plugin.SetTreeSpec(spec);
+
+                plugin.SaveFileToAppSpecDir();
+
+                MicroEngActions.Log("TreeMapper UserSelectionTree spec saved to app spec dir.");
+                MessageBox.Show(
+                    Autodesk.Navisworks.Api.Application.Gui?.MainWindow,
+                    "Installed TreeMapper Selection Tree option.\n\nRestart Navisworks, then open Selection Tree dropdown and look for “TreeMapper”.",
+                    "MicroEng",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"Install TreeMapper Selection Tree failed: {ex}");
+                MessageBox.Show(
+                    Autodesk.Navisworks.Api.Application.Gui?.MainWindow,
+                    ex.ToString(),
+                    "MicroEng - Install failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            return 0;
+        }
+
+        private static void TryRegisterCom()
+        {
+            try
+            {
+                var asm = typeof(TreeMapperSelectionTreePlugin).Assembly;
+                var rs = new RegistrationServices();
+
+                // SetCodeBase is important because this DLL is not in the GAC.
+                var ok = rs.RegisterAssembly(asm, AssemblyRegistrationFlags.SetCodeBase);
+
+                MicroEngActions.Log($"COM RegisterAssembly: ok={ok}, asm={asm.FullName}, loc={asm.Location}");
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal. We still attempt spec write; worst case: dropdown entry exists but instantiation fails.
+                MicroEngActions.Log($"COM RegisterAssembly failed (non-fatal): {ex.Message}");
+            }
+        }
+    }
+
+    [Plugin("MicroEng.Dev.TreeMapperSelectionTree.UnregisterCom", "MENG",
+        DisplayName = "MicroEng Dev: Unregister TreeMapper Selection Tree COM",
+        ToolTip = "Unregisters COM classes for TreeMapper selection tree (best-effort).")]
+    [AddInPlugin(AddInLocation.AddIn)]
+    public class DevUnregisterTreeMapperSelectionTreeCom : AddInPlugin
+    {
+        public override int Execute(params string[] parameters)
+        {
+            MicroEngActions.Init();
+
+            try
+            {
+                var asm = typeof(TreeMapperSelectionTreePlugin).Assembly;
+                var rs = new RegistrationServices();
+                var ok = rs.UnregisterAssembly(asm);
+
+                MicroEngActions.Log($"COM UnregisterAssembly: ok={ok}, asm={asm.FullName}");
+                MessageBox.Show(
+                    Autodesk.Navisworks.Api.Application.Gui?.MainWindow,
+                    "Unregister attempted. You may still need to remove the saved Selection Tree spec file if Navisworks keeps the dropdown entry.",
+                    "MicroEng",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"COM UnregisterAssembly failed: {ex}");
+                MessageBox.Show(
+                    Autodesk.Navisworks.Api.Application.Gui?.MainWindow,
+                    ex.ToString(),
+                    "MicroEng - Unregister failed",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+
+            return 0;
+        }
+    }
+}
+```
+
+---
+
+## How to run the test
+
+1. Build + deploy MicroEng as usual (ProgramData plugin path).
+2. In Navisworks: **Add-Ins → “MicroEng Dev: Install TreeMapper Selection Tree Option”**
+3. **Restart Navisworks** (likely needed for the dropdown list to reload).
+4. Open **Selection Tree** dropdown and look for **TreeMapper**.
+
+### Expected outcome (if the mechanism is real)
+
+* “TreeMapper” appears in the dropdown.
+* Selecting it shows a single node “TreeMapper (stub)”.
+
+---
+
+## If it still doesn’t show up
+
+Then the missing piece is *not* the interface—those exist and are callable —it’s the **discovery mechanism** for saved user selection tree specs (where Navis `plugin.name` must reference). Next step would be a second probe that:
+
+* finds where `SaveFileToAppSpecDir()` actually wrote the file, and
+* inspects its contents so we can match Navisworks’ expected plugin identifier format.
+
+If you run the installer and it doesn’t appear, paste:
+
+* the MicroEng log tail after running it, and
+* whether COM registration succeeded (it logs `COM RegisterAssembly ok=...`).
+
+[1]: https://help.autodesk.com/cloudhelp/2015/ENU/Navisworks/files/GUID-AF4CFA5C-1455-4444-982A-34FBA2AE4608.htm "https://help.autodesk.com/cloudhelp/2015/ENU/Navisworks/files/GUID-AF4CFA5C-1455-4444-982A-34FBA2AE4608.htm"

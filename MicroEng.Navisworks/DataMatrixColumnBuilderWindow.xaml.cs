@@ -49,18 +49,9 @@ namespace MicroEng.Navisworks
         private string _lastChooseCategoryFilterText;
         private string _lastChoosePropertyFilterText;
         private IReadOnlyCollection<string> _lastSelectionKeys;
-        private ScrapeSession _selectionIndexSession;
-        private Dictionary<string, HashSet<string>> _selectionIndex;
-        private CancellationTokenSource _selectionIndexCts;
-        private Task _selectionIndexTask;
-        private HashSet<string> _pendingSelectionKeys;
         private CancellationTokenSource _selectionScanCts;
         private Task _selectionScanTask;
         private int _selectionScanVersion;
-        private bool _breakSelectionLoopOnce;
-        private bool _breakIndexSnapshotOnce;
-        private readonly HashSet<string> _debugBreakpointsHit = new HashSet<string>(StringComparer.Ordinal);
-        private readonly object _debugBreakLock = new object();
 
         public DataMatrixColumnBuilderWindow(
             IEnumerable<DataMatrixAttributeDefinition> attributes,
@@ -121,18 +112,14 @@ namespace MicroEng.Navisworks
         {
             if (e.PropertyName == nameof(ColumnBuilderViewModel.FilterBySelection))
             {
-                DebugBreakOnce("FilterBySelection.PropertyChanged");
                 if (_viewModel.FilterBySelection)
                 {
-                    DebugBreakOnce("FilterBySelection.On");
                     StartSelectionWatcher();
                     UpdateSelectionFilterFromSelection();
                 }
                 else
                 {
-                    DebugBreakOnce("FilterBySelection.Off");
                     StopSelectionWatcher();
-                    CancelSelectionIndexBuild();
                     CancelSelectionScan();
                     _viewModel.SetSelectionFilterIds(null);
                 }
@@ -144,7 +131,6 @@ namespace MicroEng.Navisworks
             base.OnClosed(e);
             _leftScrollIdleTimer.Stop();
             StopSelectionWatcher();
-            CancelSelectionIndexBuild();
             CancelSelectionScan();
             if (!_applied)
             {
@@ -719,7 +705,6 @@ namespace MicroEng.Navisworks
 
         private void StartSelectionWatcher()
         {
-            DebugBreakOnce("SelectionWatcher.Start");
             _lastSelectionKeys = null;
             if (!_selectionRefreshTimer.IsEnabled)
             {
@@ -729,34 +714,11 @@ namespace MicroEng.Navisworks
 
         private void StopSelectionWatcher()
         {
-            DebugBreakOnce("SelectionWatcher.Stop");
             if (_selectionRefreshTimer.IsEnabled)
             {
                 _selectionRefreshTimer.Stop();
             }
             _lastSelectionKeys = null;
-        }
-
-        private void CancelSelectionIndexBuild()
-        {
-            DebugBreakOnce("SelectionIndex.Cancel");
-            _pendingSelectionKeys = null;
-
-            try
-            {
-                _selectionIndexCts?.Cancel();
-            }
-            catch
-            {
-                // ignore
-            }
-
-            _selectionIndexCts?.Dispose();
-            _selectionIndexCts = null;
-
-            _selectionIndexTask = null;
-            _selectionIndexSession = null;
-            _selectionIndex = null;
         }
 
         private void CancelSelectionScan()
@@ -777,7 +739,6 @@ namespace MicroEng.Navisworks
 
         private void SelectionRefreshTimer_Tick(object sender, EventArgs e)
         {
-            DebugBreakOnce("SelectionRefresh.Tick");
             if (!_viewModel.FilterBySelection)
             {
                 StopSelectionWatcher();
@@ -785,14 +746,12 @@ namespace MicroEng.Navisworks
             }
 
             var keys = GetCurrentSelectionKeys();
-            DebugBreakOnce("SelectionRefresh.GotKeys");
             if (SelectionKeysEqual(_lastSelectionKeys, keys))
             {
                 return;
             }
 
             _lastSelectionKeys = keys;
-            DebugBreakOnce("SelectionRefresh.KeysChanged");
             UpdateSelectionFilterFromSelection();
         }
 
@@ -803,7 +762,6 @@ namespace MicroEng.Navisworks
                 return;
             }
 
-            DebugBreakOnce("SelectionFilter.Begin");
             var session = DataScraperCache.LastSession;
             var doc = NavisApp.ActiveDocument;
             if (session == null || doc?.CurrentSelection?.SelectedItems == null)
@@ -816,11 +774,6 @@ namespace MicroEng.Navisworks
             var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (ModelItem item in doc.CurrentSelection.SelectedItems)
             {
-                if (ShouldDebugBreak() && !_breakSelectionLoopOnce)
-                {
-                    _breakSelectionLoopOnce = true;
-                    Debugger.Break();
-                }
                 try
                 {
                     keys.Add(item.InstanceGuid.ToString("D"));
@@ -831,7 +784,6 @@ namespace MicroEng.Navisworks
                 }
             }
 
-            DebugBreakOnce("SelectionFilter.KeysBuilt");
             if (keys.Count == 0)
             {
                 _viewModel.SetSelectionFilterIds(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
@@ -908,168 +860,6 @@ namespace MicroEng.Navisworks
                 }
 
                 ids.Add(id);
-            }
-
-            return ids;
-        }
-
-        private static bool ShouldDebugBreak()
-        {
-            if (!Debugger.IsAttached)
-            {
-                return false;
-            }
-
-            var flag = Environment.GetEnvironmentVariable("MICROENG_COLUMNBUILDER_BREAK");
-            return string.Equals(flag, "1", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private void DebugBreakOnce(string label)
-        {
-            if (!ShouldDebugBreak())
-            {
-                return;
-            }
-
-            lock (_debugBreakLock)
-            {
-                if (_debugBreakpointsHit.Contains(label))
-                {
-                    return;
-                }
-
-                _debugBreakpointsHit.Add(label);
-            }
-
-            Debugger.Break();
-        }
-
-        private void EnsureSelectionIndexAsync(ScrapeSession session)
-        {
-            if (session?.RawEntries == null)
-            {
-                CancelSelectionIndexBuild();
-                return;
-            }
-
-            DebugBreakOnce("SelectionIndex.Ensure");
-            if (_selectionIndexSession == session && _selectionIndex != null)
-            {
-                return;
-            }
-
-            if (_selectionIndexTask != null && !_selectionIndexTask.IsCompleted && _selectionIndexSession == session)
-            {
-                return;
-            }
-
-            _selectionIndexCts?.Cancel();
-            _selectionIndexCts?.Dispose();
-            _selectionIndexCts = new CancellationTokenSource();
-            _selectionIndexSession = session;
-
-            var token = _selectionIndexCts.Token;
-
-            ColumnBuilderDiagnostics.Log("SelectionIndex build start (async)");
-            DebugBreakOnce("SelectionIndex.BuildStart");
-            var buildTask = Task.Run(() =>
-            {
-                if (ShouldDebugBreak() && !_breakIndexSnapshotOnce)
-                {
-                    _breakIndexSnapshotOnce = true;
-                    Debugger.Break();
-                }
-                DebugBreakOnce("SelectionIndex.Snapshot");
-                var snapshot = session.RawEntries as IList<RawEntry> ?? session.RawEntries.ToList();
-                DebugBreakOnce("SelectionIndex.Build");
-                return BuildSelectionIndex(snapshot, token);
-            }, token);
-            _selectionIndexTask = buildTask;
-            buildTask.ContinueWith(t =>
-            {
-                if (t.IsCanceled || t.IsFaulted) return;
-                var index = t.Result;
-                if (index == null) return;
-
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    if (_selectionIndexSession != session) return;
-
-                    _selectionIndex = index;
-                    ColumnBuilderDiagnostics.Log($"SelectionIndex build done keys={index.Count}");
-                    DebugBreakOnce("SelectionIndex.BuildDone");
-                    var pendingKeys = _pendingSelectionKeys;
-                    _pendingSelectionKeys = null;
-                    if (pendingKeys == null || pendingKeys.Count == 0)
-                    {
-                        return;
-                    }
-
-                    _viewModel.SetSelectionFilterIds(BuildSelectionFilterIds(pendingKeys));
-                    ColumnBuilderDiagnostics.Log($"SelectionIndex applied pendingKeys={pendingKeys.Count}");
-                    DebugBreakOnce("SelectionIndex.Applied");
-                }), DispatcherPriority.Background);
-            }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
-        }
-
-        private static Dictionary<string, HashSet<string>> BuildSelectionIndex(IEnumerable<RawEntry> entries, CancellationToken token)
-        {
-            var map = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-            var idCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var entry in entries ?? Enumerable.Empty<RawEntry>())
-            {
-                if (token.IsCancellationRequested)
-                {
-                    return null;
-                }
-
-                if (string.IsNullOrWhiteSpace(entry.ItemKey))
-                {
-                    continue;
-                }
-
-                var category = entry.Category ?? string.Empty;
-                var name = entry.Name ?? string.Empty;
-
-                if (!idCache.TryGetValue(category, out var byName))
-                {
-                    byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    idCache[category] = byName;
-                }
-
-                if (!byName.TryGetValue(name, out var id))
-                {
-                    id = string.Concat(category, "|", name);
-                    byName[name] = id;
-                }
-
-                if (!map.TryGetValue(entry.ItemKey, out var set))
-                {
-                    set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    map[entry.ItemKey] = set;
-                }
-                set.Add(id);
-            }
-
-            return map;
-        }
-
-        private HashSet<string> BuildSelectionFilterIds(HashSet<string> keys)
-        {
-            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (_selectionIndex == null || keys == null || keys.Count == 0)
-            {
-                return ids;
-            }
-
-            foreach (var key in keys)
-            {
-                if (_selectionIndex.TryGetValue(key, out var set))
-                {
-                    ids.UnionWith(set);
-                }
             }
 
             return ids;

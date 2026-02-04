@@ -191,18 +191,6 @@ namespace MicroEng.Navisworks
             UpdateToolButtonStates();
         }
 
-        private void Reconstruct_Click(object sender, RoutedEventArgs e)
-        {
-            MicroEngActions.Reconstruct();
-            LogToPanel("[Reconstruct] executed.");
-        }
-
-        private void ZoneFinder_Click(object sender, RoutedEventArgs e)
-        {
-            MicroEngActions.ZoneFinder();
-            LogToPanel("[Zone Finder] executed.");
-        }
-
         private void DataScraper_Click(object sender, RoutedEventArgs e)
         {
             try
@@ -237,6 +225,22 @@ namespace MicroEng.Navisworks
                 MicroEngActions.Log($"[Data Matrix] failed to open: {ex}");
                 LogToPanel($"[Data Matrix] failed to open: {ex.Message}");
                 System.Windows.MessageBox.Show($"Data Matrix failed to open: {ex.Message}", "MicroEng",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void TreeMapper_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                MicroEngActions.TreeMapper();
+                UpdateToolButtonStates();
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"[Tree Mapper] failed to open: {ex}");
+                LogToPanel($"[Tree Mapper] failed to open: {ex.Message}");
+                MessageBox.Show($"Tree Mapper failed to open: {ex.Message}", "MicroEng",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -405,6 +409,7 @@ namespace MicroEng.Navisworks
             var dataScraperOpen = MicroEngActions.IsDataScraperOpen;
             var dataMapperOpen = MicroEngActions.IsDataMapperOpen;
             var dataMatrixOpen = IsDockPaneVisible("MicroEng.DataMatrix.DockPane.MENG");
+            var treeMapperOpen = MicroEngActions.IsTreeMapperOpen;
             var smartSetsOpen = MicroEngActions.IsSmartSetGeneratorOpen;
             var viewpointsOpen = IsDockPaneVisible("MicroEng.ViewpointsGenerator.DockPane.MENG");
             var quickColourOpen = MicroEngActions.IsQuickColourOpen;
@@ -414,6 +419,7 @@ namespace MicroEng.Navisworks
             SetCardActive(DataScraperButton, dataScraperOpen);
             SetCardActive(DataMapperButton, dataMapperOpen);
             SetCardActive(DataMatrixButton, dataMatrixOpen);
+            SetCardActive(TreeMapperButton, treeMapperOpen);
             SetCardActive(SmartSetsButton, smartSetsOpen);
             SetCardActive(ViewpointsGeneratorButton, viewpointsOpen);
             SetCardActive(QuickColourButton, quickColourOpen);

@@ -1601,17 +1601,6 @@ namespace MicroEng.Navisworks.QuickColour
             }
         }
 
-        private static QuickColourPaletteStyle ParsePaletteStyle(string name, QuickColourPaletteStyle fallback)
-        {
-            if (!string.IsNullOrWhiteSpace(name)
-                && Enum.TryParse(name, true, out QuickColourPaletteStyle parsed))
-            {
-                return parsed;
-            }
-
-            return fallback;
-        }
-
         private static MicroEngPaletteKind ParsePaletteKind(string name, MicroEngPaletteKind fallback)
         {
             if (string.IsNullOrWhiteSpace(name))
@@ -1990,16 +1979,6 @@ namespace MicroEng.Navisworks.QuickColour
             if (parts.Length > 0) category = parts[0];
             if (parts.Length > 1) property = parts[1];
             if (parts.Length > 2) value = parts[2];
-        }
-
-        private void PickHierarchyL1_Click(object sender, RoutedEventArgs e)
-        {
-            TryPickProperty(true);
-        }
-
-        private void PickHierarchyL2_Click(object sender, RoutedEventArgs e)
-        {
-            TryPickProperty(false);
         }
 
         private void TryPickProperty(bool isLevel1)
@@ -3149,81 +3128,6 @@ namespace MicroEng.Navisworks.QuickColour
             }
         }
 
-        private void ApplyHueGroupsColours()
-        {
-            var style = GetHierarchyPaletteStyle();
-            var typeSpread01 = Math.Max(0.15, GetTypeSpread01());
-            var contrast01 = Clamp01(HierarchyCategoryContrastPct / 100.0);
-
-            var (minL, maxL) = QuickColourPalette.ComputeCategoryLightnessRange(style, contrast01);
-            var sat = QuickColourPalette.GetRecommendedSaturation(style);
-
-            var enabledGroups = HueGroups
-                .Where(h => h != null && h.Enabled && !string.IsNullOrWhiteSpace(h.Name))
-                .ToDictionary(h => h.Name, h => h.HueColor, StringComparer.OrdinalIgnoreCase);
-
-            if (enabledGroups.Count == 0)
-            {
-                return;
-            }
-
-            var categories = HierarchyGroups.Where(c => c != null && c.Enabled).ToList();
-
-            foreach (var kvp in enabledGroups)
-            {
-                var groupName = kvp.Key;
-                var hueColor = kvp.Value;
-                var hue01 = QuickColourPalette.GetHue01(hueColor);
-
-                var catsInGroup = categories
-                    .Where(c => string.Equals(c.HueGroupName, groupName, StringComparison.OrdinalIgnoreCase))
-                    .OrderByDescending(c => c.Count)
-                    .ThenBy(c => c.Value, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                if (catsInGroup.Count == 0)
-                {
-                    continue;
-                }
-
-                int n = catsInGroup.Count;
-                double bandWidth = (maxL - minL) / n;
-                double pad = bandWidth * 0.08;
-
-                for (int i = 0; i < n; i++)
-                {
-                    var cat = catsInGroup[i];
-
-                    double bandMin = minL + bandWidth * i + pad;
-                    double bandMax = minL + bandWidth * (i + 1) - pad;
-                    if (bandMax <= bandMin)
-                    {
-                        bandMin = minL + bandWidth * i;
-                        bandMax = minL + bandWidth * (i + 1);
-                    }
-
-                    double baseL = (bandMin + bandMax) / 2.0;
-
-                    if (!cat.UseCustomBaseColor)
-                    {
-                        cat.SetComputedBaseColor(QuickColourPalette.FromHsl01(hue01, sat, baseL));
-                    }
-
-                    var types = GetSortedTypes(cat);
-                    if (types.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    var shades = QuickColourPalette.GenerateShades(cat.BaseColor, types.Count, style, typeSpread01);
-                    for (int t = 0; t < types.Count; t++)
-                    {
-                        types[t].Color = shades[t];
-                    }
-                }
-            }
-        }
-
         private List<QuickColourHierarchyTypeRow> GetSortedTypes(QuickColourHierarchyGroup group)
         {
             var list = group.Types
@@ -3819,51 +3723,6 @@ namespace MicroEng.Navisworks.QuickColour
             }
         }
 
-        private void AddHueGroup_Click(object sender, RoutedEventArgs e)
-        {
-            HueGroups.Add(new QuickColourHueGroup { Name = "New Group", HueHex = "#00A000" });
-            RefreshHueGroupOptions();
-        }
-
-        private void RemoveHueGroup_Click(object sender, RoutedEventArgs e)
-        {
-            if (SelectedHueGroup == null)
-            {
-                return;
-            }
-
-            var removedName = SelectedHueGroup.Name;
-            HueGroups.Remove(SelectedHueGroup);
-            RefreshHueGroupOptions();
-
-            var fallback = GetDefaultHueGroupName();
-            foreach (var cat in HierarchyGroups)
-            {
-                if (cat != null && string.Equals(cat.HueGroupName, removedName, StringComparison.OrdinalIgnoreCase))
-                {
-                    cat.HueGroupName = fallback;
-                }
-            }
-
-            ApplyHierarchyColours();
-        }
-
-        private void ResetHueGroups_Click(object sender, RoutedEventArgs e)
-        {
-            HueGroups.Clear();
-            EnsureDefaultHueGroups();
-            RefreshHueGroupOptions();
-
-            foreach (var cat in HierarchyGroups)
-            {
-                if (cat != null)
-                {
-                    cat.HueGroupName = "Architecture";
-                }
-            }
-
-            ApplyHierarchyColours();
-        }
         private void InitDisciplineMap()
         {
             var baseDir = System.IO.Path.Combine(
@@ -3880,124 +3739,6 @@ namespace MicroEng.Navisworks.QuickColour
         {
             _disciplineMap = DisciplineMapFileIO.Load(DisciplineMapPath);
             StatusText = $"Loaded category map: {_disciplineMap?.Rules?.Count ?? 0} rules (fallback={_disciplineMap?.FallbackGroup}).";
-        }
-
-        private void OpenDisciplineMap_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = DisciplineMapPath,
-                    UseShellExecute = true
-                };
-                System.Diagnostics.Process.Start(psi);
-            }
-            catch (Exception ex)
-            {
-                StatusText = "Open map failed: " + ex.Message;
-            }
-        }
-
-        private void ReloadDisciplineMap_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                ReloadDisciplineMap();
-            }
-            catch (Exception ex)
-            {
-                StatusText = "Reload map failed: " + ex.Message;
-            }
-        }
-
-        private void AutoAssignHueGroups_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (_disciplineMap == null)
-                {
-                    ReloadDisciplineMap();
-                }
-
-                if (HierarchyGroups == null || HierarchyGroups.Count == 0)
-                {
-                    StatusText = "No categories loaded. Run Load Hierarchy first.";
-                    return;
-                }
-
-                var options = new HueGroupAutoAssignOptions
-                {
-                    OnlyAssignWhenCurrentlyFallback = AutoAssignOnlyFallback,
-                    SkipLockedCategories = AutoAssignSkipLocked,
-                    AutoCreateMissingHueGroups = AutoAssignCreateMissingGroups
-                };
-
-                var res = _autoAssign.Apply(_disciplineMap, HierarchyGroups.ToList(), HueGroups, options, Log);
-
-                if (res.MissingHueGroups.Count > 0)
-                {
-                    StatusText = $"Auto assigned. Missing groups in UI: {string.Join(", ", res.MissingHueGroups)} (mapped to fallback).";
-                }
-                else
-                {
-                    StatusText = $"Auto assigned {res.Assigned} categories.";
-                }
-
-                RefreshHueGroupOptions();
-                ApplyHierarchyColours();
-            }
-            catch (Exception ex)
-            {
-                StatusText = "Auto assign failed: " + ex.Message;
-            }
-        }
-
-        private void PreviewHueMap_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (_disciplineMap == null)
-                {
-                    ReloadDisciplineMap();
-                }
-
-                if (HierarchyGroups == null || HierarchyGroups.Count == 0)
-                {
-                    AutoAssignPreviewSummary = "No hierarchy loaded. Run Load Hierarchy first.";
-                    AutoAssignPreviewRows.Clear();
-                    return;
-                }
-
-                var options = new HueGroupAutoAssignOptions
-                {
-                    OnlyAssignWhenCurrentlyFallback = AutoAssignOnlyFallback,
-                    SkipLockedCategories = AutoAssignSkipLocked,
-                    AutoCreateMissingHueGroups = AutoAssignCreateMissingGroups
-                };
-
-                var rows = new List<HueGroupAutoAssignPreviewRow>();
-                var summary = _autoAssign.BuildPreview(
-                    _disciplineMap,
-                    HierarchyGroups.ToList(),
-                    HueGroups.ToList(),
-                    options,
-                    rows,
-                    Log);
-
-                _lastPreviewRows = rows;
-                ApplyPreviewFilter();
-
-                AutoAssignPreviewSummary =
-                    $"Preview: Total={summary.Total}, Will change={summary.WillChange}, " +
-                    $"No change={summary.NoChange}, Skipped locked={summary.SkippedLocked}, " +
-                    $"Skipped assigned={summary.SkippedAlreadyAssigned}, Unmatched+fallback={summary.UnmatchedFallback}, " +
-                    $"Missing group+fallback={summary.MissingGroupFallback}, Will create group={summary.WillCreateMissingGroup}.";
-            }
-            catch (Exception ex)
-            {
-                AutoAssignPreviewSummary = "Preview failed: " + ex.Message;
-            }
         }
 
         private void ApplyPreviewFilter()

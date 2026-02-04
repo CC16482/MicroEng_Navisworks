@@ -580,13 +580,6 @@ namespace MicroEng.Navisworks
             }
         }
 
-        private void NewProfile_Click(object sender, RoutedEventArgs e)
-        {
-            ExistingProfileCombo.SelectedItem = null;
-            ProfileNameBox.Text = string.Empty;
-            ProfileNameBox.Focus();
-        }
-
         private void PickSingleItem_Click(object sender, RoutedEventArgs e)
         {
             SingleItemRadio.IsChecked = true;

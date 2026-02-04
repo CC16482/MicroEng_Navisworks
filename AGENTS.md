@@ -11,6 +11,12 @@
 - Crash reports saved under `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\CrashReports\`.
 
 ## Recent changes
+- TreeMapper Selection Tree dropdown now appears; breakthrough was setting COM Plugin License to DWORD (HKCU 22.0 was REG_SZ) and using the Roaming TreeSpec path (%APPDATA%\\Autodesk\\Navisworks Manage 2025\\TreeSpec). No need to rerun the installer once these are set.
+- TreeMapper tool UI implemented with Data Matrix-style header and profile editor + preview; profiles persist and reload (Save/Save As/Reload).
+- TreeMapper publish writes `PublishedTree.json` snapshot; COM Selection Tree renders from snapshot and supports selection.
+- TreeMapper publish now stamps DocumentFile/DocumentFileKey (fallback to active document) so trees are model-bound.
+- Selection Tree COM plugin strips `Int32:`/type prefixes from display values (display-only).
+- Selection Tree COM plugin reloads snapshot when file length or write time changes to avoid stale root-only view (fixes “only Floors” after publish).
 - Column Builder: Filter-by-selection now **scans only selected keys** (no full item→property index build) to avoid long GC/UI stalls; scan cancels/restarts on selection changes.
 - Column Builder: When selection filter is active, only **expanded categories** refresh their property view; collapsed categories are just hidden/shown.
 - Column Builder: When selection is empty, the tree is hidden and **no processing** should occur (fast path).
@@ -89,6 +95,102 @@
 - GPU diagnostics: batch metrics and per-zone GPU eligibility table (skip reasons, thresholds) in run reports.
 - Variation check: baseline CPU variant + GPU variant added for direct CPU vs GPU comparison.
 - Column Builder: modeless keyboard input fixed by calling `ElementHost.EnableModelessKeyboardInterop` when showing the Column Builder window from the Data Matrix dock pane.
+
+## TreeMapper Selection Tree - detailed debugging notes (for handoff)
+### Goal
+- Expose a custom Selection Tree entry ("TreeMapper") backed by a COM plugin (InwOpUserSelectionTreePlugin) and a .spc spec file, so the dropdown shows a new tree in Navisworks.
+
+### Key assemblies, IDs, and files
+- COM plugin assembly: `C:\\ProgramData\\Autodesk\\Navisworks Manage 2025\\Plugins\\MicroEng.Navisworks\\MicroEng.SelectionTreeCom.dll`
+- Installer/add-in assembly: `C:\\ProgramData\\Autodesk\\Navisworks Manage 2025\\Plugins\\MicroEng.Navisworks\\MicroEng.Navisworks.dll`
+- COM ProgID: `MicroEng.TreeMapperSelectionTreePlugin`
+- COM CLSID: `{9D4B2B3D-36B5-4A4E-8B79-9D8E6B7D6C01}`
+- COM class: `MicroEng.SelectionTreeCom.TreeMapperSelectionTreePlugin`
+- COM registration (effective): `HKLM\\Software\\Classes\\CLSID\\{9D4B2B3D-36B5-4A4E-8B79-9D8E6B7D6C01}\\InprocServer32`
+  - Default = `mscoree.dll`
+  - CodeBase = `file:///C:/ProgramData/Autodesk/Navisworks Manage 2025/Plugins/MicroEng.Navisworks/MicroEng.SelectionTreeCom.dll`
+- Tree spec files (final location): `%APPDATA%\\Autodesk\\Navisworks Manage 2025\\TreeSpec\\`
+  - `TreeMapper.spc`
+  - `MicroEng.TreeMapperSelectionTreePlugin.spc`
+  - `LcUntitledPlugin.spc`
+- User Tree Specs registry keys (final):
+  - `HKCU\\Software\\Autodesk\\Navisworks Manage\\22.0\\User Tree Specs`
+  - `HKLM\\Software\\Autodesk\\Navisworks Manage\\22.0\\User Tree Specs`
+  - (also wrote the same under `23.0`, but ProcMon showed 22.0 is what Navisworks actually reads for this flow)
+- COM plugin license key (critical):
+  - `HKCU\\Software\\Autodesk\\Navisworks Manage\\22.0\\COM Plugins\\MicroEng.TreeMapperSelectionTreePlugin`
+  - `HKLM\\Software\\Autodesk\\Navisworks Manage\\22.0\\COM Plugins\\MicroEng.TreeMapperSelectionTreePlugin`
+  - Must be **REG_DWORD = 1** (REG_SZ does NOT work)
+
+### Logs and diagnostics used
+- Main add-in log: `C:\\Users\\Chris\\AppData\\Local\\MicroEng.Navisworks\\NavisErrors\\MicroEng.log`
+- COM plugin log: `MicroEng.SelectionTreeCom.log` (enabled in `MicroEng.SelectionTreeCom/TreeMapperSelectionTreeCom.cs`; check if file is emitted in the same NavisErrors folder)
+- ProcMon filters:
+  - Process = `Roamer.exe`
+  - Operations = `CreateFile`, `RegOpenKey`, `RegQueryValue`, `RegSetValue`
+  - Path contains: `TreeSpec`, `User Tree Specs`, `Selection Tree`, `TreeMapper`, `LcUntitledPlugin.spc`
+- ProcMon showed Navisworks reading 22.0 registry keys and trying to open .spc files (helped locate wrong registry hive and wrong TreeSpec path).
+
+### Symptoms (what was failing)
+- Selection Tree dropdown never showed "TreeMapper".
+- Navisworks popup: "third party COM plugin MicroEng.TreeMapperSelectionTreePlugin could not be loaded" (prompt to disable).
+- Installer logs repeatedly showed:
+  - `CreatePlugin(nwOpUserSelectionTreePlugin) failed: E_ACCESSDENIED`
+  - `SaveFileToAppSpecDir` errors or success but still no dropdown
+- COM plugin registration existed, but plugin still failed to load or was ignored by Selection Tree.
+
+### What we tried (timeline summary)
+1) **COM registration + installer writes to Program Files**  
+   - Wrote TreeSpec files to `C:\\Program Files\\Autodesk\\Navisworks Manage 2025\\TreeSpec`.  
+   - Added User Tree Specs values under 23.0.  
+   - Result: no dropdown.
+
+2) **Run Navisworks as admin / rerun installer**  
+   - Reduced E_ACCESSDENIED for file writes but still no dropdown.  
+   - Result: no dropdown.
+
+3) **ProcMon deep dive**  
+   - Found Navisworks reads **22.0** registry keys (COM Plugins + User Tree Specs).  
+   - Found TreeSpec was probed in **Roaming** path, not Program Files.  
+   - Found COM plugin license value under 22.0 existed but as **REG_SZ** (string), not DWORD.
+
+4) **Registry + path fixes (breakthrough)**  
+   - Set COM plugin license to `REG_DWORD = 1` under HKCU and HKLM for `22.0\\COM Plugins`.  
+   - Moved / wrote TreeSpec files to `%APPDATA%\\Autodesk\\Navisworks Manage 2025\\TreeSpec`.  
+   - Updated `User Tree Specs` values (22.0) to Roaming paths.  
+   - Result: "TreeMapper (stub)" appeared in Selection Tree dropdown.
+
+5) **Code changes (kept)**  
+   - `MicroEng.Navisworks/SelectionTreeCom/DevTreeMapperSelectionTreeInstaller.cs`  
+     - Added `GetUserTreeSpecDir()` and wrote .spc to Roaming TreeSpec dir.  
+   - `MicroEng.Navisworks/SelectionTreeCom/SelectionTreeComRegistrar.cs`  
+     - Ensured 22.0 + 23.0 registry coverage (COM Plugins + User Tree Specs).  
+   - `MicroEng.SelectionTreeCom/TreeMapperSelectionTreeCom.cs`  
+     - Added logs in COM constructor + `iCreateInterface`, `iGetNumRootChildren`, `iGetName` to confirm activation and UI calls.
+
+### Known good configuration (final)
+- COM plugin license keys (HKCU + HKLM, 22.0) are DWORD=1.
+- TreeSpec files live in `%APPDATA%\\Autodesk\\Navisworks Manage 2025\\TreeSpec`.
+- User Tree Specs (22.0) point to those Roaming paths.
+- COM registration points to `MicroEng.SelectionTreeCom.dll` under ProgramData.
+- No need to rerun the "Install TreeMapper Selection Tree Option" once these are set.
+- TreeMapper snapshot lives at `%APPDATA%\\MicroEng\\Navisworks\\TreeMapper\\PublishedTree.json`.
+- PublishedTree now includes DocumentFile/DocumentFileKey; Selection Tree only loads when current doc matches.
+
+### Reference: Why this matters for future debugging
+- If Selection Tree dropdown is empty again, first verify:
+  - License DWORD under 22.0.
+  - TreeSpec path in Roaming.
+  - User Tree Specs values in 22.0.
+  - COM registration still points to the correct CodeBase.
+  - PublishedTree.json exists and matches current document file name.
+
+### TreeMapper runtime notes (latest)
+- Profiles now persist across Navisworks restarts; reload is immediate via dropdown/Reload.
+- Publish is required to update the Selection Tree; after publish, Selection Tree loads from snapshot (no live queries).
+- If Selection Tree shows only one root after publish, restart Navisworks or ensure snapshot reload (length+timestamp check).
+- “(Missing)” nodes appear for items missing a property at any level; selection count in UI is unrelated.
+  - If desired, we can add display counts or hide Missing nodes when count is zero.
 
 ## Open issues
 - **Column Builder filter-by-selection still freezing** after selection results appear in some runs. Previous logs showed UI stalls during selection index build; new selected-keys scan fix needs validation on new PC.

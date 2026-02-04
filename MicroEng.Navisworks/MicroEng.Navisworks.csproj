@@ -61,6 +61,10 @@
     <Reference Include="WindowsFormsIntegration" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\MicroEng.SelectionTreeCom\MicroEng.SelectionTreeCom.csproj" />
+  </ItemGroup>
+
   <!-- Deploy logos alongside the plugin -->
   <ItemGroup>
     <Content Include="..\Logos\*.png">

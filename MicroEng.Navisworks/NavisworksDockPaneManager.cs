@@ -604,6 +604,24 @@ namespace MicroEng.Navisworks
             }
         }
 
+        internal static void RefreshSelectionTreePane(TimeSpan? delay = null)
+        {
+            var pause = delay ?? TimeSpan.FromMilliseconds(200);
+            try
+            {
+                TryExecuteBuiltInCommand("RoamerGUI_OM_VIEW_TREE");
+                if (pause > TimeSpan.Zero)
+                {
+                    Thread.Sleep(pause);
+                }
+                TryExecuteBuiltInCommand("RoamerGUI_OM_VIEW_TREE");
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
         private static HashSet<string> BuildExclusions(IEnumerable<string> extraExclusions)
         {
             var exclusions = new HashSet<string>(DefaultExcludedPaneIds, StringComparer.OrdinalIgnoreCase);

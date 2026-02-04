@@ -120,6 +120,18 @@
         </StackPanel>
       </ui:CardAction>
 
+      <ui:CardAction x:Name="TreeMapperButton"
+                     Style="{StaticResource ToolCardActionStyle}"
+                     Click="TreeMapper_Click">
+        <ui:CardAction.Icon>
+          <ui:SymbolIcon Symbol="BranchFork20" Style="{StaticResource ToolCardIconStyle}" />
+        </ui:CardAction.Icon>
+        <StackPanel>
+          <ui:TextBlock FontTypography="BodyStrong" Text="Tree Mapper" TextWrapping="Wrap" Margin="0,0,0,2" />
+          <ui:TextBlock Appearance="Secondary" Text="Build a custom selection tree." TextWrapping="Wrap" />
+        </StackPanel>
+      </ui:CardAction>
+
       <ui:CardAction x:Name="SmartSetsButton"
                      Style="{StaticResource ToolCardActionStyle}"
                      Click="SmartSetGenerator_Click">

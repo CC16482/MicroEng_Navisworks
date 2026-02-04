@@ -1178,48 +1178,7 @@ namespace MicroEng.Navisworks.SmartSets
             UpdateGroupingScopeSummary(grouping);
         }
 
-        private void PickProperty_Click(object sender, RoutedEventArgs e)
-        {
-            if (!(sender is FrameworkElement element))
-            {
-                return;
-            }
-
-            if (!(element.DataContext is SmartSetRule rule))
-            {
-                return;
-            }
-
-            var session = GetSelectedSession();
-            if (session == null)
-            {
-                MessageBox.Show("No Data Scraper session available. Run Data Scraper first.", "Smart Set Generator", MessageBoxButton.OK, MessageBoxImage.Information);
-                return;
-            }
-
-            var view = new DataScraperSessionAdapter(session);
-            var vm = new PropertyPickerViewModel(view.Properties);
-            var win = new PropertyPickerWindow(vm) { Owner = Window.GetWindow(this) };
-
-            if (win.ShowDialog() == true && win.Selected != null)
-            {
-                rule.Category = win.Selected.Category;
-                rule.Property = win.Selected.Name;
-
-                rule.SampleValues.Clear();
-                foreach (var sample in win.Selected.SampleValues.Take(25))
-                {
-                    rule.SampleValues.Add(sample);
-                }
-
-                if (string.IsNullOrWhiteSpace(rule.Value) && win.Selected.SampleValues.Count > 0)
-                {
-                    rule.Value = win.Selected.SampleValues[0];
-                }
-            }
-        }
-
-        internal void RulesGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+internal void RulesGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             var cell = FindParent<DataGridCell>(e.OriginalSource as DependencyObject);
             if (cell == null || cell.IsEditing || cell.IsReadOnly)

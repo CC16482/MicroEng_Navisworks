@@ -95,9 +95,7 @@ namespace MicroEng.SelectionTreeCom
     public sealed class TreeMapperSelectionTreeInterface : ComApi.InwOpSelectionTreeInterface
     {
         private const string MissingTreeMessage = "No published TreeMapper tree. Open TreeMapper and Publish.";
-        private static readonly string PublishedTreePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "MicroEng", "Navisworks", "TreeMapper", "PublishedTree.json");
+        private static readonly string PublishedTreePath = ResolvePublishedTreePath();
 
         private readonly ComApi.InwOpState _state;
         private readonly object _sync = new object();
@@ -115,6 +113,66 @@ namespace MicroEng.SelectionTreeCom
         {
             _state = state;
             SelectionTreeComLog.Log("SelectionTreeCom: TreeMapperSelectionTreeInterface ctor");
+        }
+
+        private static string ResolvePublishedTreePath()
+        {
+            try
+            {
+                var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                var settingsPath = Path.Combine(appData, "MicroEng", "Navisworks", "Settings.json");
+                if (File.Exists(settingsPath))
+                {
+                    using (var fs = File.OpenRead(settingsPath))
+                    {
+                        var ser = new DataContractJsonSerializer(typeof(StorageSettingsSnapshot));
+                        var settings = ser.ReadObject(fs) as StorageSettingsSnapshot;
+                        var dataDir = NormalizePath(settings?.DataStorageDirectory);
+                        if (string.IsNullOrWhiteSpace(dataDir))
+                        {
+                            dataDir = NormalizePath(settings?.DataScraperCacheDirectory);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(dataDir))
+                        {
+                            var newPath = Path.Combine(dataDir, "TreeMapperPublishedTree.json");
+                            if (File.Exists(newPath))
+                            {
+                                return newPath;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore and use legacy path below
+            }
+
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "MicroEng",
+                "Navisworks",
+                "TreeMapper",
+                "PublishedTree.json");
+        }
+
+        private static string NormalizePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                var expanded = Environment.ExpandEnvironmentVariables(path.Trim());
+                return Path.GetFullPath(expanded).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         public int iGetNumRootChildren()
@@ -650,6 +708,13 @@ namespace MicroEng.SelectionTreeCom
             "System.String",
             "System.Guid"
         };
+    }
+
+    [DataContract]
+    internal sealed class StorageSettingsSnapshot
+    {
+        [DataMember(Order = 2)] public string DataStorageDirectory { get; set; }
+        [DataMember(Order = 3)] public string DataScraperCacheDirectory { get; set; }
     }
 
     [DataContract]

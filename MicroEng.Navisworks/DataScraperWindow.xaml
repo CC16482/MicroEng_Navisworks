@@ -193,18 +193,16 @@
           <TextBlock Text="Status:" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
           <TextBlock x:Name="StatusText" Text="Ready" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
           <ui:Button x:Name="RunScrapeButton"
-                     Appearance="Primary"
-                     Background="White"
-                     Foreground="Black"
+                     Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                      Padding="12,6"
                      Margin="12,0,0,0"
                      Click="Run_Click">
             <Grid>
               <TextBlock x:Name="RunScrapeLabel"
-                         Text="Run Scrape"
-                         Foreground="Black"
-                         VerticalAlignment="Center"
-                         HorizontalAlignment="Center" />
+                          Text="Run Scrape"
+                          Foreground="{DynamicResource TextFillColorInverseBrush}"
+                          VerticalAlignment="Center"
+                          HorizontalAlignment="Center" />
               <ui:SymbolIcon x:Name="RunScrapeSpinnerIcon"
                              Symbol="ArrowSyncCircle24"
                              Filled="True"
@@ -418,7 +416,22 @@
             <DataGridTextColumn Header="Scope" Binding="{Binding ScopeType}" Width="130" />
             <DataGridTextColumn Header="Items" Binding="{Binding ItemsScanned}" Width="80" />
             <DataGridTextColumn Header="Props" Binding="{Binding Properties.Count}" Width="80" />
-            <DataGridTextColumn Header="Raw" Binding="{Binding RawEntries.Count}" Width="70" />
+            <DataGridTextColumn Header="Raw" Binding="{Binding RawEntryCount}" Width="70" />
+            <DataGridTemplateColumn Header="X" Width="36" IsReadOnly="True">
+              <DataGridTemplateColumn.CellTemplate>
+                <DataTemplate>
+                  <Button Content="X"
+                          Width="20"
+                          Height="20"
+                          Padding="0"
+                          FontWeight="Bold"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center"
+                          ToolTip="Delete this cached run"
+                          Click="DeleteHistorySession_Click" />
+                </DataTemplate>
+              </DataGridTemplateColumn.CellTemplate>
+            </DataGridTemplateColumn>
           </ui:DataGrid.Columns>
         </ui:DataGrid>
 
@@ -461,12 +474,14 @@
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
         <StackPanel Grid.Row="2">
-          <TabControl Background="Transparent"
+          <TabControl x:Name="DataViewTabControl"
+                      Background="Transparent"
                       BorderThickness="0"
                       Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                       FontSize="12"
                       HorizontalAlignment="Stretch"
-                      VerticalAlignment="Stretch">
+                      VerticalAlignment="Stretch"
+                      SelectionChanged="DataViewTabControl_SelectionChanged">
               <!-- Properties -->
               <TabItem Header="Properties">
                 <ui:Card Padding="10"
@@ -512,7 +527,7 @@
               </TabItem>
 
               <!-- Raw Data -->
-              <TabItem Header="Raw Data">
+              <TabItem x:Name="RawDataTab" Header="Raw Data">
                 <ui:Card Padding="10"
                          Margin="0,6,0,0"
                          HorizontalContentAlignment="Stretch"

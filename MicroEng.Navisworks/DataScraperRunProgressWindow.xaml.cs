@@ -16,6 +16,7 @@ namespace MicroEng.Navisworks
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
 
             _state = state ?? throw new ArgumentNullException(nameof(state));
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };

@@ -140,9 +140,7 @@
                             <ui:SymbolIcon Symbol="DatabaseLightning20" FontSize="18" />
                         </ui:Button>
                         <ui:Button Content="Publish to Selection Tree"
-                                   Appearance="Primary"
-                                   Background="White"
-                                   Foreground="Black"
+                                   Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                                    Padding="12,6"
                                    Margin="12,0,0,0"
                                    IsEnabled="{Binding IsPublishEnabled}"

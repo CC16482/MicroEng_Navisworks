@@ -57,9 +57,13 @@
                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
                 <ui:Button Grid.Column="1"
-                           Content="Open Data Scraper"
-                           Padding="12,6"
-                           Click="OpenDataScraper_Click" />
+                           Width="36"
+                           Height="30"
+                           Padding="0"
+                           ToolTip="Open Data Scraper"
+                           Click="OpenDataScraper_Click">
+                    <ui:SymbolIcon Symbol="DatabaseLightning20" FontSize="18" />
+                </ui:Button>
             </Grid>
         </ui:Card>
 
@@ -192,7 +196,7 @@
                                                Grid.Column="2"
                                                Grid.RowSpan="2"
                                                Content="Load Values"
-                                               Appearance="Primary"
+                                               Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                                                Padding="12,6"
                                                Margin="12,0,0,0"
                                                VerticalAlignment="Bottom"
@@ -295,9 +299,9 @@
                                 <WrapPanel Grid.Row="1" Margin="0,6,0,0">
                                     <ui:Button Content="Save Profile" Margin="0,0,6,0" Click="SaveQuickColourProfile_Click" />
                                     <ui:Button Content="Save As" Margin="0,0,12,0" Click="SaveQuickColourProfileAs_Click" />
-                                    <ui:Button Content="Apply Temporary" Appearance="Primary" Margin="0,0,6,0" Click="ApplyQuickColourTemporary_Click" />
+                                    <ui:Button Content="Apply Temporary" Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold" Margin="0,0,6,0" Click="ApplyQuickColourTemporary_Click" />
                                     <ui:Button Content="Clear Temporary" Margin="0,0,6,0" Click="ClearTemporary_Click" />
-                                    <ui:Button Content="Apply Permanent" Appearance="Primary" Margin="12,0,6,0" Click="ApplyQuickColourPermanent_Click" />
+                                    <ui:Button Content="Apply Permanent" Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold" Margin="12,0,6,0" Click="ApplyQuickColourPermanent_Click" />
                                     <ui:Button Content="Reset Permanent" Margin="0,0,6,0" Click="ResetPermanent_Click" />
                                     <ui:Button Content="Export Legend" Margin="12,0,0,0" Click="ExportQuickColourLegend_Click" />
                                 </WrapPanel>
@@ -450,7 +454,7 @@
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" VerticalAlignment="Bottom">
                                         <ui:Button Content="Load Hierarchy"
-                                                   Appearance="Primary"
+                                                   Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                                                    Padding="12,6"
                                                    Click="LoadHierarchy_Click" />
                                     </StackPanel>
@@ -631,9 +635,9 @@
                                     <ui:Button Content="Save As" Margin="0,0,12,0" Click="SaveHierarchyProfileAs_Click" />
                                     <ui:Button Content="Auto Assign Base Colours" Margin="0,0,8,0" Click="AutoAssignBaseColours_Click" />
                                     <ui:Button Content="Regenerate Type Shades" Margin="0,0,8,0" Click="RegenerateTypeShades_Click" />
-                                    <ui:Button Content="Apply Temporary" Appearance="Primary" Margin="12,0,8,0" Click="ApplyTemporary_Click" />
+                                    <ui:Button Content="Apply Temporary" Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold" Margin="12,0,8,0" Click="ApplyTemporary_Click" />
                                     <ui:Button Content="Clear Temporary" Margin="0,0,8,0" Click="ClearTemporary_Click" />
-                                    <ui:Button Content="Generate Permanent Profile" Appearance="Primary" Margin="12,0,8,0" Click="ApplyPermanent_Click" />
+                                    <ui:Button Content="Generate Permanent Profile" Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold" Margin="12,0,8,0" Click="ApplyPermanent_Click" />
                                     <ui:Button Content="Reset Permanent" Margin="0,0,8,0" Click="ResetPermanent_Click" />
                                 </WrapPanel>
                                 <WrapPanel Grid.Row="2" Margin="0,8,0,0">

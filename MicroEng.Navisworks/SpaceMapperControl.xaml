@@ -118,7 +118,7 @@
                                     VerticalAlignment="Top">
                             <ui:Button x:Name="RunSpaceMapperButtonControl"
                                        Content="Run Space Mapper"
-                                       Appearance="Primary"
+                                       Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                                        Padding="12,6"
                                        ToolTip="Run Space Mapper" />
                         </StackPanel>

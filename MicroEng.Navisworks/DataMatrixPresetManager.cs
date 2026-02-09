@@ -61,15 +61,19 @@ namespace MicroEng.Navisworks
     {
         private readonly object _gate = new object();
         private readonly string _path;
+        private readonly string _legacyPath;
+        private bool _legacyMigrated;
 
         public FilePresetManager()
         {
-            var dir = Path.Combine(
+            _path = MicroEngStorageSettings.GetDataFilePath("DataMatrixViewPresets.json");
+            _legacyPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "MicroEng", "Navisworks", "DataMatrix");
-
-            Directory.CreateDirectory(dir);
-            _path = Path.Combine(dir, "ViewPresets.json");
+                "MicroEng",
+                "Navisworks",
+                "DataMatrix",
+                "ViewPresets.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(_path) ?? MicroEngStorageSettings.DataStorageDirectory);
         }
 
         public IEnumerable<DataMatrixViewPreset> GetPresets(string profileName)
@@ -125,16 +129,19 @@ namespace MicroEng.Navisworks
         {
             try
             {
-                if (!File.Exists(_path))
+                var readPath = ResolveReadPath();
+                if (!File.Exists(readPath))
                 {
                     return new DataMatrixPresetStore();
                 }
 
-                using (var fs = File.OpenRead(_path))
+                using (var fs = File.OpenRead(readPath))
                 {
                     var ser = new DataContractJsonSerializer(typeof(DataMatrixPresetStore));
                     var obj = ser.ReadObject(fs) as DataMatrixPresetStore;
-                    return obj ?? new DataMatrixPresetStore();
+                    var store = obj ?? new DataMatrixPresetStore();
+                    TryMigrateLegacyStore(readPath, store);
+                    return store;
                 }
             }
             catch
@@ -158,10 +165,40 @@ namespace MicroEng.Navisworks
 
         private void SaveStore(DataMatrixPresetStore store)
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(_path) ?? MicroEngStorageSettings.DataStorageDirectory);
             using (var fs = File.Create(_path))
             {
                 var ser = new DataContractJsonSerializer(typeof(DataMatrixPresetStore));
                 ser.WriteObject(fs, store ?? new DataMatrixPresetStore());
+            }
+        }
+
+        private string ResolveReadPath()
+        {
+            if (File.Exists(_path))
+            {
+                return _path;
+            }
+
+            if (File.Exists(_legacyPath))
+            {
+                return _legacyPath;
+            }
+
+            return _path;
+        }
+
+        private void TryMigrateLegacyStore(string readPath, DataMatrixPresetStore store)
+        {
+            if (_legacyMigrated)
+            {
+                return;
+            }
+
+            if (string.Equals(readPath, _legacyPath, StringComparison.OrdinalIgnoreCase))
+            {
+                SaveStore(store ?? new DataMatrixPresetStore());
+                _legacyMigrated = true;
             }
         }
     }

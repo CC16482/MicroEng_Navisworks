@@ -1,7 +1,9 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Autodesk.Navisworks.Api.Plugins;
 using NavisApp = Autodesk.Navisworks.Api.Application;
@@ -45,6 +47,7 @@ namespace MicroEng.Navisworks
                     try
                     {
                         InitializeComponent();
+                        TryLoadHeaderLogo();
                         MicroEngActions.Log("Panel: after InitializeComponent");
                     }
                     catch (Exception initEx)
@@ -91,6 +94,58 @@ namespace MicroEng.Navisworks
                     Text = "MicroEng panel failed to load. See log for details.",
                     Margin = new Thickness(12)
                 };
+            }
+        }
+
+        private void TryLoadHeaderLogo()
+        {
+            UpdateHeaderLogo(MicroEngWpfUiTheme.CurrentTheme);
+        }
+
+        private void UpdateHeaderLogo(MicroEngThemeMode theme)
+        {
+            if (HeaderLogoImage == null)
+            {
+                return;
+            }
+
+            try
+            {
+                var assemblyPath = typeof(MicroEngPanelControl).Assembly.Location;
+                var assemblyDir = Path.GetDirectoryName(assemblyPath);
+                if (string.IsNullOrWhiteSpace(assemblyDir))
+                {
+                    return;
+                }
+
+                var fileName = theme == MicroEngThemeMode.Light
+                    ? "microeng-logo2.png"
+                    : "microeng-logo3.png";
+
+                var logoPath = Path.Combine(assemblyDir, "Logos", fileName);
+                if (!File.Exists(logoPath))
+                {
+                    MicroEngActions.Log($"Panel: header logo not found at {logoPath}");
+                    HeaderLogoImage.Source = null;
+                    HeaderLogoImage.Visibility = Visibility.Collapsed;
+                    return;
+                }
+
+                var bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.UriSource = new Uri(logoPath, UriKind.Absolute);
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.EndInit();
+                bitmap.Freeze();
+
+                HeaderLogoImage.Source = bitmap;
+                HeaderLogoImage.Visibility = Visibility.Visible;
+            }
+            catch (Exception ex)
+            {
+                MicroEngActions.Log($"Panel: header logo load failed: {ex.Message}");
+                HeaderLogoImage.Source = null;
+                HeaderLogoImage.Visibility = Visibility.Collapsed;
             }
         }
 
@@ -172,6 +227,7 @@ namespace MicroEng.Navisworks
                 _settingThemeToggle = true;
                 ThemeToggle.IsChecked = theme == MicroEngThemeMode.Light;
                 _settingThemeToggle = false;
+                UpdateHeaderLogo(theme);
             }
 
             if (Dispatcher.CheckAccess())
@@ -447,10 +503,14 @@ namespace MicroEng.Navisworks
 
         ~MicroEngPanelControl()
         {
-            if (!DesignerProperties.GetIsInDesignMode(this))
+            try
             {
                 MicroEngActions.LogMessage -= LogToPanel;
                 MicroEngActions.ToolWindowStateChanged -= OnToolWindowStateChanged;
+            }
+            catch
+            {
+                // Never throw from finalizer.
             }
         }
     }

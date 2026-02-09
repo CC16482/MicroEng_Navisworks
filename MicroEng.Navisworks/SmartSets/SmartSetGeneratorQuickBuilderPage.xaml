@@ -359,7 +359,7 @@
             <ui:Button Content="Select Results" Margin="6,0,0,0"
                        IsEnabled="{Binding CanSelectPreviewResults}"
                        Click="SelectResults_Click" />
-            <ui:Button Content="Generate" Appearance="Primary" Margin="6,0,0,0" Click="Generate_Click" />
+            <ui:Button Content="Generate" Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold" Margin="6,0,0,0" Click="Generate_Click" />
           </StackPanel>
 
           <Border Grid.Column="1"

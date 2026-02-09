@@ -29,6 +29,15 @@ namespace MicroEng.Navisworks.SmartSets
             {
                 // ignore theme failures
             }
+
+            try
+            {
+                MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
+            }
+            catch
+            {
+                // ignore positioning failures
+            }
         }
 
         private void Ok_Click(object sender, RoutedEventArgs e)

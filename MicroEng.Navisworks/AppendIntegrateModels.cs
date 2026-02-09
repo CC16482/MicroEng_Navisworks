@@ -116,25 +116,32 @@ namespace MicroEng.Navisworks
     internal class AppendIntegrateTemplateStore
     {
         private readonly string _templateFilePath;
+        private readonly string _legacyTemplateFilePath;
+        private bool _legacyMigrated;
 
         public AppendIntegrateTemplateStore(string baseDirectory)
         {
-            _templateFilePath = Path.Combine(baseDirectory ?? AppDomain.CurrentDomain.BaseDirectory, "append_templates.json");
+            _templateFilePath = MicroEngStorageSettings.GetDataFilePath("DataMapperTemplates.json");
+            _legacyTemplateFilePath = Path.Combine(baseDirectory ?? AppDomain.CurrentDomain.BaseDirectory, "append_templates.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(_templateFilePath) ?? MicroEngStorageSettings.DataStorageDirectory);
         }
 
         public List<AppendIntegrateTemplate> Load()
         {
             try
             {
-                if (!File.Exists(_templateFilePath))
+                var readPath = ResolveReadPath();
+                if (!File.Exists(readPath))
                 {
                     return new List<AppendIntegrateTemplate> { AppendIntegrateTemplate.CreateDefault("Default") };
                 }
 
-                using var stream = File.OpenRead(_templateFilePath);
+                using var stream = File.OpenRead(readPath);
                 var serializer = new DataContractJsonSerializer(typeof(List<AppendIntegrateTemplate>));
-                return serializer.ReadObject(stream) as List<AppendIntegrateTemplate> ??
-                       new List<AppendIntegrateTemplate> { AppendIntegrateTemplate.CreateDefault("Default") };
+                var result = serializer.ReadObject(stream) as List<AppendIntegrateTemplate> ??
+                             new List<AppendIntegrateTemplate> { AppendIntegrateTemplate.CreateDefault("Default") };
+                TryMigrateLegacy(readPath, result);
+                return result;
             }
             catch
             {
@@ -154,6 +161,35 @@ namespace MicroEng.Navisworks
             catch
             {
                 // Persist failures are non-fatal; callers may surface a UI warning later.
+            }
+        }
+
+        private string ResolveReadPath()
+        {
+            if (File.Exists(_templateFilePath))
+            {
+                return _templateFilePath;
+            }
+
+            if (File.Exists(_legacyTemplateFilePath))
+            {
+                return _legacyTemplateFilePath;
+            }
+
+            return _templateFilePath;
+        }
+
+        private void TryMigrateLegacy(string readPath, List<AppendIntegrateTemplate> templates)
+        {
+            if (_legacyMigrated)
+            {
+                return;
+            }
+
+            if (string.Equals(readPath, _legacyTemplateFilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                Save(templates);
+                _legacyMigrated = true;
             }
         }
     }

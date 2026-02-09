@@ -138,7 +138,12 @@ namespace MicroEng.Navisworks.TreeMapper
 
             Levels.CollectionChanged += OnLevelsChanged;
             DataScraperCache.SessionAdded += OnSessionAdded;
-            Closed += (_, __) => DataScraperCache.SessionAdded -= OnSessionAdded;
+            DataScraperCache.CacheChanged += OnCacheChanged;
+            Closed += (_, __) =>
+            {
+                DataScraperCache.SessionAdded -= OnSessionAdded;
+                DataScraperCache.CacheChanged -= OnCacheChanged;
+            };
 
             LoadProfiles();
             RefreshSessionOptions(DataScraperCache.LastSession);
@@ -155,6 +160,18 @@ namespace MicroEng.Navisworks.TreeMapper
             }
 
             RefreshSessionOptions(session);
+            SchedulePreviewRebuild();
+        }
+
+        private void OnCacheChanged()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(OnCacheChanged));
+                return;
+            }
+
+            RefreshSessionOptions(DataScraperCache.LastSession);
             SchedulePreviewRebuild();
         }
 
@@ -744,6 +761,7 @@ namespace MicroEng.Navisworks.TreeMapper
                 ResizeMode = ResizeMode.NoResize
             };
             MicroEngWpfUiTheme.ApplyTo(window);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(window);
 
             var panel = new System.Windows.Controls.Grid { Margin = new Thickness(12) };
             panel.RowDefinitions.Add(new System.Windows.Controls.RowDefinition { Height = GridLength.Auto });

@@ -7,21 +7,30 @@ namespace MicroEng.Navisworks.TreeMapper
     internal sealed class TreeMapperPublishStore
     {
         private readonly object _gate = new object();
-        private readonly string _dir;
         private readonly string _activeProfilePath;
         private readonly string _publishedTreePath;
+        private readonly string _legacyDir;
+        private readonly string _legacyActiveProfilePath;
+        private readonly string _legacyPublishedTreePath;
 
         public TreeMapperPublishStore()
         {
-            _dir = Path.Combine(
+            _activeProfilePath = MicroEngStorageSettings.GetDataFilePath("TreeMapperActiveProfile.json");
+            _publishedTreePath = MicroEngStorageSettings.GetDataFilePath("TreeMapperPublishedTree.json");
+
+            _legacyDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "MicroEng", "Navisworks", "TreeMapper");
-            Directory.CreateDirectory(_dir);
-            _activeProfilePath = Path.Combine(_dir, "ActiveProfile.json");
-            _publishedTreePath = Path.Combine(_dir, "PublishedTree.json");
+                "MicroEng",
+                "Navisworks",
+                "TreeMapper");
+            _legacyActiveProfilePath = Path.Combine(_legacyDir, "ActiveProfile.json");
+            _legacyPublishedTreePath = Path.Combine(_legacyDir, "PublishedTree.json");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(_activeProfilePath) ?? MicroEngStorageSettings.DataStorageDirectory);
+            Directory.CreateDirectory(_legacyDir);
         }
 
-        public string PublishDirectory => _dir;
+        public string PublishDirectory => Path.GetDirectoryName(_publishedTreePath) ?? MicroEngStorageSettings.DataStorageDirectory;
         public string ActiveProfilePath => _activeProfilePath;
         public string PublishedTreePath => _publishedTreePath;
 
@@ -34,6 +43,13 @@ namespace MicroEng.Navisworks.TreeMapper
                     var ser = new DataContractJsonSerializer(typeof(TreeMapperProfile));
                     ser.WriteObject(fs, profile ?? new TreeMapperProfile());
                 }
+
+                // Backward compatibility for existing external readers.
+                using (var fs = File.Create(_legacyActiveProfilePath))
+                {
+                    var ser = new DataContractJsonSerializer(typeof(TreeMapperProfile));
+                    ser.WriteObject(fs, profile ?? new TreeMapperProfile());
+                }
             }
         }
 
@@ -42,6 +58,13 @@ namespace MicroEng.Navisworks.TreeMapper
             lock (_gate)
             {
                 using (var fs = File.Create(_publishedTreePath))
+                {
+                    var ser = new DataContractJsonSerializer(typeof(TreeMapperPublishedTree));
+                    ser.WriteObject(fs, tree ?? new TreeMapperPublishedTree());
+                }
+
+                // Backward compatibility for existing external readers.
+                using (var fs = File.Create(_legacyPublishedTreePath))
                 {
                     var ser = new DataContractJsonSerializer(typeof(TreeMapperPublishedTree));
                     ser.WriteObject(fs, tree ?? new TreeMapperPublishedTree());

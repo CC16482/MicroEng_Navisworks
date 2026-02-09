@@ -60,6 +60,7 @@ namespace MicroEng.Navisworks
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
             _viewModel = new ColumnBuilderViewModel(attributes, currentVisibleOrder, requiredAttributeIds);
             DataContext = _viewModel;
 
@@ -826,13 +827,19 @@ namespace MicroEng.Navisworks
         private static HashSet<string> BuildSelectionFilterIdsForKeys(ScrapeSession session, HashSet<string> keys, CancellationToken token)
         {
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (session?.RawEntries == null || keys == null || keys.Count == 0)
+            if (session == null || keys == null || keys.Count == 0)
+            {
+                return ids;
+            }
+
+            var rawEntries = session.RawEntries;
+            if (rawEntries == null || rawEntries.Count == 0)
             {
                 return ids;
             }
 
             var idCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in session.RawEntries)
+            foreach (var entry in rawEntries)
             {
                 if (token.IsCancellationRequested)
                 {

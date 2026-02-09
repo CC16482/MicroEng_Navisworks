@@ -1,4 +1,4 @@
-﻿<Window x:Class="MicroEng.Navisworks.MicroEngSettingsWindow"
+<Window x:Class="MicroEng.Navisworks.MicroEngSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
@@ -43,7 +43,7 @@
                         FontSize="16"
                         FontWeight="SemiBold"
                         Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-          <ui:TextBlock Text="Configure theme and appearance for MicroEng tools."
+          <ui:TextBlock Text="Configure theme, appearance, and storage for MicroEng tools."
                         Margin="0,2,0,0"
                         FontSize="12"
                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
@@ -52,7 +52,7 @@
          <ui:Button Grid.Column="1"
                     Content="Close"
                     Padding="12,6"
-                    Appearance="Primary"
+                    Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                     Click="Close_Click" />
       </Grid>
     </ui:Card>
@@ -196,6 +196,95 @@
                               Margin="0,4,0,0"
                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
               </StackPanel>
+            </ui:Card>
+          </Grid>
+        </TabItem>
+        <TabItem Header="Storage">
+          <Grid Margin="8">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <ui:TextBlock Text="Profile &amp; Cache Storage"
+                          FontSize="13"
+                          FontWeight="SemiBold"
+                          Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+            <ui:TextBlock Grid.Row="1"
+                          Text="Choose one shared location for MicroEng profile and cache JSON files (Scrape, Colour, Data Matrix, etc)."
+                          Margin="0,2,0,10"
+                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+            <ui:Card Grid.Row="2"
+                     Padding="12"
+                     HorizontalAlignment="Stretch"
+                     HorizontalContentAlignment="Stretch">
+              <Grid>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBox x:Name="DataCachePathBox"
+                         Grid.Row="0"
+                         Grid.Column="0"
+                         Height="32"
+                         VerticalContentAlignment="Center"
+                         Padding="8,4"
+                         TextWrapping="NoWrap" />
+
+                <StackPanel Grid.Row="0"
+                            Grid.Column="1"
+                            Orientation="Horizontal"
+                            Margin="8,0,0,0">
+                  <ui:Button Content="Browse..."
+                             Padding="12,6"
+                             Click="BrowseDataCache_Click" />
+                  <ui:Button Content="Apply"
+                             Margin="8,0,0,0"
+                             Padding="12,6"
+                             Appearance="Primary"
+                             Foreground="{DynamicResource TextFillColorInverseBrush}"
+                             FontWeight="Bold"
+                             Click="ApplyDataCache_Click" />
+                </StackPanel>
+
+                <WrapPanel Grid.Row="1"
+                           Grid.ColumnSpan="2"
+                           Margin="0,10,0,0"
+                           ItemHeight="30">
+                  <ui:Button Content="Open Folder"
+                             Padding="12,6"
+                             Click="OpenDataCacheFolder_Click" />
+                  <ui:Button Content="Reset Default"
+                             Margin="8,0,0,0"
+                             Padding="12,6"
+                             Click="ResetDataCache_Click" />
+                  <ui:Button Content="Delete Scrape Cache"
+                             Margin="8,0,0,0"
+                             Padding="12,6"
+                             Appearance="Primary"
+                             Foreground="{DynamicResource TextFillColorInverseBrush}"
+                             FontWeight="Bold"
+                             Click="DeleteDataCache_Click" />
+                </WrapPanel>
+              </Grid>
+            </ui:Card>
+
+            <ui:Card Grid.Row="3"
+                     Margin="0,12,0,0"
+                     Padding="10"
+                     HorizontalAlignment="Stretch"
+                     HorizontalContentAlignment="Stretch">
+              <ui:TextBlock x:Name="StorageStatusText"
+                            Text="Storage settings are ready."
+                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
             </ui:Card>
           </Grid>
         </TabItem>

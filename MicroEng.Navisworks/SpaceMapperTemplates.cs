@@ -11,10 +11,14 @@ namespace MicroEng.Navisworks
     internal class SpaceMapperTemplateStore
     {
         private readonly string _filePath;
+        private readonly string _legacyFilePath;
+        private bool _legacyMigrated;
 
         public SpaceMapperTemplateStore(string baseDir)
         {
-            _filePath = Path.Combine(baseDir ?? AppDomain.CurrentDomain.BaseDirectory, "space_mapper_templates.json");
+            _filePath = MicroEngStorageSettings.GetDataFilePath("SpaceMapperTemplates.json");
+            _legacyFilePath = Path.Combine(baseDir ?? AppDomain.CurrentDomain.BaseDirectory, "space_mapper_templates.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(_filePath) ?? MicroEngStorageSettings.DataStorageDirectory);
         }
 
         public List<SpaceMapperTemplate> Load()
@@ -23,10 +27,14 @@ namespace MicroEng.Navisworks
             {
                 if (!File.Exists(_filePath))
                 {
-                    return new List<SpaceMapperTemplate> { CreateDefault() };
+                    if (!File.Exists(_legacyFilePath))
+                    {
+                        return new List<SpaceMapperTemplate> { CreateDefault() };
+                    }
                 }
 
-                var json = File.ReadAllText(_filePath);
+                var readPath = ResolveReadPath();
+                var json = File.ReadAllText(readPath);
                 if (string.IsNullOrWhiteSpace(json))
                 {
                     return new List<SpaceMapperTemplate> { CreateDefault() };
@@ -36,11 +44,15 @@ namespace MicroEng.Navisworks
                 {
                     var legacyTemplates = Deserialize<List<LegacySpaceMapperTemplate>>(json);
                     var migrated = legacyTemplates?.Select(MigrateLegacyTemplate).ToList() ?? new List<SpaceMapperTemplate>();
-                    return EnsureDefaults(migrated);
+                    var result = EnsureDefaults(migrated);
+                    TryMigrateLegacy(readPath, result);
+                    return result;
                 }
 
                 var templates = Deserialize<List<SpaceMapperTemplate>>(json);
-                return EnsureDefaults(templates);
+                var normalized = EnsureDefaults(templates);
+                TryMigrateLegacy(readPath, normalized);
+                return normalized;
             }
             catch
             {
@@ -52,6 +64,7 @@ namespace MicroEng.Navisworks
         {
             try
             {
+                Directory.CreateDirectory(Path.GetDirectoryName(_filePath) ?? MicroEngStorageSettings.DataStorageDirectory);
                 using var stream = File.Create(_filePath);
                 var serializer = new DataContractJsonSerializer(typeof(List<SpaceMapperTemplate>));
                 serializer.WriteObject(stream, templates?.ToList() ?? new List<SpaceMapperTemplate>());
@@ -59,6 +72,35 @@ namespace MicroEng.Navisworks
             catch
             {
                 // non-fatal
+            }
+        }
+
+        private string ResolveReadPath()
+        {
+            if (File.Exists(_filePath))
+            {
+                return _filePath;
+            }
+
+            if (File.Exists(_legacyFilePath))
+            {
+                return _legacyFilePath;
+            }
+
+            return _filePath;
+        }
+
+        private void TryMigrateLegacy(string readPath, List<SpaceMapperTemplate> templates)
+        {
+            if (_legacyMigrated)
+            {
+                return;
+            }
+
+            if (string.Equals(readPath, _legacyFilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                Save(templates);
+                _legacyMigrated = true;
             }
         }
 

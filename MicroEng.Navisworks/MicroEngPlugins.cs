@@ -787,8 +787,8 @@ namespace MicroEng.Navisworks
     // ========= Dockable panel =========
 
     [Plugin("MicroEng.DockPane", "MENG",
-        DisplayName = "MicroEng Tools",
-        ToolTip = "Dockable panel for MicroEng tools.")]
+        DisplayName = "NavisTools",
+        ToolTip = "Dockable panel for MicroEng NavisTools.")]
     [DockPanePlugin(800, 600, FixedSize = false, AutoScroll = true, MinimumHeight = 480, MinimumWidth = 360)]
     public class MicroEngDockPane : DockPanePlugin
     {

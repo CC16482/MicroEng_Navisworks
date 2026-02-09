@@ -53,12 +53,10 @@
                 </Grid>
                 <ui:Button x:Name="AddRuleButton"
                            Content="Add Rule"
-                           Appearance="Primary"
+                           Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                            Padding="12,6"
                            Margin="0,6,0,0"
-                           HorizontalAlignment="Center"
-                           Background="White"
-                           Foreground="Black" />
+                           HorizontalAlignment="Center" />
             </StackPanel>
         </ui:Card>
 
@@ -176,7 +174,7 @@
                         HorizontalAlignment="Right">
                 <ui:Button x:Name="ApplyButton"
                            Content="Apply"
-                           Appearance="Primary"
+                           Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                            Padding="12,6"
                            Margin="0,0,6,0" />
                 <ui:Button x:Name="CancelButton"

@@ -68,7 +68,24 @@
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <ui:TextBlock Text="MicroEng Tools" FontSize="16" FontWeight="SemiBold" />
+        <Grid VerticalAlignment="Center">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Image x:Name="HeaderLogoImage"
+                 Width="128"
+                 Height="37"
+                 Margin="0,0,12,0"
+                 Stretch="Uniform"
+                 VerticalAlignment="Center"
+                 Visibility="Collapsed" />
+          <ui:TextBlock Grid.Column="1"
+                        Text="NavisTools"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        VerticalAlignment="Center" />
+        </Grid>
 
         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
           <ui:TextBlock Text="Theme" VerticalAlignment="Center" Margin="0,0,8,0" />
@@ -124,7 +141,13 @@
                      Style="{StaticResource ToolCardActionStyle}"
                      Click="TreeMapper_Click">
         <ui:CardAction.Icon>
-          <ui:SymbolIcon Symbol="BranchFork20" Style="{StaticResource ToolCardIconStyle}" />
+          <ui:SymbolIcon Symbol="BranchFork20"
+                         Style="{StaticResource ToolCardIconStyle}"
+                         RenderTransformOrigin="0.5,0.5">
+            <ui:SymbolIcon.RenderTransform>
+              <ScaleTransform ScaleY="-1" />
+            </ui:SymbolIcon.RenderTransform>
+          </ui:SymbolIcon>
         </ui:CardAction.Icon>
         <StackPanel>
           <ui:TextBlock FontTypography="BodyStrong" Text="Tree Mapper" TextWrapping="Wrap" Margin="0,0,0,2" />

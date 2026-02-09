@@ -17,6 +17,7 @@ namespace MicroEng.Navisworks
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
 
             _state = state ?? throw new ArgumentNullException(nameof(state));
             _cancelAction = cancelAction;

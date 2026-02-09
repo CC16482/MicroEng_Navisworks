@@ -1542,6 +1542,7 @@ namespace MicroEng.Navisworks
             if (_columnsWindow != null)
             {
                 ElementHost.EnableModelessKeyboardInterop(_columnsWindow);
+                MicroEngWindowPositioning.ApplyTopMostTopCenter(_columnsWindow);
                 if (!_columnsWindow.IsVisible)
                 {
                     _columnsWindow.Show();
@@ -1558,6 +1559,7 @@ namespace MicroEng.Navisworks
             {
                 Owner = Window.GetWindow(this)
             };
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(_columnsWindow);
 
             _columnsWindow.Applied += (_, __) =>
             {
@@ -1689,6 +1691,7 @@ namespace MicroEng.Navisworks
                 ResizeMode = ResizeMode.NoResize
             };
             MicroEngWpfUiTheme.ApplyTo(window);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(window);
             window.SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
             window.SetResourceReference(ForegroundProperty, "TextFillColorPrimaryBrush");
 
@@ -1856,6 +1859,7 @@ namespace MicroEng.Navisworks
                 ResizeMode = ResizeMode.CanResize;
                 SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
                 SetResourceReference(ForegroundProperty, "TextFillColorPrimaryBrush");
+                MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
 
                 var ordered = currentVisibleOrder ?? attributes.Select(a => a.Id).ToList();
                 var orderedSet = new HashSet<string>(ordered ?? Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase);

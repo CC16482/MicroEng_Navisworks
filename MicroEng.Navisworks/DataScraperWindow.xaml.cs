@@ -26,6 +26,8 @@ namespace MicroEng.Navisworks
         private string _lastSetName;
         private bool? _lastSetIsSearch;
         private List<RawRow> _rawRows = new();
+        private ScrapeSession _selectedSession;
+        private Guid _loadedRawSessionId = Guid.Empty;
         private bool _rawEntriesTruncated;
         private bool _rawEntriesStored;
         private Brush _statusReadyBrush;
@@ -39,6 +41,14 @@ namespace MicroEng.Navisworks
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
             MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
+            ApplyRunScrapeButtonTheme();
+            MicroEngWpfUiTheme.ThemeChanged += OnThemeChanged;
+            DataScraperCache.CacheChanged += OnCacheChanged;
+            Closed += (_, __) =>
+            {
+                MicroEngWpfUiTheme.ThemeChanged -= OnThemeChanged;
+                DataScraperCache.CacheChanged -= OnCacheChanged;
+            };
             _statusReadyBrush = StatusText?.Foreground;
             try
             {
@@ -65,6 +75,68 @@ namespace MicroEng.Navisworks
             {
                 MicroEngActions.Log($"DataScraper init failed: {ex.Message}");
                 StatusText.Text = ex.Message;
+            }
+        }
+
+        private void OnCacheChanged()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke((Action)OnCacheChanged);
+                return;
+            }
+
+            RefreshHistory();
+            LoadProfiles();
+            var last = DataScraperCache.LastSession;
+            if (last != null)
+            {
+                HistoryList.SelectedItem = last;
+                ShowProperties(last);
+            }
+            else
+            {
+                HistoryList.SelectedItem = null;
+                PropertiesGrid.ItemsSource = null;
+                RawDataGrid.ItemsSource = null;
+                _selectedSession = null;
+                _loadedRawSessionId = Guid.Empty;
+                PropertySummary.Text = "0 properties.";
+                RawSummaryText.Text = "0 raw entries.";
+                SelectedRunSummary.Text = "Select a run to view data.";
+            }
+        }
+
+        private void OnThemeChanged(MicroEngThemeMode theme)
+        {
+            if (Dispatcher.CheckAccess())
+            {
+                ApplyRunScrapeButtonTheme();
+            }
+            else
+            {
+                Dispatcher.BeginInvoke((Action)ApplyRunScrapeButtonTheme);
+            }
+        }
+
+        private void ApplyRunScrapeButtonTheme()
+        {
+            if (RunScrapeButton == null)
+            {
+                return;
+            }
+
+            var isDark = MicroEngWpfUiTheme.CurrentTheme == MicroEngThemeMode.Dark;
+            var background = isDark ? Brushes.White : Brushes.Black;
+            var foreground = isDark ? Brushes.Black : Brushes.White;
+
+            RunScrapeButton.Background = background;
+            RunScrapeButton.BorderBrush = background;
+            RunScrapeButton.Foreground = foreground;
+
+            if (RunScrapeLabel != null)
+            {
+                RunScrapeLabel.Foreground = foreground;
             }
         }
 
@@ -222,6 +294,13 @@ namespace MicroEng.Navisworks
 
         private void ShowProperties(ScrapeSession session)
         {
+            if (_selectedSession != null && _selectedSession.Id != session.Id)
+            {
+                DataScraperCache.ReleaseRawEntries(_selectedSession);
+            }
+
+            _selectedSession = session;
+
             _currentProperties = session.Properties
                 .Select(p => new ScrapedPropertyView(p))
                 .ToList();
@@ -229,7 +308,52 @@ namespace MicroEng.Navisworks
             PropertiesGrid.ItemsSource = _propertiesView;
             PropertySummary.Text = $"{_currentProperties.Count} properties from session {session.Timestamp:T}";
 
-            _rawRows = session.RawEntries
+            _loadedRawSessionId = Guid.Empty;
+            _rawRows = new List<RawRow>();
+            _rawRowsView = null;
+            RawDataGrid.ItemsSource = null;
+
+            _rawEntriesStored = session.RawEntryCount > 0;
+            _rawEntriesTruncated = session.RawEntriesTruncated;
+
+            RawDataNotStoredHint.Visibility = Visibility.Collapsed;
+            if (_rawEntriesTruncated)
+            {
+                RawDataNotStoredHint.Text = _rawEntriesStored
+                    ? "Raw rows were truncated."
+                    : "Raw rows were not stored in memory.";
+                RawDataNotStoredHint.Visibility = Visibility.Visible;
+            }
+
+            var rawSummary = $"{session.RawEntryCount} raw entries";
+            if (_rawEntriesTruncated)
+            {
+                rawSummary += _rawEntriesStored ? " (preview)" : " (not stored)";
+            }
+            RawSummaryText.Text = rawSummary + ".";
+
+            SelectedRunSummary.Text = $"{session.ProfileName} - {session.ScopeType} - {session.ItemsScanned} items - {session.Timestamp:G}";
+
+            if (RawDataTab?.IsSelected == true)
+            {
+                EnsureRawRowsLoaded(session);
+            }
+        }
+
+        private void EnsureRawRowsLoaded(ScrapeSession session)
+        {
+            if (session == null)
+            {
+                return;
+            }
+
+            if (_loadedRawSessionId == session.Id && _rawRowsView != null)
+            {
+                return;
+            }
+
+            var rawEntries = session.RawEntries ?? new List<RawEntry>();
+            _rawRows = rawEntries
                 .Select(r => new RawRow
                 {
                     Profile = r.Profile,
@@ -242,16 +366,21 @@ namespace MicroEng.Navisworks
                 }).ToList();
             _rawRowsView = CollectionViewSource.GetDefaultView(_rawRows);
             RawDataGrid.ItemsSource = _rawRowsView;
+            _loadedRawSessionId = session.Id;
 
-            _rawEntriesStored = session.RawEntries.Count > 0;
-            _rawEntriesTruncated = session.RawEntriesTruncated;
+            _rawEntriesStored = _rawRows.Count > 0;
 
             RawDataNotStoredHint.Visibility = Visibility.Collapsed;
             if (_rawEntriesTruncated)
             {
                 RawDataNotStoredHint.Text = _rawEntriesStored
                     ? "Raw rows were truncated."
-                    : "Raw rows weren’t stored in memory.";
+                    : "Raw rows were not stored in memory.";
+                RawDataNotStoredHint.Visibility = Visibility.Visible;
+            }
+            else if (session.RawEntryCount > 0 && _rawRows.Count == 0)
+            {
+                RawDataNotStoredHint.Text = "Raw rows are unavailable for this run.";
                 RawDataNotStoredHint.Visibility = Visibility.Visible;
             }
 
@@ -261,8 +390,19 @@ namespace MicroEng.Navisworks
                 rawSummary += _rawEntriesStored ? " (preview)" : " (not stored)";
             }
             RawSummaryText.Text = rawSummary + ".";
+        }
 
-            SelectedRunSummary.Text = $"{session.ProfileName} · {session.ScopeType} · {session.ItemsScanned} items · {session.Timestamp:G}";
+        private void DataViewTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!ReferenceEquals(e.Source, DataViewTabControl))
+            {
+                return;
+            }
+
+            if (RawDataTab?.IsSelected == true && _selectedSession != null)
+            {
+                EnsureRawRowsLoaded(_selectedSession);
+            }
         }
 
         private void FilterBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -339,6 +479,34 @@ namespace MicroEng.Navisworks
             {
                 ShowProperties(session);
             }
+        }
+
+        private void DeleteHistorySession_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not FrameworkElement element || element.DataContext is not ScrapeSession session)
+            {
+                return;
+            }
+
+            e.Handled = true;
+            var profile = string.IsNullOrWhiteSpace(session.ProfileName) ? "Default" : session.ProfileName.Trim();
+            var confirm = MessageBox.Show(
+                $"Delete cached run '{profile}' from {session.Timestamp:G}?",
+                "MicroEng",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+            if (confirm != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            if (!DataScraperCache.RemoveSession(session.Id))
+            {
+                ShowSnackbar("Delete failed", "Could not remove the selected cached run.", WpfUiControls.ControlAppearance.Danger, WpfUiControls.SymbolRegular.ErrorCircle24);
+                return;
+            }
+
+            ShowSnackbar("Cache removed", $"Removed '{profile}' run from {session.Timestamp:t}.", WpfUiControls.ControlAppearance.Success, WpfUiControls.SymbolRegular.CheckmarkCircle24);
         }
 
         private void RefreshSets_Click(object sender, RoutedEventArgs e)
@@ -636,3 +804,4 @@ namespace MicroEng.Navisworks
         public string Value { get; set; }
     }
 }
+

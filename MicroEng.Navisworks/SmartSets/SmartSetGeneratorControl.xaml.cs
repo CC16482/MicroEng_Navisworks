@@ -90,7 +90,12 @@ namespace MicroEng.Navisworks.SmartSets
             Loaded += OnLoaded;
 
             DataScraperCache.SessionAdded += OnSessionAdded;
-            Unloaded += (_, __) => DataScraperCache.SessionAdded -= OnSessionAdded;
+            DataScraperCache.CacheChanged += OnCacheChanged;
+            Unloaded += (_, __) =>
+            {
+                DataScraperCache.SessionAdded -= OnSessionAdded;
+                DataScraperCache.CacheChanged -= OnCacheChanged;
+            };
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
@@ -329,6 +334,11 @@ namespace MicroEng.Navisworks.SmartSets
         public bool CanSelectPreviewResults => !UseFastPreview && _lastPreviewResults != null && _lastPreviewResults.Count > 0;
 
         private void OnSessionAdded(ScrapeSession session)
+        {
+            Dispatcher.BeginInvoke(new Action(RefreshScraperProfiles));
+        }
+
+        private void OnCacheChanged()
         {
             Dispatcher.BeginInvoke(new Action(RefreshScraperProfiles));
         }
@@ -915,7 +925,8 @@ namespace MicroEng.Navisworks.SmartSets
 
         private void InitRecipeStore()
         {
-            var baseDir = Path.Combine(
+            var baseDir = MicroEngStorageSettings.GetDataSubdirectory("SmartSetRecipes");
+            var legacyDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 "Autodesk",
                 "Navisworks Manage 2025",
@@ -924,7 +935,51 @@ namespace MicroEng.Navisworks.SmartSets
                 "SmartSets",
                 "Recipes");
 
+            TryMigrateLegacyRecipes(legacyDir, baseDir);
+
             _recipeStore = new SmartSetRecipeStore(baseDir);
+        }
+
+        private static void TryMigrateLegacyRecipes(string legacyDir, string newDir)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(legacyDir) || string.IsNullOrWhiteSpace(newDir))
+                {
+                    return;
+                }
+
+                if (!Directory.Exists(legacyDir))
+                {
+                    return;
+                }
+
+                Directory.CreateDirectory(newDir);
+                var hasNewRecipes = Directory.EnumerateFiles(newDir, "*.json", SearchOption.TopDirectoryOnly).Any();
+                if (hasNewRecipes)
+                {
+                    return;
+                }
+
+                foreach (var legacyFile in Directory.EnumerateFiles(legacyDir, "*.json", SearchOption.TopDirectoryOnly))
+                {
+                    var fileName = Path.GetFileName(legacyFile);
+                    if (string.IsNullOrWhiteSpace(fileName))
+                    {
+                        continue;
+                    }
+
+                    var targetPath = Path.Combine(newDir, fileName);
+                    if (!File.Exists(targetPath))
+                    {
+                        File.Copy(legacyFile, targetPath, overwrite: false);
+                    }
+                }
+            }
+            catch
+            {
+                // non-fatal migration; keep operating with current directory
+            }
         }
 
         private void RefreshRecipeFiles()

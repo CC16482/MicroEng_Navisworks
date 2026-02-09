@@ -849,9 +849,21 @@ namespace MicroEng.Navisworks.QuickColour
             }
 
             DataScraperCache.SessionAdded += OnSessionAdded;
+            DataScraperCache.CacheChanged += OnCacheChanged;
+            Unloaded += (_, __) =>
+            {
+                DataScraperCache.SessionAdded -= OnSessionAdded;
+                DataScraperCache.CacheChanged -= OnCacheChanged;
+            };
         }
 
         private void OnSessionAdded(ScrapeSession session)
+        {
+            RefreshProfiles();
+            RefreshScopeSelectionSetOptions();
+        }
+
+        private void OnCacheChanged()
         {
             RefreshProfiles();
             RefreshScopeSelectionSetOptions();
@@ -3725,14 +3737,40 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void InitDisciplineMap()
         {
-            var baseDir = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "MicroEng", "Navisworks", "QuickColour");
-
-            DisciplineMapPath = System.IO.Path.Combine(baseDir, "CategoryDisciplineMap.json");
+            DisciplineMapPath = MicroEngStorageSettings.GetDataFilePath("QuickColourCategoryDisciplineMap.json");
+            TryMigrateLegacyDisciplineMap(DisciplineMapPath);
 
             DisciplineMapFileIO.EnsureDefaultExists(DisciplineMapPath, DefaultCategoryDisciplineMapJson);
             ReloadDisciplineMap();
+        }
+
+        private static void TryMigrateLegacyDisciplineMap(string newPath)
+        {
+            try
+            {
+                if (File.Exists(newPath))
+                {
+                    return;
+                }
+
+                var legacyPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "MicroEng",
+                    "Navisworks",
+                    "QuickColour",
+                    "CategoryDisciplineMap.json");
+                if (!File.Exists(legacyPath))
+                {
+                    return;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(newPath) ?? MicroEngStorageSettings.DataStorageDirectory);
+                File.Copy(legacyPath, newPath, overwrite: false);
+            }
+            catch
+            {
+                // non-fatal migration
+            }
         }
 
         private void ReloadDisciplineMap()

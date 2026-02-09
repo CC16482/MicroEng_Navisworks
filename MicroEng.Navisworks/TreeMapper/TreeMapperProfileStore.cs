@@ -8,14 +8,19 @@ namespace MicroEng.Navisworks.TreeMapper
     {
         private readonly object _gate = new object();
         private readonly string _path;
+        private readonly string _legacyPath;
+        private bool _legacyMigrated;
 
         public TreeMapperProfileStore()
         {
-            var dir = Path.Combine(
+            _path = MicroEngStorageSettings.GetDataFilePath("TreeMapperProfiles.json");
+            _legacyPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "MicroEng", "Navisworks", "TreeMapper");
-            Directory.CreateDirectory(dir);
-            _path = Path.Combine(dir, "Profiles.json");
+                "MicroEng",
+                "Navisworks",
+                "TreeMapper",
+                "Profiles.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(_path) ?? MicroEngStorageSettings.DataStorageDirectory);
         }
 
         public TreeMapperProfileStoreData Load()
@@ -24,16 +29,19 @@ namespace MicroEng.Navisworks.TreeMapper
             {
                 try
                 {
-                    if (!File.Exists(_path))
+                    var readPath = ResolveReadPath();
+                    if (!File.Exists(readPath))
                     {
                         return new TreeMapperProfileStoreData();
                     }
 
-                    using (var fs = File.OpenRead(_path))
+                    using (var fs = File.OpenRead(readPath))
                     {
                         var ser = new DataContractJsonSerializer(typeof(TreeMapperProfileStoreData));
                         var obj = ser.ReadObject(fs) as TreeMapperProfileStoreData;
-                        return obj ?? new TreeMapperProfileStoreData();
+                        var result = obj ?? new TreeMapperProfileStoreData();
+                        TryMigrateLegacy(readPath, result);
+                        return result;
                     }
                 }
                 catch
@@ -60,11 +68,41 @@ namespace MicroEng.Navisworks.TreeMapper
         {
             lock (_gate)
             {
+                Directory.CreateDirectory(Path.GetDirectoryName(_path) ?? MicroEngStorageSettings.DataStorageDirectory);
                 using (var fs = File.Create(_path))
                 {
                     var ser = new DataContractJsonSerializer(typeof(TreeMapperProfileStoreData));
                     ser.WriteObject(fs, store ?? new TreeMapperProfileStoreData());
                 }
+            }
+        }
+
+        private string ResolveReadPath()
+        {
+            if (File.Exists(_path))
+            {
+                return _path;
+            }
+
+            if (File.Exists(_legacyPath))
+            {
+                return _legacyPath;
+            }
+
+            return _path;
+        }
+
+        private void TryMigrateLegacy(string readPath, TreeMapperProfileStoreData store)
+        {
+            if (_legacyMigrated)
+            {
+                return;
+            }
+
+            if (string.Equals(readPath, _legacyPath, StringComparison.OrdinalIgnoreCase))
+            {
+                Save(store ?? new TreeMapperProfileStoreData());
+                _legacyMigrated = true;
             }
         }
     }

@@ -91,7 +91,7 @@
 
         <ui:Button Grid.Column="1"
                    Content="Run Pack"
-                   Appearance="Primary"
+                   Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
                    Padding="12,6"
                    Margin="12,0,0,0"
                    IsEnabled="{Binding CanRunPack}"

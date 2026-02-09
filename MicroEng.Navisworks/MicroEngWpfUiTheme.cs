@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Threading;
 using Wpf.Ui;
 using Wpf.Ui.Appearance;
+using Wpf.Ui.Controls;
 using Wpf.Ui.Extensions;
 using Wpf.Ui.Markup;
 using System.Windows.Media;
@@ -284,6 +285,7 @@ namespace MicroEng.Navisworks
             ApplyTextResources(root, appTheme);
             ApplyAccentResources(root, appTheme);
             ApplyDataGridResources(root, dataGridGridLineColor);
+            ApplyPrimaryActionButtonOverrides(root, appTheme);
 
             root.SetValue(AppliedThemeProperty, new AppliedState(theme, accentMode, customAccent, dataGridGridLineColor));
         }
@@ -676,17 +678,34 @@ namespace MicroEng.Navisworks
             SetBrushResource(root, themeDictionary, "TextOnAccentFillColorSelectedTextBrush", textSelected);
             SetBrushResource(root, themeDictionary, "AccentTextFillColorDisabledBrush", accentTextDisabled);
 
-            // WPF-UI Buttons (and a few other controls) depend on AccentButton* resources defined in Theme/*.xaml.
-            // Those are SolidColorBrush resources, and in plugin-hosted WPF the underlying brush instances may be
-            // effectively "static" (frozen / not re-evaluated), even when their Color uses DynamicResource.
-            // Force-update the AccentButton brush keys so custom accent changes apply immediately and consistently.
-            SetBrushResource(root, themeDictionary, "AccentButtonBackground", themeAccent);
-            SetBrushResource(root, themeDictionary, "AccentButtonBackgroundPointerOver", themeAccent, 0.9);
-            SetBrushResource(root, themeDictionary, "AccentButtonBackgroundPressed", themeAccent, 0.8);
+            // Primary action buttons should be high-contrast and consistent across tools:
+            // Dark theme  -> white button with black text.
+            // Light theme -> black button with white text.
+            var actionButtonBackground = applicationTheme == ApplicationTheme.Dark
+                ? Color.FromRgb(0xFF, 0xFF, 0xFF)
+                : Color.FromRgb(0x00, 0x00, 0x00);
+            var actionButtonBackgroundPointerOver = applicationTheme == ApplicationTheme.Dark
+                ? Color.FromRgb(0xE6, 0xE6, 0xE6)
+                : Color.FromRgb(0x1A, 0x1A, 0x1A);
+            var actionButtonBackgroundPressed = applicationTheme == ApplicationTheme.Dark
+                ? Color.FromRgb(0xCC, 0xCC, 0xCC)
+                : Color.FromRgb(0x33, 0x33, 0x33);
 
-            SetBrushResource(root, themeDictionary, "AccentButtonForeground", textPrimary);
-            SetBrushResource(root, themeDictionary, "AccentButtonForegroundPointerOver", textPrimary);
-            SetBrushResource(root, themeDictionary, "AccentButtonForegroundPressed", textSecondary);
+            var actionButtonForeground = applicationTheme == ApplicationTheme.Dark
+                ? Color.FromRgb(0x00, 0x00, 0x00)
+                : Color.FromRgb(0xFF, 0xFF, 0xFF);
+            var actionButtonForegroundPressed = applicationTheme == ApplicationTheme.Dark
+                ? Color.FromRgb(0x20, 0x20, 0x20)
+                : Color.FromRgb(0xE6, 0xE6, 0xE6);
+
+            // WPF-UI Buttons (Appearance=Primary) consume these AccentButton* brushes.
+            SetBrushResource(root, themeDictionary, "AccentButtonBackground", actionButtonBackground);
+            SetBrushResource(root, themeDictionary, "AccentButtonBackgroundPointerOver", actionButtonBackgroundPointerOver);
+            SetBrushResource(root, themeDictionary, "AccentButtonBackgroundPressed", actionButtonBackgroundPressed);
+
+            SetBrushResource(root, themeDictionary, "AccentButtonForeground", actionButtonForeground);
+            SetBrushResource(root, themeDictionary, "AccentButtonForegroundPointerOver", actionButtonForeground);
+            SetBrushResource(root, themeDictionary, "AccentButtonForegroundPressed", actionButtonForegroundPressed);
 
             // TabControl/TabItem styling (WPF-UI templates use these keys).
             // Make the selected tab reflect the current accent (e.g. white in BlackWhite dark mode),
@@ -694,6 +713,64 @@ namespace MicroEng.Navisworks
             SetBrushResource(root, themeDictionary, "TabViewItemHeaderBackgroundSelected", themeAccent);
             SetBrushResource(root, themeDictionary, "TabViewItemForegroundSelected", textPrimary);
             SetBrushResource(root, themeDictionary, "TabViewSelectedItemBorderBrush", themeAccent, 0.9);
+        }
+
+        private static void ApplyPrimaryActionButtonOverrides(FrameworkElement root, ApplicationTheme applicationTheme)
+        {
+            try
+            {
+                var backgroundColor = applicationTheme == ApplicationTheme.Dark
+                    ? Color.FromRgb(0xFF, 0xFF, 0xFF)
+                    : Color.FromRgb(0x00, 0x00, 0x00);
+                var foregroundColor = applicationTheme == ApplicationTheme.Dark
+                    ? Color.FromRgb(0x00, 0x00, 0x00)
+                    : Color.FromRgb(0xFF, 0xFF, 0xFF);
+
+                var backgroundBrush = new SolidColorBrush(backgroundColor);
+                backgroundBrush.Freeze();
+                var foregroundBrush = new SolidColorBrush(foregroundColor);
+                foregroundBrush.Freeze();
+
+                foreach (var button in FindVisualChildren<Button>(root))
+                {
+                    if (button.Appearance != ControlAppearance.Primary)
+                    {
+                        continue;
+                    }
+
+                    button.Background = backgroundBrush;
+                    button.BorderBrush = backgroundBrush;
+                    button.Foreground = foregroundBrush;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent)
+            where T : DependencyObject
+        {
+            if (parent == null)
+            {
+                yield break;
+            }
+
+            var childCount = VisualTreeHelper.GetChildrenCount(parent);
+            for (var i = 0; i < childCount; i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is T match)
+                {
+                    yield return match;
+                }
+
+                foreach (var nested in FindVisualChildren<T>(child))
+                {
+                    yield return nested;
+                }
+            }
         }
 
         private static ResourceDictionary TryGetThemesDictionary(FrameworkElement root)

@@ -3519,6 +3519,7 @@ namespace MicroEng.Navisworks
                 ResizeMode = ResizeMode.NoResize
             };
             MicroEngWpfUiTheme.ApplyTo(window);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(window);
 
             var panel = new Grid { Margin = new Thickness(12) };
             panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });

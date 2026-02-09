@@ -39,6 +39,7 @@ namespace MicroEng.Navisworks
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
+            MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
             SetResourceReference(BackgroundProperty, "ApplicationBackgroundBrush");
             SetResourceReference(ForegroundProperty, "TextFillColorPrimaryBrush");
 

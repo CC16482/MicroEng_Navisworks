@@ -1,14 +1,18 @@
 # MicroEng Handoff
 
 ## Status
-- Last build: succeeded (`dotnet build "MicroEng_Navisworks.sln" /p:DeployToProgramData=false`), **but latest Column Builder changes have not been rebuilt/tested yet**.
-- Latest build has not been rerun since the Data Matrix Filter Builder changes.
+- Last local build: succeeded on **February 9, 2026** (`dotnet build "MicroEng_Navisworks.sln" /p:DeployToProgramData=false`).
+- Last ProgramData deploy build: succeeded on **February 9, 2026** (`dotnet build "MicroEng_Navisworks.sln"`).
+- Navisworks restart after deploy confirmed add-in startup (see `%LOCALAPPDATA%\\MicroEng.Navisworks\\NavisErrors\\MicroEng.log` around `2026-02-09 17:24:04`).
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
-- Working tree is dirty (build outputs in bin/obj + Data Matrix refactor/column builder + crash-report logging + Quick Colour profile apply fix).
-- Changing PCs: copy `%APPDATA%\MicroEng\Navisworks\TreeMapper\` (Profiles.json + PublishedTree.json) and re-apply TreeSpec/COM registry fixes (see TreeMapper notes below).
+- Working tree is dirty (build outputs in bin/obj + Data Matrix refactor/column builder + crash-report logging + Quick Colour profile apply fix + Data Scraper cache refactor/perf fixes).
+- Storage is now unified under `%APPDATA%\\MicroEng\\Navisworks\\DataStore\\` (legacy locations auto-migrate on load).
+- Changing PCs: copy `%APPDATA%\\MicroEng\\Navisworks\\DataStore\\` and re-apply TreeSpec/COM registry fixes (see TreeMapper notes below).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
-- Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
-- Quick Colour profiles saved under `%APPDATA%\MicroEng\ColourProfiles\` (JSON schema v1).
+- Smart Set recipes saved under `%APPDATA%\\MicroEng\\Navisworks\\DataStore\\SmartSetRecipes\\` (legacy ProgramData recipe folder auto-migrates).
+- Quick Colour profiles saved under `%APPDATA%\\MicroEng\\Navisworks\\DataStore\\QuickColourProfiles.json` (legacy `%APPDATA%\\MicroEng\\ColourProfiles\\` auto-migrates).
+- Data Scraper metadata saved under `%APPDATA%\\MicroEng\\Navisworks\\DataStore\\ScrapeSessions.json` (v2 metadata-only store).
+- Data Scraper raw rows saved per session under `%APPDATA%\\MicroEng\\Navisworks\\DataStore\\DataScraperRaw\\*.json`.
 - Crash reports saved under `%LOCALAPPDATA%\MicroEng.Navisworks\NavisErrors\CrashReports\`.
 
 ## Recent changes
@@ -42,7 +46,12 @@
 - Data Scraper UI rebuilt into step cards (Profile, Scope, History, Data View, Export) with WPF-UI styling, scroll, and tighter spacing.
 - Data Scraper: Run Scrape/Export Now now use ArrowSync icon during processing; status shows “Processing - Please Wait” in orange while running.
 - Data Scraper: Export requires Output path to be set before enabling; Export Now restores scroll position after completion.
-- Data Scraper: Keep raw rows in memory defaulted on (so downstream tools work immediately).
+- Data Scraper: cache store refactored to metadata + per-session raw files (`ScrapeSessions.json` + `DataScraperRaw/*.json`).
+- Data Scraper: history grid raw count now binds `RawEntryCount` (prevents forced raw-row deserialization on window open).
+- Data Scraper: raw rows now lazy-load only when the Raw Data tab is opened for a selected run.
+- Data Scraper: switching runs now releases previously loaded raw rows from memory.
+- Data Scraper: `X` action in History removes old cached runs (metadata + per-session raw file).
+- Data Scraper: save path now retries file replace to reduce transient file-lock save failures.
 - Data Scraper: Data View tab content now uses cards (no white border).
 - Snackbars added across tools (success/error) with larger PresenceAvailable icon, centered, black text, no close X.
 - Quick Colour: hierarchy value matching switched to ItemKey (fixes missing types).
@@ -202,6 +211,8 @@
 - TreeMapper: rename preview header to “Tree Preview” and confirm window height shrinks when table shrinks.
 - **Column Builder filter-by-selection still freezing** after selection results appear in some runs. Previous logs showed UI stalls during selection index build; new selected-keys scan fix needs validation on new PC.
 - Data Scraper: verify Selection/Search set scopes populate and resolve items correctly.
+- Data Scraper: validate open performance on large history after v2 cache migration (first load can be longer; subsequent opens should be fast).
+- Data Scraper: verify Raw Data tab lazy-load behavior and memory release when switching sessions.
 - Data Matrix Column Builder: confirm filtering + rapid toggles no longer crash (WPF-UI animations).
 - Data Matrix: verify scope-based column culling + JSONL export formatting across modes.
 - Data Matrix: validate Filter Builder behavior (join enablement, per-rule case/trim, regex/numeric/date validation, layout spacing).
@@ -222,6 +233,7 @@
 - `MicroEng.SelectionTreeCom/TreeMapperSelectionTreeCom.cs`
 - `MicroEng.Navisworks/NavisworksSelectionSetUtils.cs`
 - `MicroEng.Navisworks/DataScraperService.cs`
+- `MicroEng.Navisworks/DataScraperModels.cs`
 - `MicroEng.Navisworks/DataMatrixModels.cs`
 - `MicroEng.Navisworks/DataMatrixPresetManager.cs`
 - `MicroEng.Navisworks/DataMatrixRowBuilder.cs`
@@ -295,6 +307,7 @@
 - `MicroEng.Navisworks/SpaceMapperStepProcessingPage.xaml`
 - `MicroEng.Navisworks/SpaceMapperStepProcessingPage.xaml.cs`
 - `MicroEng.Navisworks/NavisworksDockPaneManager.cs`
+- `MicroEng.Navisworks/MicroEngStorageSettings.cs`
 - `MicroEng.Navisworks/MicroEng.Navisworks.csproj`
 - `MicroEng.Navisworks/Gpu/D3D11PointInMeshGpu.cs`
 - `MicroEng.Navisworks/SpaceMapper/Gpu/CudaPointInMeshGpu.cs`
@@ -316,6 +329,10 @@
 - Data Scraper: status flips to “Processing - Please Wait” in orange while running; returns to Ready after.
 - Data Scraper: Export Now disabled until Output path set; Export Now keeps scroll position.
 - Data Scraper: ArrowSync icons show during Run/Export; snackbars appear on success/error.
+- Data Scraper: History `Raw` column shows counts quickly without loading full raw rows for every run.
+- Data Scraper: raw rows load only after opening the `Raw Data` tab; `Properties` tab remains responsive on large history.
+- Data Scraper: deleting a run with `X` removes history and deletes matching `DataScraperRaw\\<sessionId>.json`.
+- Data Scraper: first load after legacy migration may take longer; subsequent opens should be significantly faster.
 - Viewpoints Generator: Refresh loads selection/search sets; Preview shows plan rows + counts.
 - Viewpoints Generator: Generate writes Saved Viewpoints under `MicroEng/Viewpoints Generator` using chosen direction/projection.
 - Quick Colour: Profiles tab loads profile list, preview shows color swatches, Apply Temp/Permanent uses profile scope.

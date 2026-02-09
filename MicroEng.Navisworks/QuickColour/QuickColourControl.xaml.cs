@@ -859,18 +859,32 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void OnSessionAdded(ScrapeSession session)
         {
-            RefreshProfiles();
-            RefreshScopeSelectionSetOptions();
+            RefreshProfiles(session?.Id);
         }
 
         private void OnCacheChanged()
         {
             RefreshProfiles();
-            RefreshScopeSelectionSetOptions();
         }
 
-        private void RefreshProfiles()
+        private void RefreshProfiles(Guid? preferredSessionId = null)
         {
+            var targetSessionId = preferredSessionId ?? SelectedScraperProfile?.Session?.Id;
+            var existingById = new Dictionary<Guid, ScraperProfileOption>();
+            foreach (var option in ScraperProfiles)
+            {
+                var session = option?.Session;
+                if (session == null)
+                {
+                    continue;
+                }
+
+                if (!existingById.ContainsKey(session.Id))
+                {
+                    existingById[session.Id] = option;
+                }
+            }
+
             ScraperProfiles.Clear();
 
             var sessions = DataScraperCache.AllSessions
@@ -879,15 +893,45 @@ namespace MicroEng.Navisworks.QuickColour
 
             foreach (var session in sessions)
             {
-                ScraperProfiles.Add(new ScraperProfileOption(session));
+                if (session == null)
+                {
+                    continue;
+                }
+
+                if (!existingById.TryGetValue(session.Id, out var option))
+                {
+                    option = new ScraperProfileOption(session);
+                }
+
+                ScraperProfiles.Add(option);
             }
 
-            SelectedScraperProfile = ScraperProfiles.FirstOrDefault();
-
-            if (SelectedScraperProfile == null && DataScraperCache.LastSession != null)
+            ScraperProfileOption selected = null;
+            if (targetSessionId.HasValue)
             {
-                SelectedScraperProfile = new ScraperProfileOption(DataScraperCache.LastSession);
-                ScraperProfiles.Add(SelectedScraperProfile);
+                selected = ScraperProfiles.FirstOrDefault(o => o?.Session?.Id == targetSessionId.Value);
+            }
+
+            if (selected == null)
+            {
+                var lastSessionId = DataScraperCache.LastSession?.Id;
+                if (lastSessionId.HasValue)
+                {
+                    selected = ScraperProfiles.FirstOrDefault(o => o?.Session?.Id == lastSessionId.Value);
+                }
+            }
+
+            selected ??= ScraperProfiles.FirstOrDefault();
+
+            if (selected == null && DataScraperCache.LastSession != null)
+            {
+                selected = new ScraperProfileOption(DataScraperCache.LastSession);
+                ScraperProfiles.Add(selected);
+            }
+
+            if (!ReferenceEquals(SelectedScraperProfile, selected))
+            {
+                SelectedScraperProfile = selected;
             }
 
             RefreshScopeSelectionSetOptions();
@@ -909,6 +953,7 @@ namespace MicroEng.Navisworks.QuickColour
         private void RefreshQuickColourPropertyOptions()
         {
             _quickColourPropertyOptionsByCategory.Clear();
+            var propertyNamesByCategory = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
             var session = GetCurrentSession();
             var properties = session?.Properties ?? Enumerable.Empty<ScrapedProperty>();
@@ -926,9 +971,10 @@ namespace MicroEng.Navisworks.QuickColour
                 {
                     list = new List<string>();
                     _quickColourPropertyOptionsByCategory[category] = list;
+                    propertyNamesByCategory[category] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 }
 
-                if (!ContainsIgnoreCase(list, name))
+                if (propertyNamesByCategory.TryGetValue(category, out var names) && names.Add(name))
                 {
                     list.Add(name);
                 }
@@ -939,19 +985,19 @@ namespace MicroEng.Navisworks.QuickColour
                 list.Sort(StringComparer.OrdinalIgnoreCase);
             }
 
-            var categories = new List<string>(_quickColourPropertyOptionsByCategory.Keys);
-            if (!string.IsNullOrWhiteSpace(QuickColourCategory) && !ContainsIgnoreCase(categories, QuickColourCategory))
+            var categories = new HashSet<string>(_quickColourPropertyOptionsByCategory.Keys, StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(QuickColourCategory))
             {
                 categories.Add(QuickColourCategory);
             }
 
-            categories = categories
+            var orderedCategories = categories
                 .Where(c => !string.IsNullOrWhiteSpace(c))
                 .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             QuickColourCategoryOptions.Clear();
-            foreach (var cat in categories)
+            foreach (var cat in orderedCategories)
             {
                 QuickColourCategoryOptions.Add(cat);
             }
@@ -1419,7 +1465,10 @@ namespace MicroEng.Navisworks.QuickColour
                 var expected = QuickColourValues
                     .Where(v => v != null && v.Enabled)
                     .Sum(v => Math.Max(0, v.Count));
-                Log($"QuickColour: expected count from cache={expected} for {category}.{property}.");
+                if (IsQuickColourTraceEnabled())
+                {
+                    Log($"QuickColour: expected count from cache={expected} for {category}.{property}.");
+                }
 
                 var count = _service.ApplyBySingleProperty(
                     doc,
@@ -1439,10 +1488,7 @@ namespace MicroEng.Navisworks.QuickColour
                     QuickColourProfileName,
                     Log);
 
-                if (expected > 0 && count < expected)
-                {
-                    Log($"QuickColour: apply mismatch. Expected={expected}, Actual={count}, Missing={expected - count}.");
-                }
+                Log($"QuickColour: cached entries={expected}, coloured items={count}.");
 
                 StatusText = $"Applied {count} item(s).";
                 FlashSuccess(sourceButton);
@@ -1509,6 +1555,7 @@ namespace MicroEng.Navisworks.QuickColour
         private void RefreshHierarchyPropertyOptions()
         {
             _hierarchyPropertyOptionsByCategory.Clear();
+            var propertyNamesByCategory = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
             var session = GetCurrentSession();
             var properties = session?.Properties ?? Enumerable.Empty<ScrapedProperty>();
@@ -1526,9 +1573,10 @@ namespace MicroEng.Navisworks.QuickColour
                 {
                     list = new List<string>();
                     _hierarchyPropertyOptionsByCategory[category] = list;
+                    propertyNamesByCategory[category] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 }
 
-                if (!ContainsIgnoreCase(list, name))
+                if (propertyNamesByCategory.TryGetValue(category, out var names) && names.Add(name))
                 {
                     list.Add(name);
                 }
@@ -1539,23 +1587,23 @@ namespace MicroEng.Navisworks.QuickColour
                 list.Sort(StringComparer.OrdinalIgnoreCase);
             }
 
-            var categories = new List<string>(_hierarchyPropertyOptionsByCategory.Keys);
-            if (!string.IsNullOrWhiteSpace(HierarchyL1Category) && !ContainsIgnoreCase(categories, HierarchyL1Category))
+            var categories = new HashSet<string>(_hierarchyPropertyOptionsByCategory.Keys, StringComparer.OrdinalIgnoreCase);
+            if (!string.IsNullOrWhiteSpace(HierarchyL1Category))
             {
                 categories.Add(HierarchyL1Category);
             }
-            if (!string.IsNullOrWhiteSpace(HierarchyL2Category) && !ContainsIgnoreCase(categories, HierarchyL2Category))
+            if (!string.IsNullOrWhiteSpace(HierarchyL2Category))
             {
                 categories.Add(HierarchyL2Category);
             }
 
-            categories = categories
+            var orderedCategories = categories
                 .Where(c => !string.IsNullOrWhiteSpace(c))
                 .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             HierarchyCategoryOptions.Clear();
-            foreach (var cat in categories)
+            foreach (var cat in orderedCategories)
             {
                 HierarchyCategoryOptions.Add(cat);
             }
@@ -2965,7 +3013,10 @@ namespace MicroEng.Navisworks.QuickColour
                     .Where(g => g != null && g.Enabled)
                     .SelectMany(g => g.Types.Where(t => t != null && t.Enabled))
                     .Sum(t => Math.Max(0, t.Count));
-                Log($"QuickColour(Hierarchy): expected count from cache={expected} for {l1Category}.{l1Property} -> {l2Category}.{l2Property}.");
+                if (IsQuickColourTraceEnabled())
+                {
+                    Log($"QuickColour(Hierarchy): expected count from cache={expected} for {l1Category}.{l1Property} -> {l2Category}.{l2Property}.");
+                }
 
                 var count = _service.ApplyByHierarchy(
                     doc,
@@ -2988,10 +3039,7 @@ namespace MicroEng.Navisworks.QuickColour
                     CreateFoldersByHueGroup && HierarchyUseHueGroups,
                     Log);
 
-                if (expected > 0 && count < expected)
-                {
-                    Log($"QuickColour(Hierarchy): apply mismatch. Expected={expected}, Actual={count}, Missing={expected - count}.");
-                }
+                Log($"QuickColour(Hierarchy): cached entries={expected}, coloured items={count}.");
 
                 StatusText = $"Applied {count} item(s).";
                 FlashSuccess(sourceButton);
@@ -3796,28 +3844,7 @@ namespace MicroEng.Navisworks.QuickColour
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
         {
-            if (SnackbarPresenter == null)
-            {
-                return;
-            }
-
-            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
-            {
-                Title = title,
-                Content = message,
-                Appearance = appearance,
-                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
-                {
-                    Filled = true,
-                    FontSize = 25
-                },
-                Foreground = System.Windows.Media.Brushes.Black,
-                ContentForeground = System.Windows.Media.Brushes.Black,
-                Timeout = TimeSpan.FromSeconds(4),
-                IsCloseButtonEnabled = false
-            };
-
-            snackbar.Show();
+            MicroEngSnackbar.Show(SnackbarPresenter, title, message, appearance, icon);
         }
 
         private void FlashSuccess(System.Windows.Controls.Button button)
@@ -3845,6 +3872,14 @@ namespace MicroEng.Navisworks.QuickColour
         private void Log(string message)
         {
             MicroEngActions.Log(message);
+        }
+
+        private static bool IsQuickColourTraceEnabled()
+        {
+            return string.Equals(
+                Environment.GetEnvironmentVariable("MICROENG_QUICKCOLOUR_TRACE"),
+                "1",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

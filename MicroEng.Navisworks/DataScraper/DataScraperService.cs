@@ -20,6 +20,10 @@ namespace MicroEng.Navisworks
     {
         public ScrapeSession Scrape(string profileName, ScrapeScopeType scopeType, string scopeDescription, IEnumerable<ModelItem> items)
         {
+            var sourceItems = items as ICollection<ModelItem>;
+            var estimatedItemCount = sourceItems?.Count ?? 0;
+            var estimatedRawCapacity = estimatedItemCount > 0 ? estimatedItemCount * 8 : 0;
+
             var session = new ScrapeSession
             {
                 ProfileName = profileName,
@@ -32,9 +36,13 @@ namespace MicroEng.Navisworks
             var documentFile = doc?.FileName ?? string.Empty;
             session.DocumentFile = documentFile;
             session.DocumentFileKey = BuildDocumentFileKey(documentFile);
-            session.RawEntries = new List<RawEntry>();
+            session.RawEntries = estimatedRawCapacity > 0
+                ? new List<RawEntry>(estimatedRawCapacity)
+                : new List<RawEntry>();
 
-            var propertyMap = new Dictionary<string, PropertyAccumulator>(StringComparer.OrdinalIgnoreCase);
+            var propertyMap = new Dictionary<string, PropertyAccumulator>(
+                estimatedItemCount > 0 ? estimatedItemCount : 0,
+                StringComparer.OrdinalIgnoreCase);
 
             foreach (var item in items ?? Enumerable.Empty<ModelItem>())
             {
@@ -73,10 +81,7 @@ namespace MicroEng.Navisworks
                             continue;
                         }
 
-                        values = values
-                            .Where(v => !string.IsNullOrWhiteSpace(v))
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .ToList();
+                        values = NormalizeValues(values);
 
                         if (values.Count == 0)
                         {
@@ -85,7 +90,7 @@ namespace MicroEng.Navisworks
 
                         var key = $"{catName}\u001F{name}\u001F{dtype}";
                         var firstThisItem = seenPropsThisItem.Add(key);
-                        TouchProperty(propertyMap, catName, name, dtype, firstThisItem, values);
+                        TouchProperty(propertyMap, key, catName, name, dtype, firstThisItem, values);
 
                         foreach (var v in values)
                         {
@@ -143,9 +148,10 @@ namespace MicroEng.Navisworks
                     }
                     return Enumerable.Empty<ModelItem>();
                 case ScrapeScopeType.CurrentSelection:
-                    var sel = doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>() ?? Enumerable.Empty<ModelItem>();
-                    description = $"Current Selection ({sel.Count()} items)";
-                    return sel;
+                    var selection = doc.CurrentSelection?.SelectedItems?.Cast<ModelItem>()?.ToList()
+                                   ?? new List<ModelItem>();
+                    description = $"Current Selection ({selection.Count} items)";
+                    return selection;
                 case ScrapeScopeType.SelectionSet:
                 {
                     var items = NavisworksSelectionSetUtils.GetItemsFromSet(doc, selectionSetName, expectSearchSet: false, out var desc);
@@ -171,7 +177,7 @@ namespace MicroEng.Navisworks
             foreach (ModelItem item in items)
             {
                 yield return item;
-                if (item.Children != null && item.Children.Any())
+                if (item.Children != null)
                 {
                     foreach (var child in Traverse(item.Children))
                     {
@@ -277,16 +283,41 @@ namespace MicroEng.Navisworks
             return values;
         }
 
+        private static List<string> NormalizeValues(List<string> values)
+        {
+            if (values == null || values.Count == 0)
+            {
+                return new List<string>();
+            }
+
+            var unique = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var normalized = new List<string>(values.Count);
+            foreach (var value in values)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                if (unique.Add(value))
+                {
+                    normalized.Add(value);
+                }
+            }
+
+            return normalized;
+        }
+
         private static void TouchProperty(
             Dictionary<string, PropertyAccumulator> map,
+            string propertyKey,
             string category,
             string name,
             string dataType,
             bool firstThisItem,
             List<string> values)
         {
-            var key = $"{category}\u001F{name}\u001F{dataType}";
-            if (!map.TryGetValue(key, out var acc))
+            if (!map.TryGetValue(propertyKey, out var acc))
             {
                 acc = new PropertyAccumulator
                 {
@@ -294,7 +325,7 @@ namespace MicroEng.Navisworks
                     Name = name,
                     DataType = dataType
                 };
-                map[key] = acc;
+                map[propertyKey] = acc;
             }
 
             if (firstThisItem)
@@ -309,7 +340,7 @@ namespace MicroEng.Navisworks
                     acc.Distinct.Add(v);
                 }
 
-                if (acc.Sample.Count < 12 && !acc.Sample.Any(s => string.Equals(s, v, StringComparison.OrdinalIgnoreCase)))
+                if (acc.Sample.Count < 12 && acc.SampleSet.Add(v))
                 {
                     acc.Sample.Add(v);
                 }
@@ -325,6 +356,7 @@ namespace MicroEng.Navisworks
         public int ItemCount { get; set; }
         public HashSet<string> Distinct { get; } = new(StringComparer.OrdinalIgnoreCase);
         public List<string> Sample { get; } = new();
+        public HashSet<string> SampleSet { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     internal static class ModelItemExtensions

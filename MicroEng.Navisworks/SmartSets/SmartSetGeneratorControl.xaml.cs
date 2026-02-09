@@ -45,6 +45,7 @@ namespace MicroEng.Navisworks.SmartSets
         private readonly SmartSetGeneratorPacksPage _packsPage;
         private readonly Dictionary<Type, UserControl> _pageMap = new();
         private bool _initialized;
+        private bool _dataScraperEventsHooked;
 
         public SmartSetGeneratorControl()
         {
@@ -88,18 +89,13 @@ namespace MicroEng.Navisworks.SmartSets
             _pageMap[typeof(SmartSetGeneratorPacksPage)] = _packsPage;
 
             Loaded += OnLoaded;
-
-            DataScraperCache.SessionAdded += OnSessionAdded;
-            DataScraperCache.CacheChanged += OnCacheChanged;
-            Unloaded += (_, __) =>
-            {
-                DataScraperCache.SessionAdded -= OnSessionAdded;
-                DataScraperCache.CacheChanged -= OnCacheChanged;
-            };
+            Unloaded += OnUnloaded;
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
+            EnsureDataScraperEventHandlers();
+
             if (_initialized)
             {
                 return;
@@ -108,6 +104,30 @@ namespace MicroEng.Navisworks.SmartSets
             _initialized = true;
             RefreshSavedSelectionSets();
             NavigateToPage(typeof(SmartSetGeneratorQuickBuilderPage));
+        }
+
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            if (!_dataScraperEventsHooked)
+            {
+                return;
+            }
+
+            DataScraperCache.SessionAdded -= OnSessionAdded;
+            DataScraperCache.CacheChanged -= OnCacheChanged;
+            _dataScraperEventsHooked = false;
+        }
+
+        private void EnsureDataScraperEventHandlers()
+        {
+            if (_dataScraperEventsHooked)
+            {
+                return;
+            }
+
+            DataScraperCache.SessionAdded += OnSessionAdded;
+            DataScraperCache.CacheChanged += OnCacheChanged;
+            _dataScraperEventsHooked = true;
         }
 
         private void NavigateToPage(Type pageType)
@@ -223,6 +243,11 @@ namespace MicroEng.Navisworks.SmartSets
             get => _selectedScraperProfile;
             set
             {
+                if (string.Equals(_selectedScraperProfile, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
                 _selectedScraperProfile = value;
                 if (CurrentRecipe != null)
                 {
@@ -345,6 +370,7 @@ namespace MicroEng.Navisworks.SmartSets
 
         private void RefreshScraperProfiles()
         {
+            var previousSelection = SelectedScraperProfile;
             ScraperProfiles.Clear();
             var profiles = DataScraperCache.AllSessions
                 .Where(s => !string.IsNullOrWhiteSpace(s.ProfileName))
@@ -360,10 +386,18 @@ namespace MicroEng.Navisworks.SmartSets
 
             if (profiles.Count > 0)
             {
-                if (string.IsNullOrWhiteSpace(SelectedScraperProfile) || !profiles.Contains(SelectedScraperProfile))
+                var match = profiles.FirstOrDefault(p => string.Equals(p, previousSelection, StringComparison.OrdinalIgnoreCase));
+                var nextSelection = match ?? profiles[0];
+                if (!string.Equals(SelectedScraperProfile, nextSelection, StringComparison.OrdinalIgnoreCase))
                 {
-                    SelectedScraperProfile = profiles[0];
+                    SelectedScraperProfile = nextSelection;
+                    return;
                 }
+            }
+            else if (!string.IsNullOrWhiteSpace(SelectedScraperProfile))
+            {
+                SelectedScraperProfile = string.Empty;
+                return;
             }
 
             RefreshCategoryAndPropertyOptions();
@@ -738,6 +772,7 @@ namespace MicroEng.Navisworks.SmartSets
         private void RefreshCategoryAndPropertyOptions()
         {
             _propertyOptionsByCategory.Clear();
+            var propertyNamesByCategory = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
             var session = GetSelectedSession();
             var properties = session?.Properties ?? Enumerable.Empty<ScrapedProperty>();
 
@@ -754,9 +789,10 @@ namespace MicroEng.Navisworks.SmartSets
                 {
                     list = new List<string>();
                     _propertyOptionsByCategory[category] = list;
+                    propertyNamesByCategory[category] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 }
 
-                if (!ContainsIgnoreCase(list, name))
+                if (propertyNamesByCategory.TryGetValue(category, out var names) && names.Add(name))
                 {
                     list.Add(name);
                 }
@@ -767,13 +803,13 @@ namespace MicroEng.Navisworks.SmartSets
                 list.Sort(StringComparer.OrdinalIgnoreCase);
             }
 
-            var categories = new List<string>(_propertyOptionsByCategory.Keys);
+            var categories = new HashSet<string>(_propertyOptionsByCategory.Keys, StringComparer.OrdinalIgnoreCase);
             if (CurrentRecipe?.Rules != null)
             {
                 foreach (var rule in CurrentRecipe.Rules)
                 {
                     var cat = rule?.Category;
-                    if (!string.IsNullOrWhiteSpace(cat) && !ContainsIgnoreCase(categories, cat))
+                    if (!string.IsNullOrWhiteSpace(cat))
                     {
                         categories.Add(cat);
                     }
@@ -781,26 +817,24 @@ namespace MicroEng.Navisworks.SmartSets
             }
             if (CurrentRecipe?.Grouping != null)
             {
-                if (!string.IsNullOrWhiteSpace(CurrentRecipe.Grouping.GroupByCategory)
-                    && !ContainsIgnoreCase(categories, CurrentRecipe.Grouping.GroupByCategory))
+                if (!string.IsNullOrWhiteSpace(CurrentRecipe.Grouping.GroupByCategory))
                 {
                     categories.Add(CurrentRecipe.Grouping.GroupByCategory);
                 }
 
-                if (!string.IsNullOrWhiteSpace(CurrentRecipe.Grouping.ThenByCategory)
-                    && !ContainsIgnoreCase(categories, CurrentRecipe.Grouping.ThenByCategory))
+                if (!string.IsNullOrWhiteSpace(CurrentRecipe.Grouping.ThenByCategory))
                 {
                     categories.Add(CurrentRecipe.Grouping.ThenByCategory);
                 }
             }
 
-            categories = categories
+            var orderedCategories = categories
                 .Where(c => !string.IsNullOrWhiteSpace(c))
                 .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             CategoryOptions.Clear();
-            foreach (var cat in categories)
+            foreach (var cat in orderedCategories)
             {
                 CategoryOptions.Add(cat);
             }
@@ -1803,28 +1837,7 @@ internal void RulesGrid_PreviewMouseLeftButtonDown(object sender, MouseButtonEve
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
         {
-            if (SnackbarPresenter == null)
-            {
-                return;
-            }
-
-            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
-            {
-                Title = title,
-                Content = message,
-                Appearance = appearance,
-                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
-                {
-                    Filled = true,
-                    FontSize = 25
-                },
-                Foreground = System.Windows.Media.Brushes.Black,
-                ContentForeground = System.Windows.Media.Brushes.Black,
-                Timeout = TimeSpan.FromSeconds(4),
-                IsCloseButtonEnabled = false
-            };
-
-            snackbar.Show();
+            MicroEngSnackbar.Show(SnackbarPresenter, title, message, appearance, icon);
         }
 
         private void FlashSuccess(System.Windows.Controls.Button button)

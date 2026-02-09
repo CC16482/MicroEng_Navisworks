@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -9,6 +10,24 @@ namespace MicroEng.Navisworks.ViewpointsGenerator
 {
     internal static class ViewpointsGeneratorNavisworksService
     {
+        private sealed class SelectionSetAccessor
+        {
+            public PropertyInfo SearchProperty;
+            public PropertyInfo ExplicitItemsProperty;
+        }
+
+        private sealed class BoundingBoxAccessor
+        {
+            public PropertyInfo BoundingBoxProperty;
+            public MethodInfo BoundingBoxMethod;
+        }
+
+        private static readonly ConcurrentDictionary<Type, SelectionSetAccessor> SelectionSetAccessorCache =
+            new ConcurrentDictionary<Type, SelectionSetAccessor>();
+
+        private static readonly ConcurrentDictionary<Type, BoundingBoxAccessor> BoundingBoxAccessorCache =
+            new ConcurrentDictionary<Type, BoundingBoxAccessor>();
+
         public static List<SelectionSetPickerItem> LoadSelectionSets(Document doc)
         {
             var results = new List<SelectionSetPickerItem>();
@@ -213,15 +232,14 @@ namespace MicroEng.Navisworks.ViewpointsGenerator
 
         private static ModelItemCollection ResolveSelectionSetItems(Document doc, SelectionSet set)
         {
-            var searchProp = set.GetType().GetProperty("Search", BindingFlags.Instance | BindingFlags.Public);
-            var search = searchProp?.GetValue(set) as Search;
+            var accessor = GetSelectionSetAccessor(set?.GetType());
+            var search = accessor?.SearchProperty?.GetValue(set) as Search;
             if (search != null)
             {
                 return search.FindAll(doc, false);
             }
 
-            var explicitProp = set.GetType().GetProperty("ExplicitModelItems", BindingFlags.Instance | BindingFlags.Public);
-            var explicitItems = explicitProp?.GetValue(set) as ModelItemCollection;
+            var explicitItems = accessor?.ExplicitItemsProperty?.GetValue(set) as ModelItemCollection;
             if (explicitItems != null)
             {
                 return explicitItems;
@@ -384,8 +402,10 @@ namespace MicroEng.Navisworks.ViewpointsGenerator
         {
             bbox = default;
 
-            var prop = obj.GetType().GetProperty("BoundingBox", BindingFlags.Instance | BindingFlags.Public);
-            if (prop != null && prop.PropertyType == typeof(BoundingBox3D))
+            var accessor = GetBoundingBoxAccessor(obj?.GetType());
+
+            var prop = accessor?.BoundingBoxProperty;
+            if (prop != null)
             {
                 try
                 {
@@ -397,8 +417,8 @@ namespace MicroEng.Navisworks.ViewpointsGenerator
                 }
             }
 
-            var method = obj.GetType().GetMethod("BoundingBox", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null);
-            if (method != null && method.ReturnType == typeof(BoundingBox3D))
+            var method = accessor?.BoundingBoxMethod;
+            if (method != null)
             {
                 try
                 {
@@ -411,6 +431,49 @@ namespace MicroEng.Navisworks.ViewpointsGenerator
             }
 
             return false;
+        }
+
+        private static SelectionSetAccessor GetSelectionSetAccessor(Type type)
+        {
+            if (type == null)
+            {
+                return null;
+            }
+
+            return SelectionSetAccessorCache.GetOrAdd(type, t => new SelectionSetAccessor
+            {
+                SearchProperty = t.GetProperty("Search", BindingFlags.Instance | BindingFlags.Public),
+                ExplicitItemsProperty = t.GetProperty("ExplicitModelItems", BindingFlags.Instance | BindingFlags.Public)
+            });
+        }
+
+        private static BoundingBoxAccessor GetBoundingBoxAccessor(Type type)
+        {
+            if (type == null)
+            {
+                return null;
+            }
+
+            return BoundingBoxAccessorCache.GetOrAdd(type, t =>
+            {
+                var accessor = new BoundingBoxAccessor
+                {
+                    BoundingBoxProperty = t.GetProperty("BoundingBox", BindingFlags.Instance | BindingFlags.Public),
+                    BoundingBoxMethod = t.GetMethod("BoundingBox", BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null)
+                };
+
+                if (accessor.BoundingBoxProperty?.PropertyType != typeof(BoundingBox3D))
+                {
+                    accessor.BoundingBoxProperty = null;
+                }
+
+                if (accessor.BoundingBoxMethod?.ReturnType != typeof(BoundingBox3D))
+                {
+                    accessor.BoundingBoxMethod = null;
+                }
+
+                return accessor;
+            });
         }
 
         private static BoundingBox3D Union(BoundingBox3D a, BoundingBox3D b)

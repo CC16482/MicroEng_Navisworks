@@ -7,14 +7,38 @@ namespace MicroEng.Navisworks
 {
     internal class DataMatrixRowBuilder
     {
-        private static IEnumerable<ScrapedProperty> GetDistinctProperties(ScrapeSession session)
+        private static List<ScrapedProperty> GetDistinctProperties(ScrapeSession session)
         {
-            return (session?.Properties ?? Enumerable.Empty<ScrapedProperty>())
-                .GroupBy(p => $"{p.Category}|{p.Name}", StringComparer.OrdinalIgnoreCase)
-                .Select(g => g
-                    .OrderByDescending(p => p.ItemCount)
-                    .ThenByDescending(p => p.DistinctValueCount)
-                    .First());
+            var distinct = new List<ScrapedProperty>();
+            var properties = session?.Properties;
+            if (properties == null || properties.Count == 0)
+            {
+                return distinct;
+            }
+
+            var indexById = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in properties)
+            {
+                if (property == null)
+                {
+                    continue;
+                }
+
+                var id = BuildAttributeId(property.Category, property.Name);
+                if (!indexById.TryGetValue(id, out var existingIndex))
+                {
+                    indexById[id] = distinct.Count;
+                    distinct.Add(property);
+                    continue;
+                }
+
+                if (IsPreferredProperty(property, distinct[existingIndex]))
+                {
+                    distinct[existingIndex] = property;
+                }
+            }
+
+            return distinct;
         }
 
         public List<DataMatrixAttributeDefinition> BuildAttributeCatalog(ScrapeSession session)
@@ -59,19 +83,44 @@ namespace MicroEng.Navisworks
                 return (new List<DataMatrixAttributeDefinition>(), new List<DataMatrixRow>());
             }
 
-            var whitelist = (attributeWhitelist ?? new List<string>())
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var whitelist = new List<string>();
+            HashSet<string> whitelistSet = null;
+            if (attributeWhitelist != null)
+            {
+                whitelistSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var id in attributeWhitelist)
+                {
+                    if (string.IsNullOrWhiteSpace(id))
+                    {
+                        continue;
+                    }
 
-            var whitelistSet = whitelist.Count > 0
-                ? new HashSet<string>(whitelist, StringComparer.OrdinalIgnoreCase)
-                : null;
+                    if (whitelistSet.Add(id))
+                    {
+                        whitelist.Add(id);
+                    }
+                }
 
-            var propById = GetDistinctProperties(session)
-                .ToDictionary(p => $"{p.Category}|{p.Name}", StringComparer.OrdinalIgnoreCase);
+                if (whitelistSet.Count == 0)
+                {
+                    whitelistSet = null;
+                }
+            }
 
-            var attributes = new Dictionary<string, DataMatrixAttributeDefinition>(StringComparer.OrdinalIgnoreCase);
+            var distinctProperties = GetDistinctProperties(session);
+            var propById = new Dictionary<string, ScrapedProperty>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in distinctProperties)
+            {
+                var id = BuildAttributeId(property.Category, property.Name);
+                propById[id] = property;
+            }
+
+            var initialAttributeCapacity = whitelistSet != null
+                ? whitelistSet.Count
+                : Math.Max(distinctProperties.Count, 16);
+            var attributes = new Dictionary<string, DataMatrixAttributeDefinition>(
+                initialAttributeCapacity,
+                StringComparer.OrdinalIgnoreCase);
             var order = 0;
 
             if (whitelistSet != null)
@@ -97,9 +146,9 @@ namespace MicroEng.Navisworks
             }
             else
             {
-                foreach (var p in session.Properties ?? Enumerable.Empty<ScrapedProperty>())
+                foreach (var p in distinctProperties)
                 {
-                    var id = $"{p.Category}|{p.Name}";
+                    var id = BuildAttributeId(p.Category, p.Name);
                     attributes[id] = new DataMatrixAttributeDefinition
                     {
                         Id = id,
@@ -115,9 +164,19 @@ namespace MicroEng.Navisworks
                 }
             }
 
-            var rows = new Dictionary<string, DataMatrixRow>(StringComparer.OrdinalIgnoreCase);
+            var estimatedRowCount = session.ItemsScanned > 0 ? session.ItemsScanned : 0;
+            var rows = estimatedRowCount > 0
+                ? new Dictionary<string, DataMatrixRow>(estimatedRowCount, StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, DataMatrixRow>(StringComparer.OrdinalIgnoreCase);
+            var attrIdCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var entry in session.RawEntries ?? Enumerable.Empty<RawEntry>())
             {
+                if (entry == null)
+                {
+                    continue;
+                }
+
                 var rowKey = !string.IsNullOrWhiteSpace(entry.ItemKey)
                     ? entry.ItemKey
                     : (!string.IsNullOrWhiteSpace(entry.ItemPath) ? entry.ItemPath : Guid.NewGuid().ToString());
@@ -127,7 +186,7 @@ namespace MicroEng.Navisworks
                     continue;
                 }
 
-                var attrId = $"{entry.Category}|{entry.Name}";
+                var attrId = GetOrCreateAttributeId(attrIdCache, entry.Category, entry.Name);
                 if (whitelistSet != null && !whitelistSet.Contains(attrId))
                 {
                     continue;
@@ -188,6 +247,59 @@ namespace MicroEng.Navisworks
             }
 
             return (orderedAttrs, rows.Values.ToList());
+        }
+
+        private static bool IsPreferredProperty(ScrapedProperty candidate, ScrapedProperty current)
+        {
+            if (candidate == null)
+            {
+                return false;
+            }
+
+            if (current == null)
+            {
+                return true;
+            }
+
+            if (candidate.ItemCount != current.ItemCount)
+            {
+                return candidate.ItemCount > current.ItemCount;
+            }
+
+            if (candidate.DistinctValueCount != current.DistinctValueCount)
+            {
+                return candidate.DistinctValueCount > current.DistinctValueCount;
+            }
+
+            return false;
+        }
+
+        private static string BuildAttributeId(string category, string name)
+        {
+            return string.Concat(category ?? string.Empty, "|", name ?? string.Empty);
+        }
+
+        private static string GetOrCreateAttributeId(
+            IDictionary<string, Dictionary<string, string>> cache,
+            string category,
+            string name)
+        {
+            var normalizedCategory = category ?? string.Empty;
+            var normalizedName = name ?? string.Empty;
+
+            if (!cache.TryGetValue(normalizedCategory, out var byName))
+            {
+                byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                cache[normalizedCategory] = byName;
+            }
+
+            if (!byName.TryGetValue(normalizedName, out var id))
+            {
+                id = BuildAttributeId(normalizedCategory, normalizedName);
+                byName[normalizedName] = id;
+            }
+
+            return id;
         }
 
         private Type MapType(string dataTypeName)

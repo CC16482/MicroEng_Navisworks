@@ -1,15 +1,14 @@
 using System.Windows.Forms;
 using Autodesk.Navisworks.Api.Plugins;
 using ElementHost = System.Windows.Forms.Integration.ElementHost;
-using MicroEng.Navisworks;
 
-namespace MicroEng.Navisworks.ViewpointsGenerator
+namespace MicroEng.Navisworks
 {
-    [Plugin("MicroEng.ViewpointsGenerator.DockPane", "MENG",
-        DisplayName = "Viewpoints Generator",
-        ToolTip = "Batch-generate Saved Viewpoints.")]
-    [DockPanePlugin(900, 650, FixedSize = false, AutoScroll = true, MinimumHeight = 420, MinimumWidth = 520)]
-    public class ViewpointsGeneratorDockPane : DockPanePlugin
+    [Plugin("MicroEng.DataMatrix.DockPane", "MENG",
+        DisplayName = "MicroEng Data Matrix",
+        ToolTip = "Tabular view of scraped model data.")]
+    [DockPanePlugin(900, 600, FixedSize = false, AutoScroll = true)]
+    public class DataMatrixDockPane : DockPanePlugin
     {
         public override Control CreateControlPane()
         {
@@ -20,19 +19,19 @@ namespace MicroEng.Navisworks.ViewpointsGenerator
                 var host = new ElementHost
                 {
                     Dock = DockStyle.Fill,
-                    Child = new ViewpointsGeneratorControl()
+                    Child = new DataMatrixControl()
                 };
                 return host;
             }
             catch (System.Exception ex)
             {
-                MicroEngActions.Log($"ViewpointsGeneratorDockPane: CreateControlPane failed: {ex}");
+                MicroEngActions.Log($"DataMatrixDockPane: CreateControlPane failed: {ex}");
                 return new ElementHost
                 {
                     Dock = DockStyle.Fill,
                     Child = new System.Windows.Controls.TextBlock
                     {
-                        Text = "Viewpoints Generator failed to load. See MicroEng.log for details.",
+                        Text = "Data Matrix failed to load. See MicroEng.log for details.",
                         Margin = new System.Windows.Thickness(12)
                     }
                 };

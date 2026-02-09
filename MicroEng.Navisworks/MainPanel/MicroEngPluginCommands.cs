@@ -1,48 +1,47 @@
+﻿using System;
 using System.Windows.Forms;
 using Autodesk.Navisworks.Api.Plugins;
 using ElementHost = System.Windows.Forms.Integration.ElementHost;
-using MicroEng.Navisworks;
 
-namespace MicroEng.Navisworks.ViewpointsGenerator
+namespace MicroEng.Navisworks
 {
-    [Plugin("MicroEng.ViewpointsGenerator.DockPane", "MENG",
-        DisplayName = "Viewpoints Generator",
-        ToolTip = "Batch-generate Saved Viewpoints.")]
-    [DockPanePlugin(900, 650, FixedSize = false, AutoScroll = true, MinimumHeight = 420, MinimumWidth = 520)]
-    public class ViewpointsGeneratorDockPane : DockPanePlugin
+    [Plugin("MicroEng.DockPane", "MENG",
+        DisplayName = "NavisTools",
+        ToolTip = "Dockable panel for MicroEng NavisTools.")]
+    [DockPanePlugin(800, 600, FixedSize = false, AutoScroll = true, MinimumHeight = 480, MinimumWidth = 360)]
+    public class MicroEngDockPane : DockPanePlugin
     {
         public override Control CreateControlPane()
         {
             MicroEngActions.Init();
-
             try
             {
                 var host = new ElementHost
                 {
                     Dock = DockStyle.Fill,
-                    Child = new ViewpointsGeneratorControl()
+                    Child = new MicroEngPanelControl()
                 };
                 return host;
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                MicroEngActions.Log($"ViewpointsGeneratorDockPane: CreateControlPane failed: {ex}");
-                return new ElementHost
+                MicroEngActions.Log($"DockPane: CreateControlPane failed: {ex}");
+                var fallback = new ElementHost
                 {
                     Dock = DockStyle.Fill,
                     Child = new System.Windows.Controls.TextBlock
                     {
-                        Text = "Viewpoints Generator failed to load. See MicroEng.log for details.",
+                        Text = "MicroEng panel failed to load. Check log.",
                         Margin = new System.Windows.Thickness(12)
                     }
                 };
+                return fallback;
             }
         }
 
         public override void DestroyControlPane(Control pane)
         {
             pane?.Dispose();
-            base.DestroyControlPane(pane);
         }
     }
 

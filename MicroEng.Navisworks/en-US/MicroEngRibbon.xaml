@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<RibbonControl
+    xmlns="clr-namespace:Autodesk.Windows;assembly=AdWindows"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:nvw="clr-namespace:Autodesk.Navisworks.Gui.Roamer.AIRLook;assembly=navisworks.gui.roamer">
+    <RibbonTab Id="ID_MicroEng_TAB" Title="MicroEng">
+        <RibbonPanel>
+            <RibbonPanelSource Title="NavisTools">
+                <nvw:NWRibbonButton
+                    Id="ID_MicroEng_OpenPanel"
+                    Orientation="Vertical"
+                    ShowText="True"
+                    Size="Large" />
+            </RibbonPanelSource>
+        </RibbonPanel>
+    </RibbonTab>
+</RibbonControl>

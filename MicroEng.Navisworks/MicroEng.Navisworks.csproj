@@ -111,6 +111,14 @@
     </Page>
   </ItemGroup>
 
+  <!-- Navisworks ribbon layout XAML is loaded by plugin framework at runtime (not WPF page-compiled). -->
+  <ItemGroup>
+    <Page Remove="en-US\MicroEngRibbon.xaml" />
+    <None Include="en-US\MicroEngRibbon.xaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
   <!-- Mark design-only XAML mocks as None so they don't compile -->
   <!-- After build, copy dll to Navisworks Plugins\<AssemblyName>\ -->
   <!-- Folder name must match dll name for simple side-loading. -->

@@ -206,28 +206,7 @@ namespace MicroEng.Navisworks
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
         {
-            if (SnackbarPresenter == null)
-            {
-                return;
-            }
-
-            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
-            {
-                Title = title,
-                Content = message,
-                Appearance = appearance,
-                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
-                {
-                    Filled = true,
-                    FontSize = 25
-                },
-                Foreground = System.Windows.Media.Brushes.Black,
-                ContentForeground = System.Windows.Media.Brushes.Black,
-                Timeout = TimeSpan.FromSeconds(4),
-                IsCloseButtonEnabled = false
-            };
-
-            snackbar.Show();
+            MicroEngSnackbar.Show(SnackbarPresenter, title, message, appearance, icon);
         }
 
         private void FlashSuccess(System.Windows.Controls.Button button)

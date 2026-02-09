@@ -251,19 +251,43 @@ namespace MicroEng.Navisworks.TreeMapper
 
         private void RefreshSessionOptions(ScrapeSession preferredSession)
         {
-            _isLoading = true;
-            _sessionOptions.Clear();
-            var sessions = DataScraperCache.AllSessions
-                .OrderByDescending(s => s.Timestamp)
-                .ToList();
-            foreach (var session in sessions)
+            var preferredSessionId = preferredSession?.Id;
+            if (!preferredSessionId.HasValue)
             {
-                _sessionOptions.Add(new ScrapeSessionOption(session));
+                preferredSessionId = SelectedSession?.Session?.Id ?? DataScraperCache.LastSession?.Id;
             }
 
-            var target = preferredSession ?? DataScraperCache.LastSession;
-            SelectedSession = _sessionOptions.FirstOrDefault(o => o.Session == target) ?? _sessionOptions.FirstOrDefault();
-            _isLoading = false;
+            _isLoading = true;
+            try
+            {
+                _sessionOptions.Clear();
+                var sessions = DataScraperCache.AllSessions
+                    .OrderByDescending(s => s.Timestamp)
+                    .ToList();
+
+                foreach (var session in sessions)
+                {
+                    _sessionOptions.Add(new ScrapeSessionOption(session));
+                }
+
+                ScrapeSessionOption selectedOption = null;
+                if (preferredSessionId.HasValue)
+                {
+                    selectedOption = _sessionOptions.FirstOrDefault(o => o?.Session?.Id == preferredSessionId.Value);
+                }
+
+                if (selectedOption == null && preferredSession != null)
+                {
+                    selectedOption = _sessionOptions.FirstOrDefault(o => ReferenceEquals(o.Session, preferredSession));
+                }
+
+                SelectedSession = selectedOption ?? _sessionOptions.FirstOrDefault();
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+
             var selected = SelectedSession?.Session;
             RefreshCategoryOptions(selected);
             UpdateCacheStatus(selected);

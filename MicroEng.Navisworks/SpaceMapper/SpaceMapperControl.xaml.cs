@@ -52,6 +52,7 @@ namespace MicroEng.Navisworks
         private const string NotApplicableText = "N/A";
         private List<ModelItem> _lastTargetsWithoutBounds = new();
         private List<ModelItem> _lastTargetsUnmatched = new();
+        private bool _dataScraperEventsHooked;
 
         public SpaceMapperControl()
         {
@@ -75,10 +76,69 @@ namespace MicroEng.Navisworks
             _processingPage.Loaded += OnProcessingPageLoaded;
             SpaceMapperNav.Navigating += OnSpaceMapperNavNavigating;
             Loaded += OnLoaded;
+            Unloaded += OnUnloaded;
+        }
+
+        private void EnsureDataScraperEventHandlers()
+        {
+            if (_dataScraperEventsHooked)
+            {
+                return;
+            }
+
+            DataScraperCache.SessionAdded += OnDataScraperSessionAdded;
+            DataScraperCache.CacheChanged += OnDataScraperCacheChanged;
+            _dataScraperEventsHooked = true;
+        }
+
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            if (!_dataScraperEventsHooked)
+            {
+                return;
+            }
+
+            DataScraperCache.SessionAdded -= OnDataScraperSessionAdded;
+            DataScraperCache.CacheChanged -= OnDataScraperCacheChanged;
+            _dataScraperEventsHooked = false;
+        }
+
+        private void OnDataScraperSessionAdded(ScrapeSession session)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => OnDataScraperSessionAdded(session)));
+                return;
+            }
+
+            if (!_initialized)
+            {
+                return;
+            }
+
+            RefreshScraperProfiles(GetSelectedScraperProfileName());
+        }
+
+        private void OnDataScraperCacheChanged()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(OnDataScraperCacheChanged));
+                return;
+            }
+
+            if (!_initialized)
+            {
+                return;
+            }
+
+            RefreshScraperProfiles(GetSelectedScraperProfileName());
         }
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
+            EnsureDataScraperEventHandlers();
+
             if (_initialized)
             {
                 return;
@@ -609,6 +669,7 @@ namespace MicroEng.Navisworks
 
         private void RefreshScraperProfiles(string selectName = null)
         {
+            var currentSelection = _setupPage.ScraperProfileCombo.SelectedItem?.ToString();
             var profiles = DataScraperCache.AllSessions
                 .Select(s => string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -629,24 +690,41 @@ namespace MicroEng.Navisworks
             var nameToSelect = selectName;
             if (string.IsNullOrWhiteSpace(nameToSelect))
             {
-                nameToSelect = _setupPage.ScraperProfileCombo.SelectedItem?.ToString();
+                nameToSelect = currentSelection;
             }
 
-            if (string.IsNullOrWhiteSpace(nameToSelect))
+            object matchedItem = null;
+            if (!string.IsNullOrWhiteSpace(nameToSelect))
             {
-                _setupPage.ScraperProfileCombo.SelectedIndex = 0;
+                foreach (var item in _setupPage.ScraperProfileCombo.Items)
+                {
+                    if (string.Equals(item?.ToString(), nameToSelect, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedItem = item;
+                        break;
+                    }
+                }
             }
-            else if (_setupPage.ScraperProfileCombo.Items.Contains(nameToSelect))
+
+            if (matchedItem != null)
             {
-                _setupPage.ScraperProfileCombo.SelectedItem = nameToSelect;
+                if (!Equals(_setupPage.ScraperProfileCombo.SelectedItem, matchedItem))
+                {
+                    _setupPage.ScraperProfileCombo.SelectedItem = matchedItem;
+                }
             }
-            else
+            else if (_setupPage.ScraperProfileCombo.SelectedIndex != 0)
             {
                 _setupPage.ScraperProfileCombo.SelectedIndex = 0;
             }
 
             var session = GetLatestScrapeSession(GetSelectedScraperProfileName());
-            DataScraperCache.LastSession = session;
+            var previousSessionId = DataScraperCache.LastSession?.Id ?? Guid.Empty;
+            var nextSessionId = session?.Id ?? Guid.Empty;
+            if (previousSessionId != nextSessionId)
+            {
+                DataScraperCache.LastSession = session;
+            }
             UpdateScraperSummary(session);
 
             if (!_applyingTemplate)
@@ -3549,28 +3627,7 @@ namespace MicroEng.Navisworks
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
         {
-            if (SnackbarPresenter == null)
-            {
-                return;
-            }
-
-            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
-            {
-                Title = title,
-                Content = message,
-                Appearance = appearance,
-                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
-                {
-                    Filled = true,
-                    FontSize = 25
-                },
-                Foreground = System.Windows.Media.Brushes.Black,
-                ContentForeground = System.Windows.Media.Brushes.Black,
-                Timeout = TimeSpan.FromSeconds(4),
-                IsCloseButtonEnabled = false
-            };
-
-            snackbar.Show();
+            MicroEngSnackbar.Show(SnackbarPresenter, title, message, appearance, icon);
         }
 
         private void FlashSuccess(System.Windows.Controls.Button button)

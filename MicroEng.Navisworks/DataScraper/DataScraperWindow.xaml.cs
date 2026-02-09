@@ -15,6 +15,9 @@ namespace MicroEng.Navisworks
 {
     public partial class DataScraperWindow : Window
     {
+        private const int PropertiesPreviewSampleSize = 500;
+        private const int RawPreviewSampleSize = 2000;
+
         static DataScraperWindow()
         {
             AssemblyResolver.EnsureRegistered();
@@ -35,6 +38,8 @@ namespace MicroEng.Navisworks
         private ICollectionView _rawRowsView;
         private List<SetListItem> _availableSets = new();
         private bool _updatingSetLists;
+        private int _propertyPreviewTotalCount;
+        private int _rawPreviewTotalCount;
 
         public DataScraperWindow(string initialProfile = null)
         {
@@ -43,10 +48,12 @@ namespace MicroEng.Navisworks
             MicroEngWindowPositioning.ApplyTopMostTopCenter(this);
             ApplyRunScrapeButtonTheme();
             MicroEngWpfUiTheme.ThemeChanged += OnThemeChanged;
+            DataScraperCache.SessionAdded += OnSessionAdded;
             DataScraperCache.CacheChanged += OnCacheChanged;
             Closed += (_, __) =>
             {
                 MicroEngWpfUiTheme.ThemeChanged -= OnThemeChanged;
+                DataScraperCache.SessionAdded -= OnSessionAdded;
                 DataScraperCache.CacheChanged -= OnCacheChanged;
             };
             _statusReadyBrush = StatusText?.Foreground;
@@ -104,7 +111,20 @@ namespace MicroEng.Navisworks
                 PropertySummary.Text = "0 properties.";
                 RawSummaryText.Text = "0 raw entries.";
                 SelectedRunSummary.Text = "Select a run to view data.";
+                _propertyPreviewTotalCount = 0;
+                _rawPreviewTotalCount = 0;
             }
+        }
+
+        private void OnSessionAdded(ScrapeSession session)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => OnSessionAdded(session)));
+                return;
+            }
+
+            OnCacheChanged();
         }
 
         private void OnThemeChanged(MicroEngThemeMode theme)
@@ -243,8 +263,6 @@ namespace MicroEng.Navisworks
                     return;
                 }
 
-                MicroEngActions.Log($"[DataScraper] Run start. Profile='{profile}', Scope={scope}, Items={items.Count}");
-
                 StatusText.Text = "Scraping...";
                 var session = _service.Scrape(profile, scope, description, items);
 
@@ -255,7 +273,6 @@ namespace MicroEng.Navisworks
                 LoadProfiles();
                 SelectLatestRunForProfile(profile);
                 ShowProperties(session);
-                MicroEngActions.Log($"[DataScraper] Run complete. Items={session.ItemsScanned}, Properties={session.Properties.Count}");
                 FlashSuccess(RunScrapeButton);
                 ShowSnackbar("Scrape complete", $"{session.ItemsScanned} items, {session.Properties.Count} properties cached.", WpfUiControls.ControlAppearance.Success, WpfUiControls.SymbolRegular.CheckmarkCircle24);
             }
@@ -301,23 +318,33 @@ namespace MicroEng.Navisworks
 
             _selectedSession = session;
 
-            _currentProperties = session.Properties
+            var sourceProperties = session.Properties ?? new List<ScrapedProperty>();
+            _propertyPreviewTotalCount = sourceProperties.Count;
+            var previewProperties = TakeEvenSample(sourceProperties, PropertiesPreviewSampleSize);
+
+            _currentProperties = previewProperties
                 .Select(p => new ScrapedPropertyView(p))
                 .ToList();
             _propertiesView = CollectionViewSource.GetDefaultView(_currentProperties);
             PropertiesGrid.ItemsSource = _propertiesView;
-            PropertySummary.Text = $"{_currentProperties.Count} properties from session {session.Timestamp:T}";
+            UpdatePropertySummary(session);
 
             _loadedRawSessionId = Guid.Empty;
             _rawRows = new List<RawRow>();
             _rawRowsView = null;
             RawDataGrid.ItemsSource = null;
+            _rawPreviewTotalCount = session.RawEntryCount;
 
             _rawEntriesStored = session.RawEntryCount > 0;
             _rawEntriesTruncated = session.RawEntriesTruncated;
 
             RawDataNotStoredHint.Visibility = Visibility.Collapsed;
-            if (_rawEntriesTruncated)
+            if (_rawPreviewTotalCount > RawPreviewSampleSize)
+            {
+                RawDataNotStoredHint.Text = $"Showing sampled raw preview ({RawPreviewSampleSize} max rows).";
+                RawDataNotStoredHint.Visibility = Visibility.Visible;
+            }
+            else if (_rawEntriesTruncated)
             {
                 RawDataNotStoredHint.Text = _rawEntriesStored
                     ? "Raw rows were truncated."
@@ -325,12 +352,7 @@ namespace MicroEng.Navisworks
                 RawDataNotStoredHint.Visibility = Visibility.Visible;
             }
 
-            var rawSummary = $"{session.RawEntryCount} raw entries";
-            if (_rawEntriesTruncated)
-            {
-                rawSummary += _rawEntriesStored ? " (preview)" : " (not stored)";
-            }
-            RawSummaryText.Text = rawSummary + ".";
+            UpdateRawSummary();
 
             SelectedRunSummary.Text = $"{session.ProfileName} - {session.ScopeType} - {session.ItemsScanned} items - {session.Timestamp:G}";
 
@@ -353,7 +375,9 @@ namespace MicroEng.Navisworks
             }
 
             var rawEntries = session.RawEntries ?? new List<RawEntry>();
-            _rawRows = rawEntries
+            _rawPreviewTotalCount = Math.Max(session.RawEntryCount, rawEntries.Count);
+            var previewRows = TakeEvenSample(rawEntries, RawPreviewSampleSize);
+            _rawRows = previewRows
                 .Select(r => new RawRow
                 {
                     Profile = r.Profile,
@@ -368,10 +392,25 @@ namespace MicroEng.Navisworks
             RawDataGrid.ItemsSource = _rawRowsView;
             _loadedRawSessionId = session.Id;
 
-            _rawEntriesStored = _rawRows.Count > 0;
+            _rawEntriesStored = rawEntries.Count > 0;
+            // Keep only sampled preview rows in UI memory; full rows can be lazy-loaded again when needed.
+            DataScraperCache.ReleaseRawEntries(session);
 
             RawDataNotStoredHint.Visibility = Visibility.Collapsed;
-            if (_rawEntriesTruncated)
+            if (_rawPreviewTotalCount > _rawRows.Count)
+            {
+                var maxRows = _rawRows.Count;
+                var previewMsg = maxRows > 0
+                    ? $"Showing sampled preview ({maxRows} of {_rawPreviewTotalCount} raw entries)."
+                    : $"Raw entries available: {_rawPreviewTotalCount}.";
+                if (_rawEntriesTruncated)
+                {
+                    previewMsg += _rawEntriesStored ? " Raw rows were truncated." : " Raw rows were not stored in memory.";
+                }
+                RawDataNotStoredHint.Text = previewMsg;
+                RawDataNotStoredHint.Visibility = Visibility.Visible;
+            }
+            else if (_rawEntriesTruncated)
             {
                 RawDataNotStoredHint.Text = _rawEntriesStored
                     ? "Raw rows were truncated."
@@ -384,12 +423,7 @@ namespace MicroEng.Navisworks
                 RawDataNotStoredHint.Visibility = Visibility.Visible;
             }
 
-            var rawSummary = $"{_rawRows.Count} raw entries";
-            if (_rawEntriesTruncated)
-            {
-                rawSummary += _rawEntriesStored ? " (preview)" : " (not stored)";
-            }
-            RawSummaryText.Text = rawSummary + ".";
+            UpdateRawSummary();
         }
 
         private void DataViewTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -456,12 +490,7 @@ namespace MicroEng.Navisworks
 
             _rawRowsView.Refresh();
             var count = _rawRowsView.Cast<object>().Count();
-            var summary = $"{count} raw entries";
-            if (_rawEntriesTruncated)
-            {
-                summary += _rawEntriesStored ? " (preview)" : " (not stored)";
-            }
-            RawSummaryText.Text = summary + ".";
+            UpdateRawSummary(count);
         }
 
         private void Rerun_Click(object sender, RoutedEventArgs e)
@@ -686,25 +715,7 @@ namespace MicroEng.Navisworks
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
         {
-            if (SnackbarPresenter == null) return;
-
-            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
-            {
-                Title = title,
-                Content = message,
-                Appearance = appearance,
-                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
-                {
-                    Filled = true,
-                    FontSize = 25
-                },
-                Foreground = System.Windows.Media.Brushes.Black,
-                ContentForeground = System.Windows.Media.Brushes.Black,
-                Timeout = TimeSpan.FromSeconds(4),
-                IsCloseButtonEnabled = false
-            };
-
-            snackbar.Show();
+            MicroEngSnackbar.Show(SnackbarPresenter, title, message, appearance, icon);
         }
 
         private void ProfileNameBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -771,6 +782,75 @@ namespace MicroEng.Navisworks
         private void OtherScope_Checked(object sender, RoutedEventArgs e)
         {
             // No-op; set/search controls are enabled via binding.
+        }
+
+        private void UpdatePropertySummary(ScrapeSession session)
+        {
+            if (session == null)
+            {
+                PropertySummary.Text = "0 properties.";
+                return;
+            }
+
+            if (_propertyPreviewTotalCount > _currentProperties.Count)
+            {
+                PropertySummary.Text = $"Showing {_currentProperties.Count} of {_propertyPreviewTotalCount} properties (sample) from session {session.Timestamp:T}";
+                return;
+            }
+
+            PropertySummary.Text = $"{_currentProperties.Count} properties from session {session.Timestamp:T}";
+        }
+
+        private void UpdateRawSummary(int? visibleCount = null)
+        {
+            var shown = visibleCount ?? _rawRows.Count;
+            var total = _rawPreviewTotalCount > 0 ? _rawPreviewTotalCount : _rawRows.Count;
+
+            string summary;
+            if (total > _rawRows.Count)
+            {
+                summary = $"{shown} raw entries shown (sample of {total})";
+            }
+            else
+            {
+                summary = $"{shown} raw entries";
+            }
+
+            if (_rawEntriesTruncated)
+            {
+                summary += _rawEntriesStored ? " (preview)" : " (not stored)";
+            }
+
+            RawSummaryText.Text = summary + ".";
+        }
+
+        private static List<T> TakeEvenSample<T>(IReadOnlyList<T> source, int maxCount)
+        {
+            if (source == null || source.Count == 0 || maxCount <= 0)
+            {
+                return new List<T>();
+            }
+
+            if (source.Count <= maxCount)
+            {
+                return source.ToList();
+            }
+
+            if (maxCount == 1)
+            {
+                return new List<T> { source[0] };
+            }
+
+            var sampled = new List<T>(maxCount);
+            var lastIndex = source.Count - 1;
+            var divisor = maxCount - 1;
+            for (var i = 0; i < maxCount; i++)
+            {
+                var index = (int)((long)i * lastIndex / divisor);
+                sampled.Add(source[index]);
+            }
+
+            return sampled;
         }
     }
 

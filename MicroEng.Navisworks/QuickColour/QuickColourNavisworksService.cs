@@ -38,7 +38,8 @@ namespace MicroEng.Navisworks.QuickColour
                 return 0;
             }
 
-            log?.Invoke($"QuickColour: apply by single property. Category='{category}', Property='{property}', Scope={scope}, Values={enabledValues.Count}.");
+            log?.Invoke($"QuickColour: apply started. Scope={scope}, Values={enabledValues.Count}.");
+            var verboseLogging = IsVerboseLoggingEnabled();
 
             GroupItem folder = null;
             if ((createSearchSets || createSnapshots) && !string.IsNullOrWhiteSpace(folderPath))
@@ -74,7 +75,7 @@ namespace MicroEng.Navisworks.QuickColour
                 if (results == null || results.Count == 0)
                 {
                     zeroHits++;
-                    if (debugLogged < maxDebug)
+                    if (verboseLogging && debugLogged < maxDebug)
                     {
                         log?.Invoke($"QuickColour: value='{row.Value}' normalized='{normalized}' variant={variantLabel} -> 0 items.");
                         debugLogged++;
@@ -83,7 +84,7 @@ namespace MicroEng.Navisworks.QuickColour
                 }
 
                 rowsWithHits++;
-                if (debugLogged < maxDebug)
+                if (verboseLogging && debugLogged < maxDebug)
                 {
                     log?.Invoke($"QuickColour: value='{row.Value}' normalized='{normalized}' variant={variantLabel} -> {results.Count} items.");
                     debugLogged++;
@@ -162,7 +163,8 @@ namespace MicroEng.Navisworks.QuickColour
                 return 0;
             }
 
-            log?.Invoke($"QuickColour(Hierarchy): apply. L1='{l1Category}.{l1Property}', L2='{l2Category}.{l2Property}', Scope={scope}, Groups={enabledGroups.Count}.");
+            log?.Invoke($"QuickColour(Hierarchy): apply started. Scope={scope}, Groups={enabledGroups.Count}.");
+            var verboseLogging = IsVerboseLoggingEnabled();
 
             var totalColored = 0;
             var zeroHits = 0;
@@ -205,7 +207,7 @@ namespace MicroEng.Navisworks.QuickColour
                     if (results == null || results.Count == 0)
                     {
                         zeroHits++;
-                        if (debugLogged < maxDebug)
+                        if (verboseLogging && debugLogged < maxDebug)
                         {
                             log?.Invoke($"QuickColour(Hierarchy): L1='{group.Value}' ({l1VariantLabel}) L2='{typeRow.Value}' ({l2VariantLabel}) -> 0 items.");
                             debugLogged++;
@@ -214,7 +216,7 @@ namespace MicroEng.Navisworks.QuickColour
                     }
 
                     rowsWithHits++;
-                    if (debugLogged < maxDebug)
+                    if (verboseLogging && debugLogged < maxDebug)
                     {
                         log?.Invoke($"QuickColour(Hierarchy): L1='{group.Value}' ({l1VariantLabel}) L2='{typeRow.Value}' ({l2VariantLabel}) -> {results.Count} items.");
                         debugLogged++;
@@ -313,6 +315,14 @@ namespace MicroEng.Navisworks.QuickColour
             }
 
             return trimmed;
+        }
+
+        private static bool IsVerboseLoggingEnabled()
+        {
+            return string.Equals(
+                Environment.GetEnvironmentVariable("MICROENG_QUICKCOLOUR_TRACE"),
+                "1",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static VariantData BuildVariantData(string value, out string debugLabel)

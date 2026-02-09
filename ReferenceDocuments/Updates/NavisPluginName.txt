@@ -1,0 +1,106 @@
+In Navisworks, **“Tool add-ins 1” isn’t controlled by where you deploy the DLL**. It’s the **default ribbon host that Navisworks uses for `AddInPlugin`-style add-ins**—so if your plugin is an `AddInPlugin`, it will land there by design (“By default add-in will be shown in `Tool add-ins 1` tab”). ([TwentyTwo][1])
+
+If you want a **dedicated, branded ribbon tab** like **Speckle** / **Revizto**, you need to change *how the UI is defined*, not just the install folder.
+
+## What you need to do to get your own ribbon tab
+
+### Use `CommandHandlerPlugin` (the “custom tab” plugin type)
+
+Autodesk introduced `CommandHandlerPlugin` specifically so a plugin can **organize multiple commands in a custom ribbon tab** (i.e., a real “Speckle”-style tab). ([Autodesk Developer Blog][2])
+
+That workflow is:
+
+* Create a class derived from **`CommandHandlerPlugin`**
+* Provide a **Ribbon layout XAML** via `[RibbonLayout("…xaml")]`
+* Define the tab via `[RibbonTab("…", DisplayName="…")]` and/or in the XAML
+* Define buttons/commands via `[Command("…")]`
+
+The tab label you see in the ribbon is typically driven by the XAML’s `RibbonTab` knows as **`Title`** (“Title: defines the text that appears on the tab”). ([Autodesk Developer Blog][3])
+
+✅ Result: you get a ribbon tab named **“MicroEng”** or **“NavisTools”** (whatever you set), instead of “Tool add-ins 1”.
+
+> Practical pattern: keep your existing logic (dockpane, commands, etc.) and add a thin `CommandHandlerPlugin` “UI shell” that just exposes buttons and calls into your existing code.
+
+### Alternative (less “own tab”, more “integrate into Home”)
+
+You *can* add a panel/button into built-in tabs (e.g., **Home**) using `Autodesk.Windows` / `AdWindows.dll`, but Autodesk explicitly calls this **not official API / use-at-your-own-risk**. ([Autodesk Developer Blog][4])
+This is useful if you want “Home > MicroEng panel”, but it’s not the cleanest “professional plugin tab” approach.
+
+---
+
+## Where to deploy (install) your plugin (Navisworks Manage 2025)
+
+Deployment affects **loading**, not the ribbon tab name. These are the common/valid deployment models:
+
+### Option A — Classic Navisworks `Plugins\` folder (simple for dev/testing)
+
+Navisworks loads plugins from a **subfolder under `Plugins`**, and the **folder name must match the DLL name** (minus `.dll`) or it won’t load. ([ApiDocs][5])
+
+Example:
+
+* `C:\Program Files\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.NavisTools\MicroEng.NavisTools.dll`
+
+Navisworks literally scans `...\Plugins\*` and loads `FolderName\FolderName.dll`. ([ApiDocs][5])
+
+Good for:
+
+* Local development
+* Quick internal deployments
+
+Downside:
+
+* Often requires admin rights (Program Files)
+* Not the “App Store / enterprise” standard
+
+### Option B — Per-user plugin folder (common for installers that avoid Program Files)
+
+Some vendors install into the user roaming profile, e.g. for 2022+:
+
+* `C:\Users\<you>\AppData\Roaming\Autodesk\Navisworks Manage 2022\Plugins\...` ([help.holobuilder.com][6])
+
+This pattern is used by real-world Navisworks add-ins to avoid requiring admin writes to Program Files. ([help.holobuilder.com][6])
+(For 2025, the equivalent pattern is typically the same “Navisworks Manage <year>\Plugins” convention under Roaming.)
+
+### Option C — “Professional” deployment: Autodesk Autoloader `.bundle` (what Speckle-style apps typically use)
+
+This is the standard for **App Store / enterprise-grade** packaging:
+
+* Root: `%APPDATA%\Autodesk\ApplicationPlugins` ([Autodesk Platform Services][7])
+* Create: `YourCompany.YourApp.bundle\`
+
+  * `PackageContents.xml`
+  * `Contents\... your DLLs ...`
+
+Autodesk’s Navisworks App Store guidance explicitly documents this structure and location. ([Autodesk Platform Services][7])
+Also, the general Autodesk “AppBundle” convention supports both:
+
+* **Current user:** `%AppData%\Autodesk\ApplicationPlugins`
+* **All users:** `%ProgramData%\Autodesk\ApplicationPlugins` ([ricaun - ricaun - Revit Api][8])
+
+**This is the closest match to how Speckle/Revizto feel “first-class”** in Autodesk products (managed by App Manager / consistent deployment).
+
+---
+
+## Navisworks 2025-specific dev notes you should align with
+
+* Autodesk’s App Store guidance says **Navisworks 2024+ uses .NET Framework 4.8**. Navisworks 2025 falls in that range. ([Autodesk Platform Services][7])
+* Navisworks .NET API binaries are generally **major-version specific**, so you typically ship a 2025 build separately from other years if you support multiple releases. ([Autodesk Platform Services][7])
+
+---
+
+## Bottom line
+
+* **No install folder will make an `AddInPlugin` stop showing under “Tool add-ins 1”.** That label comes from Navisworks’ default hosting for that plugin type. ([TwentyTwo][1])
+* To look like Speckle/Revizto, implement a **`CommandHandlerPlugin` + Ribbon XAML** and define your own `RibbonTab` title. ([Autodesk Developer Blog][2])
+* For “professional” deployment, package it as a **`.bundle`** under **`%APPDATA%\Autodesk\ApplicationPlugins`** (or `%ProgramData%` for all users). ([Autodesk Platform Services][7])
+
+If you tell me what your plugin currently is (e.g., `AddInPlugin`, `DockPanePlugin`, both), I can outline the cleanest way to add a `CommandHandlerPlugin` “UI shell” that exposes your existing features under a **NavisTools** ribbon tab (without rewriting your core logic).
+
+[1]: https://twentytwo.space/2020/04/08/creating-navisworks-add-ins/ "Navisworks API : Creating Navisworks Add-Ins – TwentyTwo"
+[2]: https://blog.autodesk.io/custom-ribbon-of-navisworks-part-1/ "Autodesk Developer Blog : Custom Ribbon of Navisworks part 1"
+[3]: https://blog.autodesk.io/custom-ribbon-of-navisworks-part-2/ "Autodesk Developer Blog : Custom Ribbon of Navisworks part 2"
+[4]: https://blog.autodesk.io/add-custom-panel-and-button-to-built-in-tab-of-navisworks-ribbon/ "Autodesk Developer Blog : Add Custom Panel and Button to Built-in Tab of Navisworks Ribbon"
+[5]: https://apidocs.co/apps/navisworks/2018/87317537-2911-4c08-b492-6496c82b3ed5.htm "ApiDocs.co · Navisworks · Plug-ins"
+[6]: https://help.holobuilder.com/en/articles/2441729-how-to-integrate-the-holobuilder-add-in-for-autodesk-navisworks "How to integrate the HoloBuilder Add-In for Autodesk Navisworks | HoloBuilder/Sphere XG Help Center"
+[7]: https://aps.autodesk.com/app-store/publisher-center/navisworks "Autodesk App Store Navisworks | Autodesk Platform Services"
+[8]: https://ricaun.com/appbundle/ "AppBundle - ricaun"

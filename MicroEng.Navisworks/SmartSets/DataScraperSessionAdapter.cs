@@ -8,6 +8,7 @@ namespace MicroEng.Navisworks.SmartSets
     internal sealed class DataScraperSessionAdapter : IDataScrapeSessionView
     {
         private readonly ScrapeSession _session;
+        private IReadOnlyList<ScrapedPropertyDescriptor> _cachedProperties;
 
         public DataScraperSessionAdapter(ScrapeSession session)
         {
@@ -26,17 +27,28 @@ namespace MicroEng.Navisworks.SmartSets
         {
             get
             {
+                if (_cachedProperties != null)
+                {
+                    return _cachedProperties;
+                }
+
+                var list = new List<ScrapedPropertyDescriptor>();
                 foreach (var p in _session.Properties ?? Enumerable.Empty<ScrapedProperty>())
                 {
-                    var samples = p.SampleValues?.Select(s => s ?? "").ToList() ?? new List<string>();
-                    yield return new ScrapedPropertyDescriptor(
-                        p.Category ?? "",
-                        p.Name ?? "",
-                        p.DataType ?? "",
+                    var samples = p.SampleValues?.Count > 0
+                        ? p.SampleValues.Select(s => s ?? string.Empty).ToList()
+                        : new List<string>();
+                    list.Add(new ScrapedPropertyDescriptor(
+                        p.Category ?? string.Empty,
+                        p.Name ?? string.Empty,
+                        p.DataType ?? string.Empty,
                         p.ItemCount,
                         p.DistinctValueCount,
-                        samples);
+                        samples));
                 }
+
+                _cachedProperties = list;
+                return _cachedProperties;
             }
         }
 

@@ -1,57 +1,20 @@
-using System;
-using System.Collections.Generic;
-using System.Drawing;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
-using WpfWindow = System.Windows.Window;
 using Autodesk.Navisworks.Api;
 using Autodesk.Navisworks.Api.Plugins;
 using NavisApp = Autodesk.Navisworks.Api.Application;
-using DrawingColor = System.Drawing.Color;
-using DrawingColorTranslator = System.Drawing.ColorTranslator;
 using ElementHost = System.Windows.Forms.Integration.ElementHost;
-using MicroEng.Navisworks.SmartSets;
+using WpfWindow = System.Windows.Window;
 using MicroEng.Navisworks.QuickColour;
+using MicroEng.Navisworks.SmartSets;
 using MicroEng.Navisworks.TreeMapper;
 
 namespace MicroEng.Navisworks
 {
-    internal static class ThemeAssets
-    {
-        private static readonly string AssetRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logos");
-        private static readonly Lazy<Bitmap> _ribbonIcon = new(() => LoadBitmap("microeng_logotray.png"));
-        private static readonly Lazy<Bitmap> _headerLogo = new(() => LoadBitmap("microeng-logo2.png"));
-        public static DrawingColor BackgroundPanel => DrawingColorTranslator.FromHtml("#f5f7fb");
-        public static DrawingColor BackgroundMuted => DrawingColorTranslator.FromHtml("#eef1f4");
-        public static DrawingColor Accent => DrawingColorTranslator.FromHtml("#8ba9d9");
-        public static DrawingColor AccentStrong => DrawingColorTranslator.FromHtml("#6b89c9");
-        public static DrawingColor TextPrimary => DrawingColorTranslator.FromHtml("#111827");
-        public static DrawingColor TextSecondary => DrawingColorTranslator.FromHtml("#374151");
-
-        public static Font DefaultFont => new Font("Segoe UI", 9F, FontStyle.Regular);
-        public static Bitmap RibbonIcon => _ribbonIcon.Value;
-        public static Bitmap HeaderLogo => _headerLogo.Value;
-
-        private static Bitmap LoadBitmap(string fileName)
-        {
-            try
-            {
-                var path = Path.Combine(AssetRoot, fileName);
-                return File.Exists(path) ? (Bitmap)Image.FromFile(path) : null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-    }
-
-    // ========= Shared logic for the 3 tools =========
-
     internal static class MicroEngActions
     {
         private static DataScraperWindow _dataScraperWindow;
@@ -354,16 +317,12 @@ namespace MicroEng.Navisworks
             }
         }
 
-        public static void AppendData()
-        {
-            TryShowDataMapper(out _);
-        }
-
         internal static bool IsDataScraperOpen => _dataScraperWindow?.IsVisible == true;
         internal static bool IsDataMapperOpen => _dataMapperWindow?.IsVisible == true;
         internal static bool IsSmartSetGeneratorOpen => _smartSetGeneratorWindow?.IsVisible == true;
         internal static bool IsQuickColourOpen => _quickColourWindow?.IsVisible == true;
         internal static bool IsTreeMapperOpen => _treeMapperWindow?.IsVisible == true;
+        internal static bool IsSettingsOpen => _settingsWindow?.IsVisible == true;
 
         private static bool TryActivateWindow(WpfWindow window)
         {
@@ -433,7 +392,6 @@ namespace MicroEng.Navisworks
                 return true;
             }
 
-            Log("AppendData: launching Data Mapper dialog");
             try
             {
                 var createdDialog = new AppendIntegrateDialog
@@ -454,7 +412,6 @@ namespace MicroEng.Navisworks
                 ElementHost.EnableModelessKeyboardInterop(createdDialog);
                 createdDialog.Show();
                 TryActivateWindow(createdDialog);
-                Log("AppendData: dialog shown");
                 RaiseToolWindowStateChanged();
                 return true;
             }
@@ -613,11 +570,158 @@ namespace MicroEng.Navisworks
 
         internal static void Log(string message)
         {
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            if (!ShouldEmitLogMessage(message))
+            {
+                return;
+            }
+
             System.Diagnostics.Trace.WriteLine($"[MicroEng] {message}");
             LogMessage?.Invoke(message);
             var line = $"{DateTime.Now:HH:mm:ss} {message}";
             WriteLogLine(LogFilePathPrimary, line);
             WriteLogLine(LogFilePathFallback, line);
+        }
+
+        private static bool ShouldEmitLogMessage(string message)
+        {
+            if (IsVerboseLoggingEnabled())
+            {
+                return true;
+            }
+
+            var text = message?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+            {
+                return false;
+            }
+
+            if (IsHighPriorityLogMessage(text))
+            {
+                return true;
+            }
+
+            if (text.StartsWith("Tool:", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (IsDiagnosticNoise(text))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool IsVerboseLoggingEnabled()
+        {
+            return string.Equals(
+                Environment.GetEnvironmentVariable("MICROENG_VERBOSE_LOG"),
+                "1",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsHighPriorityLogMessage(string message)
+        {
+            var text = message ?? string.Empty;
+            return ContainsAny(text,
+                "failed",
+                "error",
+                "exception",
+                "[Unhandled]",
+                "[DispatcherUnhandled]",
+                "[UnobservedTaskException]",
+                "[CrashReport]",
+                "[warning]");
+        }
+
+        private static bool IsDiagnosticNoise(string message)
+        {
+            var text = message ?? string.Empty;
+
+            if (StartsWithAny(text,
+                "Assembly=",
+                "Theme: broadcasting",
+                "Theme: accentMode=",
+                "Theme: datagridGridLineColor=",
+                "[ColumnBuilder][Perf]",
+                "[ColumnBuilder][Choose]",
+                "DockPanes:",
+                "SpaceMapper Processing:",
+                "SpaceMapper: navigating to Processing page",
+                "SpaceMapper: Processing page loaded in",
+                "SmartSets preview (fast):",
+                "SmartSets preview (live):",
+                "AppendData: launching Data Mapper dialog",
+                "AppendData: dialog shown",
+                "DataMatrix: locating plugin record",
+                "DataMatrix: loading plugin",
+                "DataMatrix: setting pane visible",
+                "ViewpointsGenerator: locating plugin record",
+                "ViewpointsGenerator: loading plugin",
+                "ViewpointsGenerator: setting pane visible",
+                "SpaceMapper: locating plugin record",
+                "SpaceMapper: loading plugin",
+                "SpaceMapper: setting pane visible",
+                "Sequence4D: locating plugin record",
+                "Sequence4D: loading plugin",
+                "Sequence4D: setting pane visible"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool StartsWithAny(string text, params string[] prefixes)
+        {
+            if (string.IsNullOrWhiteSpace(text) || prefixes == null || prefixes.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var prefix in prefixes)
+            {
+                if (string.IsNullOrWhiteSpace(prefix))
+                {
+                    continue;
+                }
+
+                if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool ContainsAny(string text, params string[] values)
+        {
+            if (string.IsNullOrWhiteSpace(text) || values == null || values.Length == 0)
+            {
+                return false;
+            }
+
+            foreach (var value in values)
+            {
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                if (text.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static void EnsureLogFiles()
@@ -653,10 +757,31 @@ namespace MicroEng.Navisworks
             }
         }
 
+        public static void ToggleMainPanel()
+        {
+            const string dockPanePluginId = "MicroEng.DockPane.MENG";
+            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
+            if (record == null)
+            {
+                MessageBox.Show($"Could not find dock pane plugin '{dockPanePluginId}'.",
+                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            if (!record.IsLoaded)
+            {
+                record.LoadPlugin();
+            }
+
+            if (record.LoadedPlugin is DockPanePlugin pane)
+            {
+                pane.Visible = !pane.Visible;
+            }
+        }
+
         public static void DataMatrix()
         {
             const string dockPanePluginId = "MicroEng.DataMatrix.DockPane.MENG";
-            Log("DataMatrix: locating plugin record");
             var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
             if (record == null)
             {
@@ -667,13 +792,11 @@ namespace MicroEng.Navisworks
 
             if (!record.IsLoaded)
             {
-                Log("DataMatrix: loading plugin");
                 record.LoadPlugin();
             }
 
             if (record.LoadedPlugin is DockPanePlugin pane)
             {
-                Log("DataMatrix: setting pane visible");
                 pane.Visible = true;
             }
         }
@@ -681,7 +804,6 @@ namespace MicroEng.Navisworks
         public static void ViewpointsGenerator()
         {
             const string dockPanePluginId = "MicroEng.ViewpointsGenerator.DockPane.MENG";
-            Log("ViewpointsGenerator: locating plugin record");
             var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
             if (record == null)
             {
@@ -692,13 +814,11 @@ namespace MicroEng.Navisworks
 
             if (!record.IsLoaded)
             {
-                Log("ViewpointsGenerator: loading plugin");
                 record.LoadPlugin();
             }
 
             if (record.LoadedPlugin is DockPanePlugin pane)
             {
-                Log("ViewpointsGenerator: setting pane visible");
                 pane.Visible = true;
             }
         }
@@ -706,7 +826,6 @@ namespace MicroEng.Navisworks
         public static void SpaceMapper()
         {
             const string dockPanePluginId = "MicroEng.SpaceMapper.DockPane.MENG";
-            Log("SpaceMapper: locating plugin record");
             var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
             if (record == null)
             {
@@ -717,13 +836,11 @@ namespace MicroEng.Navisworks
 
             if (!record.IsLoaded)
             {
-                Log("SpaceMapper: loading plugin");
                 record.LoadPlugin();
             }
 
             if (record.LoadedPlugin is DockPanePlugin pane)
             {
-                Log("SpaceMapper: setting pane visible");
                 pane.Visible = true;
             }
         }
@@ -746,7 +863,6 @@ namespace MicroEng.Navisworks
         public static void Sequence4D()
         {
             const string dockPanePluginId = "MicroEng.Sequence4D.DockPane.MENG";
-            Log("Sequence4D: locating plugin record");
             var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
             if (record == null)
             {
@@ -757,328 +873,12 @@ namespace MicroEng.Navisworks
 
             if (!record.IsLoaded)
             {
-                Log("Sequence4D: loading plugin");
                 record.LoadPlugin();
             }
 
             if (record.LoadedPlugin is DockPanePlugin pane)
             {
-                Log("Sequence4D: setting pane visible");
                 pane.Visible = true;
-            }
-        }
-    }
-
-    // ========= Standalone Add-In commands (nice for NavisAddinManager testing) =========
-
-    [Plugin("MicroEng.AppendData", "MENG",
-        DisplayName = "MicroEng Data Mapper",
-        ToolTip = "Map and append data to the current selection.")]
-    [AddInPlugin(AddInLocation.AddIn)]
-    public class AppendDataAddIn : AddInPlugin
-    {
-        public override int Execute(params string[] parameters)
-        {
-            MicroEngActions.AppendData();
-            return 0;
-        }
-    }
-
-    // ========= Dockable panel =========
-
-    [Plugin("MicroEng.DockPane", "MENG",
-        DisplayName = "NavisTools",
-        ToolTip = "Dockable panel for MicroEng NavisTools.")]
-    [DockPanePlugin(800, 600, FixedSize = false, AutoScroll = true, MinimumHeight = 480, MinimumWidth = 360)]
-    public class MicroEngDockPane : DockPanePlugin
-    {
-        public override Control CreateControlPane()
-        {
-            MicroEngActions.Log("DockPane: CreateControlPane start");
-            MicroEngActions.Init();
-            try
-            {
-                var host = new ElementHost
-                {
-                    Dock = DockStyle.Fill,
-                    Child = new MicroEngPanelControl()
-                };
-                MicroEngActions.Log("DockPane: CreateControlPane created ElementHost");
-                return host;
-            }
-            catch (Exception ex)
-            {
-                MicroEngActions.Log($"DockPane: CreateControlPane failed: {ex}");
-                var fallback = new ElementHost
-                {
-                    Dock = DockStyle.Fill,
-                    Child = new System.Windows.Controls.TextBlock
-                    {
-                        Text = "MicroEng panel failed to load. Check log.",
-                        Margin = new System.Windows.Thickness(12)
-                    }
-                };
-                return fallback;
-            }
-        }
-
-        public override void DestroyControlPane(Control pane)
-        {
-            pane?.Dispose();
-        }
-    }
-
-    // Command that toggles the dockable panel
-    [Plugin("MicroEng.PanelCommand", "MENG",
-        DisplayName = "MicroEng Panel",
-        ToolTip = "Show/hide the MicroEng tools panel.")]
-    [AddInPlugin(AddInLocation.AddIn)]
-    public class MicroEngPanelCommand : AddInPlugin
-    {
-        public override int Execute(params string[] parameters)
-        {
-            MicroEngActions.Init();
-            // ID pattern is: PluginAttribute.Id + "." + VendorId
-            // e.g. "MicroEng.DockPane.MENG"
-            const string dockPanePluginId = "MicroEng.DockPane.MENG";
-
-            var record = NavisApp.Plugins.FindPlugin(dockPanePluginId);
-            if (record == null)
-            {
-                MessageBox.Show($"Could not find dock pane plugin '{dockPanePluginId}'.",
-                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return 0;
-            }
-
-            if (!record.IsLoaded)
-            {
-                record.LoadPlugin();
-            }
-
-            var pane = record.LoadedPlugin as DockPanePlugin;
-            if (pane == null)
-            {
-                MessageBox.Show("Found plugin record but could not cast to DockPanePlugin.",
-                    "MicroEng", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return 0;
-            }
-
-            pane.Visible = !pane.Visible;
-            return 0;
-        }
-    }
-
-    internal static class AssemblyResolver
-    {
-        private static readonly object Sync = new object();
-        private static bool _registered;
-        private static bool _firstChanceHooked;
-        private static int _firstChanceLogged;
-        private const int FirstChanceLogLimit = 10;
-
-        private static readonly string AssemblyDir =
-            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? AppDomain.CurrentDomain.BaseDirectory;
-
-        private static readonly string LogFilePathPrimary = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "MicroEng.Navisworks",
-            "NavisErrors",
-            "MicroEng.log");
-
-        private static readonly string LogFilePathFallback = Path.Combine(Path.GetTempPath(), "MicroEng.log");
-
-        private static readonly HashSet<string> ResolveLogOnce = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        [ThreadStatic]
-        private static HashSet<string> _resolving;
-
-        public static void EnsureRegistered()
-        {
-            if (_registered) return;
-
-            lock (Sync)
-            {
-                if (_registered) return;
-                AppDomain.CurrentDomain.AssemblyResolve += OnResolve;
-                if (!_firstChanceHooked)
-                {
-                    AppDomain.CurrentDomain.FirstChanceException += OnFirstChance;
-                    _firstChanceHooked = true;
-                }
-                _registered = true;
-            }
-        }
-
-        private static void OnFirstChance(object sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs e)
-        {
-            try
-            {
-                // Only log the first few FileLoad/FileNotFound exceptions for our assemblies.
-                if (_firstChanceLogged >= FirstChanceLogLimit)
-                    return;
-
-                var ex = e.Exception;
-                switch (ex)
-                {
-                    case System.IO.FileLoadException fle:
-                        if (IsOurs(fle.FileName))
-                        {
-                            _firstChanceLogged++;
-                            SafeLog($"[FirstChance] FileLoad: {fle.FileName} :: {fle.Message}");
-                        }
-                        break;
-                    case System.IO.FileNotFoundException fnf:
-                        if (IsOurs(fnf.FileName))
-                        {
-                            _firstChanceLogged++;
-                            SafeLog($"[FirstChance] FileNotFound: {fnf.FileName} :: {fnf.Message}");
-                        }
-                        break;
-                }
-            }
-            catch
-            {
-                // swallow
-            }
-        }
-
-        private static bool IsOurs(string fileName)
-        {
-            if (string.IsNullOrEmpty(fileName)) return false;
-            return fileName.IndexOf("MicroEng", StringComparison.OrdinalIgnoreCase) >= 0
-                   || fileName.IndexOf("Wpf.Ui", StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static Assembly OnResolve(object sender, ResolveEventArgs args)
-        {
-            try
-            {
-                var requested = new AssemblyName(args.Name);
-                var name = requested.Name ?? string.Empty;
-                if (string.IsNullOrEmpty(name))
-                    return null;
-
-                // Ignore resource satellites.
-                if (name.EndsWith(".resources", StringComparison.OrdinalIgnoreCase))
-                    return null;
-
-                // Only handle our own and Wpf.Ui assemblies.
-                if (!ShouldHandle(name))
-                {
-                    return null;
-                }
-
-                // If it's already loaded, never load it again (avoids duplicate-load issues that can break WPF pack URIs).
-                var alreadyLoaded = TryGetLoaded(name);
-                if (alreadyLoaded != null)
-                {
-                    return alreadyLoaded;
-                }
-
-                _resolving ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (!_resolving.Add(name))
-                {
-                    return null;
-                }
-
-                try
-                {
-                    var candidate = Path.Combine(AssemblyDir, name + ".dll");
-                    if (!File.Exists(candidate))
-                    {
-                        return null;
-                    }
-
-                    // Re-check in case another thread loaded it while we were waiting.
-                    alreadyLoaded = TryGetLoaded(name);
-                    if (alreadyLoaded != null)
-                    {
-                        return alreadyLoaded;
-                    }
-
-                    SafeResolveLogOnce($"[AssemblyResolve] Loading {name} from {candidate}");
-                    return Assembly.LoadFrom(candidate);
-                }
-                finally
-                {
-                    _resolving.Remove(name);
-                }
-            }
-            catch
-            {
-                // swallow
-            }
-            return null;
-        }
-
-        private static bool ShouldHandle(string assemblySimpleName)
-        {
-            return assemblySimpleName.StartsWith("MicroEng", StringComparison.OrdinalIgnoreCase)
-                   || assemblySimpleName.StartsWith("Wpf.Ui", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static Assembly TryGetLoaded(string simpleName)
-        {
-            try
-            {
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    var asmName = asm.GetName().Name;
-                    if (string.Equals(asmName, simpleName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return asm;
-                    }
-                }
-            }
-            catch
-            {
-                // swallow
-            }
-
-            return null;
-        }
-
-        private static void SafeResolveLogOnce(string message)
-        {
-            try
-            {
-                lock (Sync)
-                {
-                    if (!ResolveLogOnce.Add(message))
-                    {
-                        return;
-                    }
-                }
-
-                SafeLog(message);
-            }
-            catch
-            {
-                // swallow
-            }
-        }
-
-        private static void SafeLog(string message)
-        {
-            var line = $"{DateTime.Now:HH:mm:ss} {message}";
-            WriteLogLine(LogFilePathPrimary, line);
-            WriteLogLine(LogFilePathFallback, line);
-        }
-
-        private static void WriteLogLine(string path, string line)
-        {
-            try
-            {
-                var dir = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
-                File.AppendAllLines(path, new[] { line });
-            }
-            catch
-            {
-                // swallow
             }
         }
     }

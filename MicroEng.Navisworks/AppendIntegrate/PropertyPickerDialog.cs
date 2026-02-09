@@ -97,6 +97,42 @@ namespace MicroEng.Navisworks
             Controls.Add(bottomPanel);
             Controls.Add(_itemLabel);
 
+            DataScraperCache.SessionAdded += OnDataScraperSessionAdded;
+            DataScraperCache.CacheChanged += OnDataScraperCacheChanged;
+
+            LoadProperties();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            DataScraperCache.SessionAdded -= OnDataScraperSessionAdded;
+            DataScraperCache.CacheChanged -= OnDataScraperCacheChanged;
+            base.OnFormClosed(e);
+        }
+
+        private void OnDataScraperSessionAdded(ScrapeSession _)
+        {
+            RefreshFromDataScraperCache();
+        }
+
+        private void OnDataScraperCacheChanged()
+        {
+            RefreshFromDataScraperCache();
+        }
+
+        private void RefreshFromDataScraperCache()
+        {
+            if (_sampleItem != null || IsDisposed)
+            {
+                return;
+            }
+
+            if (InvokeRequired)
+            {
+                BeginInvoke(new MethodInvoker(RefreshFromDataScraperCache));
+                return;
+            }
+
             LoadProperties();
         }
 

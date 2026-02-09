@@ -26,6 +26,7 @@ namespace MicroEng.Navisworks
         private AppendIntegrateTemplate _currentTemplate;
         private ObservableCollection<AppendIntegrateRow> _rowBinding;
         private List<string> _dataProfiles = new();
+        private bool _isRefreshingDataProfiles;
 
         public Action<string> LogAction { get; set; }
 
@@ -51,6 +52,41 @@ namespace MicroEng.Navisworks
             ModeColumn.ItemsSource = Enum.GetValues(typeof(AppendValueMode));
             OptionColumn.ItemsSource = Enum.GetValues(typeof(AppendValueOption));
             RefreshDataProfiles();
+            DataScraperCache.SessionAdded += OnDataScraperSessionAdded;
+            DataScraperCache.CacheChanged += OnDataScraperCacheChanged;
+            Closed += (_, __) =>
+            {
+                DataScraperCache.SessionAdded -= OnDataScraperSessionAdded;
+                DataScraperCache.CacheChanged -= OnDataScraperCacheChanged;
+            };
+        }
+
+        private void OnDataScraperSessionAdded(ScrapeSession session)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => OnDataScraperSessionAdded(session)));
+                return;
+            }
+
+            var selected = DataProfileCombo.SelectedItem as string;
+            if (string.IsNullOrWhiteSpace(selected))
+            {
+                selected = NormalizeProfileName(session?.ProfileName);
+            }
+
+            RefreshDataProfiles(selected);
+        }
+
+        private void OnDataScraperCacheChanged()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(OnDataScraperCacheChanged));
+                return;
+            }
+
+            RefreshDataProfiles(DataProfileCombo.SelectedItem as string);
         }
 
         private void TemplateCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -289,28 +325,7 @@ namespace MicroEng.Navisworks
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
         {
-            if (SnackbarPresenter == null)
-            {
-                return;
-            }
-
-            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
-            {
-                Title = title,
-                Content = message,
-                Appearance = appearance,
-                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
-                {
-                    Filled = true,
-                    FontSize = 25
-                },
-                Foreground = System.Windows.Media.Brushes.Black,
-                ContentForeground = System.Windows.Media.Brushes.Black,
-                Timeout = TimeSpan.FromSeconds(4),
-                IsCloseButtonEnabled = false
-            };
-
-            snackbar.Show();
+            MicroEngSnackbar.Show(SnackbarPresenter, title, message, appearance, icon);
         }
 
         private void FlashSuccess(System.Windows.Controls.Button button)
@@ -335,26 +350,60 @@ namespace MicroEng.Navisworks
             flashBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
         }
 
-        private void RefreshDataProfiles()
+        private void RefreshDataProfiles(string preferredProfile = null)
         {
+            var selectedProfile = preferredProfile;
+            if (string.IsNullOrWhiteSpace(selectedProfile))
+            {
+                selectedProfile = DataProfileCombo.SelectedItem as string;
+            }
+
             _dataProfiles = DataScraperCache.AllSessions
-                .Select(s => string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName)
+                .Select(s => NormalizeProfileName(s.ProfileName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n)
                 .ToList();
-            DataProfileCombo.ItemsSource = _dataProfiles;
-            if (_dataProfiles.Any())
+
+            if (!_dataProfiles.Any())
             {
-                DataProfileCombo.SelectedItem = _dataProfiles.First();
-                SetLastSessionFromProfile(_dataProfiles.First());
+                _dataProfiles.Add("Default");
+            }
+
+            _isRefreshingDataProfiles = true;
+            try
+            {
+                DataProfileCombo.ItemsSource = null;
+                DataProfileCombo.ItemsSource = _dataProfiles;
+
+                var match = _dataProfiles.FirstOrDefault(p => string.Equals(p, selectedProfile, StringComparison.OrdinalIgnoreCase));
+                DataProfileCombo.SelectedItem = match ?? _dataProfiles.FirstOrDefault();
+            }
+            finally
+            {
+                _isRefreshingDataProfiles = false;
+            }
+
+            if (DataProfileCombo.SelectedItem is string activeProfile && !string.IsNullOrWhiteSpace(activeProfile))
+            {
+                SetLastSessionFromProfile(activeProfile);
             }
         }
 
         private void DataProfileCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_isRefreshingDataProfiles)
+            {
+                return;
+            }
+
             var selected = DataProfileCombo.SelectedItem as string;
             if (string.IsNullOrWhiteSpace(selected)) return;
             SetLastSessionFromProfile(selected);
+        }
+
+        private static string NormalizeProfileName(string profileName)
+        {
+            return string.IsNullOrWhiteSpace(profileName) ? "Default" : profileName;
         }
 
         private void SetLastSessionFromProfile(string profileName)

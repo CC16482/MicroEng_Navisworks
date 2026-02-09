@@ -48,10 +48,14 @@ namespace MicroEng.Navisworks
         private bool _heartbeatArmed;
         private string _lastChooseCategoryFilterText;
         private string _lastChoosePropertyFilterText;
-        private IReadOnlyCollection<string> _lastSelectionKeys;
+        private HashSet<string> _lastSelectionKeys;
         private CancellationTokenSource _selectionScanCts;
         private Task _selectionScanTask;
         private int _selectionScanVersion;
+        private readonly object _selectionIndexGate = new();
+        private Guid _selectionIndexSessionId = Guid.Empty;
+        private int _selectionIndexRawEntryCount = -1;
+        private Dictionary<string, string[]> _selectionIndexByItemKey;
 
         public DataMatrixColumnBuilderWindow(
             IEnumerable<DataMatrixAttributeDefinition> attributes,
@@ -122,6 +126,7 @@ namespace MicroEng.Navisworks
                 {
                     StopSelectionWatcher();
                     CancelSelectionScan();
+                    ClearSelectionIndexCache();
                     _viewModel.SetSelectionFilterIds(null);
                 }
             }
@@ -133,6 +138,7 @@ namespace MicroEng.Navisworks
             _leftScrollIdleTimer.Stop();
             StopSelectionWatcher();
             CancelSelectionScan();
+            ClearSelectionIndexCache();
             if (!_applied)
             {
                 Cancelled?.Invoke(this, EventArgs.Empty);
@@ -753,10 +759,10 @@ namespace MicroEng.Navisworks
             }
 
             _lastSelectionKeys = keys;
-            UpdateSelectionFilterFromSelection();
+            UpdateSelectionFilterFromSelection(keys);
         }
 
-        private void UpdateSelectionFilterFromSelection()
+        private void UpdateSelectionFilterFromSelection(HashSet<string> selectionKeys = null)
         {
             if (!_viewModel.FilterBySelection)
             {
@@ -767,23 +773,13 @@ namespace MicroEng.Navisworks
             var doc = NavisApp.ActiveDocument;
             if (session == null || doc?.CurrentSelection?.SelectedItems == null)
             {
+                ClearSelectionIndexCache();
                 _viewModel.SetSelectionFilterIds(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
                 return;
             }
 
             var sw = ColumnBuilderDiagnostics.Start("SelectionFilter");
-            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (ModelItem item in doc.CurrentSelection.SelectedItems)
-            {
-                try
-                {
-                    keys.Add(item.InstanceGuid.ToString("D"));
-                }
-                catch
-                {
-                    // ignore
-                }
-            }
+            var keys = selectionKeys ?? GetCurrentSelectionKeys();
 
             if (keys.Count == 0)
             {
@@ -824,8 +820,10 @@ namespace MicroEng.Navisworks
             }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
         }
 
-        private static HashSet<string> BuildSelectionFilterIdsForKeys(ScrapeSession session, HashSet<string> keys, CancellationToken token)
+        private HashSet<string> BuildSelectionFilterIdsForKeys(ScrapeSession session, HashSet<string> keys, CancellationToken token)
         {
+            token.ThrowIfCancellationRequested();
+
             var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (session == null || keys == null || keys.Count == 0)
             {
@@ -838,46 +836,137 @@ namespace MicroEng.Navisworks
                 return ids;
             }
 
-            var idCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var entry in rawEntries)
+            var selectionIndex = GetOrBuildSelectionIndex(session, rawEntries, token);
+            if (selectionIndex == null || selectionIndex.Count == 0)
             {
-                if (token.IsCancellationRequested)
-                {
-                    return ids;
-                }
+                return ids;
+            }
 
-                if (!keys.Contains(entry.ItemKey))
+            foreach (var key in keys)
+            {
+                token.ThrowIfCancellationRequested();
+
+                if (!selectionIndex.TryGetValue(key, out var itemIds) || itemIds == null)
                 {
                     continue;
                 }
 
-                var category = entry.Category ?? string.Empty;
-                var name = entry.Name ?? string.Empty;
-
-                if (!idCache.TryGetValue(category, out var byName))
+                foreach (var id in itemIds)
                 {
-                    byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    idCache[category] = byName;
+                    ids.Add(id);
                 }
-
-                if (!byName.TryGetValue(name, out var id))
-                {
-                    id = string.Concat(category, "|", name);
-                    byName[name] = id;
-                }
-
-                ids.Add(id);
             }
 
             return ids;
         }
 
-        private static IReadOnlyCollection<string> GetCurrentSelectionKeys()
+        private Dictionary<string, string[]> GetOrBuildSelectionIndex(
+            ScrapeSession session,
+            IList<RawEntry> rawEntries,
+            CancellationToken token)
+        {
+            if (session == null || rawEntries == null || rawEntries.Count == 0)
+            {
+                return null;
+            }
+
+            lock (_selectionIndexGate)
+            {
+                if (_selectionIndexByItemKey != null
+                    && _selectionIndexSessionId == session.Id
+                    && _selectionIndexRawEntryCount == rawEntries.Count)
+                {
+                    return _selectionIndexByItemKey;
+                }
+            }
+
+            var built = BuildSelectionIndex(rawEntries, token);
+            token.ThrowIfCancellationRequested();
+
+            lock (_selectionIndexGate)
+            {
+                token.ThrowIfCancellationRequested();
+
+                _selectionIndexSessionId = session.Id;
+                _selectionIndexRawEntryCount = rawEntries.Count;
+                _selectionIndexByItemKey = built;
+                return _selectionIndexByItemKey;
+            }
+        }
+
+        private static Dictionary<string, string[]> BuildSelectionIndex(IList<RawEntry> rawEntries, CancellationToken token)
+        {
+            var indexByItemKey = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            var idCache = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in rawEntries)
+            {
+                token.ThrowIfCancellationRequested();
+
+                if (entry == null || string.IsNullOrWhiteSpace(entry.ItemKey))
+                {
+                    continue;
+                }
+
+                var id = GetOrCreateAttributeId(idCache, entry.Category, entry.Name);
+
+                if (!indexByItemKey.TryGetValue(entry.ItemKey, out var ids))
+                {
+                    ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    indexByItemKey[entry.ItemKey] = ids;
+                }
+
+                ids.Add(id);
+            }
+
+            var compact = new Dictionary<string, string[]>(indexByItemKey.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in indexByItemKey)
+            {
+                compact[pair.Key] = pair.Value.ToArray();
+            }
+
+            return compact;
+        }
+
+        private static string GetOrCreateAttributeId(
+            IDictionary<string, Dictionary<string, string>> cache,
+            string category,
+            string name)
+        {
+            var normalizedCategory = category ?? string.Empty;
+            var normalizedName = name ?? string.Empty;
+
+            if (!cache.TryGetValue(normalizedCategory, out var byName))
+            {
+                byName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                cache[normalizedCategory] = byName;
+            }
+
+            if (!byName.TryGetValue(normalizedName, out var id))
+            {
+                id = string.Concat(normalizedCategory, "|", normalizedName);
+                byName[normalizedName] = id;
+            }
+
+            return id;
+        }
+
+        private void ClearSelectionIndexCache()
+        {
+            lock (_selectionIndexGate)
+            {
+                _selectionIndexSessionId = Guid.Empty;
+                _selectionIndexRawEntryCount = -1;
+                _selectionIndexByItemKey = null;
+            }
+        }
+
+        private static HashSet<string> GetCurrentSelectionKeys()
         {
             var doc = NavisApp.ActiveDocument;
             if (doc?.CurrentSelection?.SelectedItems == null)
             {
-                return Array.Empty<string>();
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             }
 
             var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -895,22 +984,12 @@ namespace MicroEng.Navisworks
             return keys;
         }
 
-        private static bool SelectionKeysEqual(IReadOnlyCollection<string> a, IReadOnlyCollection<string> b)
+        private static bool SelectionKeysEqual(HashSet<string> a, HashSet<string> b)
         {
             if (ReferenceEquals(a, b)) return true;
             if (a == null || b == null) return false;
             if (a.Count != b.Count) return false;
-            if (a.Count == 0) return true;
-
-            var set = new HashSet<string>(a, StringComparer.OrdinalIgnoreCase);
-            foreach (var key in b)
-            {
-                if (!set.Contains(key))
-                {
-                    return false;
-                }
-            }
-            return true;
+            return a.SetEquals(b);
         }
     }
 
@@ -1510,9 +1589,15 @@ namespace MicroEng.Navisworks
 
         public void SetSelectionFilterIds(HashSet<string> ids)
         {
+            var nextSelectionEmpty = _filterBySelection && (ids == null || ids.Count == 0);
+            if (SelectionIdsEqual(_selectionFilteredIds, ids) && _selectionEmpty == nextSelectionEmpty)
+            {
+                return;
+            }
+
             _selectionFilteredIds = ids;
             _selectionFilteredCategories = null;
-            _selectionEmpty = _filterBySelection && (ids == null || ids.Count == 0);
+            _selectionEmpty = nextSelectionEmpty;
             if (_selectionEmpty)
             {
                 if (!IsFilterActive)
@@ -1544,6 +1629,14 @@ namespace MicroEng.Navisworks
             }
 
             ScheduleFilter();
+        }
+
+        private static bool SelectionIdsEqual(HashSet<string> a, HashSet<string> b)
+        {
+            if (ReferenceEquals(a, b)) return true;
+            if (a == null || b == null) return false;
+            if (a.Count != b.Count) return false;
+            return a.SetEquals(b);
         }
 
         internal bool IsPropertyVisible(ColumnBuilderPropertyNode node)
@@ -1690,8 +1783,24 @@ namespace MicroEng.Navisworks
         {
             if (_suppressChildren) return;
 
-            var allTrue = Properties.All(p => p.IsChecked == true);
-            var allFalse = Properties.All(p => p.IsChecked == false);
+            var allTrue = true;
+            var allFalse = true;
+            foreach (var child in Properties)
+            {
+                if (child.IsChecked == true)
+                {
+                    allFalse = false;
+                }
+                else
+                {
+                    allTrue = false;
+                }
+
+                if (!allTrue && !allFalse)
+                {
+                    break;
+                }
+            }
             var newValue = allTrue ? (bool?)true : allFalse ? (bool?)false : null;
 
             _suppressChildren = true;

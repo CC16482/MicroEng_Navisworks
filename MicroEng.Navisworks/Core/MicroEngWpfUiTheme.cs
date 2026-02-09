@@ -282,6 +282,7 @@ namespace MicroEng.Navisworks
 
             var appTheme = theme == MicroEngThemeMode.Dark ? ApplicationTheme.Dark : ApplicationTheme.Light;
             ApplyThemeDictionaries(root, appTheme);
+            ApplySurfaceResources(root, appTheme);
             ApplyTextResources(root, appTheme);
             ApplyAccentResources(root, appTheme);
             ApplyDataGridResources(root, dataGridGridLineColor);
@@ -298,6 +299,94 @@ namespace MicroEng.Navisworks
                 // Resource used by styles in MicroEngUiKit.xaml.
                 SetColorResource(root, themeDictionary, "MicroEngDataGridGridLineColor", gridLineColor);
                 SetBrushResource(root, themeDictionary, "MicroEngDataGridGridLineBrush", gridLineColor, opacity: 0.55);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private static void ApplySurfaceResources(FrameworkElement root, ApplicationTheme theme)
+        {
+            try
+            {
+                var themeDictionary = TryGetThemesDictionary(root) ?? root.Resources;
+
+                void Set(string colorKey, Color color)
+                {
+                    SetColorResource(root, themeDictionary, colorKey, color);
+                    SetBrushResource(root, themeDictionary, $"{colorKey}Brush", color);
+                }
+
+                void SetColorAndBrush(string colorKey, string brushKey, Color color)
+                {
+                    SetColorResource(root, themeDictionary, colorKey, color);
+                    SetBrushResource(root, themeDictionary, brushKey, color);
+                }
+
+                if (theme == ApplicationTheme.Light)
+                {
+                    // Light mode: gray canvas with white cards and controls.
+                    SetColorAndBrush("ApplicationBackgroundColor", "ApplicationBackgroundBrush", Color.FromRgb(0xF0, 0xF0, 0xF0));
+
+                    Set("ControlFillColorDefault", Color.FromRgb(0xFF, 0xFF, 0xFF));
+                    Set("ControlFillColorSecondary", Color.FromRgb(0xF7, 0xF7, 0xF7));
+                    Set("ControlFillColorTertiary", Color.FromRgb(0xF0, 0xF0, 0xF0));
+                    Set("ControlFillColorInputActive", Color.FromRgb(0xFF, 0xFF, 0xFF));
+
+                    Set("CardBackgroundFillColorDefault", Color.FromRgb(0xFF, 0xFF, 0xFF));
+                    Set("CardBackgroundFillColorSecondary", Color.FromRgb(0xFA, 0xFA, 0xFA));
+
+                    Set("LayerFillColorDefault", Color.FromRgb(0xF2, 0xF2, 0xF2));
+                    Set("LayerFillColorAlt", Color.FromRgb(0xEC, 0xEC, 0xEC));
+
+                    Set("SolidBackgroundFillColorBase", Color.FromRgb(0xFF, 0xFF, 0xFF));
+                    Set("SolidBackgroundFillColorSecondary", Color.FromRgb(0xF7, 0xF7, 0xF7));
+                    Set("SolidBackgroundFillColorTertiary", Color.FromRgb(0xFC, 0xFC, 0xFC));
+                    Set("SolidBackgroundFillColorQuarternary", Color.FromRgb(0xFF, 0xFF, 0xFF));
+                    Set("SolidBackgroundFillColorBaseAlt", Color.FromRgb(0xE3, 0xE3, 0xE3));
+
+                    Set("SubtleFillColorSecondary", Color.FromArgb(0x12, 0x00, 0x00, 0x00));
+                    Set("ControlAltFillColorSecondary", Color.FromArgb(0x0C, 0x00, 0x00, 0x00));
+                    Set("ControlAltFillColorTertiary", Color.FromArgb(0x16, 0x00, 0x00, 0x00));
+                    Set("ControlAltFillColorQuarternary", Color.FromArgb(0x24, 0x00, 0x00, 0x00));
+
+                    Set("ControlStrokeColorDefault", Color.FromArgb(0x2E, 0x00, 0x00, 0x00));
+                    Set("ControlStrokeColorSecondary", Color.FromArgb(0x47, 0x00, 0x00, 0x00));
+                    Set("CardStrokeColorDefault", Color.FromArgb(0x2E, 0x00, 0x00, 0x00));
+                    Set("CardStrokeColorDefaultSolid", Color.FromRgb(0xD0, 0xD0, 0xD0));
+                    return;
+                }
+
+                // Restore WPF-UI dark defaults when switching away from light mode.
+                SetColorAndBrush("ApplicationBackgroundColor", "ApplicationBackgroundBrush", Color.FromRgb(0x20, 0x20, 0x20));
+
+                Set("ControlFillColorDefault", Color.FromArgb(0x0F, 0xFF, 0xFF, 0xFF));
+                Set("ControlFillColorSecondary", Color.FromArgb(0x15, 0xFF, 0xFF, 0xFF));
+                Set("ControlFillColorTertiary", Color.FromArgb(0x08, 0xFF, 0xFF, 0xFF));
+                Set("ControlFillColorInputActive", Color.FromArgb(0xB3, 0x1E, 0x1E, 0x1E));
+
+                Set("CardBackgroundFillColorDefault", Color.FromArgb(0x0D, 0xFF, 0xFF, 0xFF));
+                Set("CardBackgroundFillColorSecondary", Color.FromArgb(0x08, 0xFF, 0xFF, 0xFF));
+
+                Set("LayerFillColorDefault", Color.FromArgb(0x4C, 0x3A, 0x3A, 0x3A));
+                Set("LayerFillColorAlt", Color.FromArgb(0x0D, 0xFF, 0xFF, 0xFF));
+
+                Set("SolidBackgroundFillColorBase", Color.FromRgb(0x20, 0x20, 0x20));
+                Set("SolidBackgroundFillColorSecondary", Color.FromRgb(0x1C, 0x1C, 0x1C));
+                Set("SolidBackgroundFillColorTertiary", Color.FromRgb(0x28, 0x28, 0x28));
+                Set("SolidBackgroundFillColorQuarternary", Color.FromRgb(0x2C, 0x2C, 0x2C));
+                Set("SolidBackgroundFillColorBaseAlt", Color.FromRgb(0x0A, 0x0A, 0x0A));
+
+                Set("SubtleFillColorSecondary", Color.FromArgb(0x0F, 0xFF, 0xFF, 0xFF));
+                Set("ControlAltFillColorSecondary", Color.FromArgb(0x19, 0x00, 0x00, 0x00));
+                Set("ControlAltFillColorTertiary", Color.FromArgb(0x0B, 0xFF, 0xFF, 0xFF));
+                Set("ControlAltFillColorQuarternary", Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF));
+
+                Set("ControlStrokeColorDefault", Color.FromArgb(0x12, 0xFF, 0xFF, 0xFF));
+                Set("ControlStrokeColorSecondary", Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF));
+                Set("CardStrokeColorDefault", Color.FromArgb(0x19, 0x00, 0x00, 0x00));
+                Set("CardStrokeColorDefaultSolid", Color.FromRgb(0x1C, 0x1C, 0x1C));
             }
             catch
             {

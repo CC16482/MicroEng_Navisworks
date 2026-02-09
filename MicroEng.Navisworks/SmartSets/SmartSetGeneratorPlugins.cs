@@ -1,6 +1,5 @@
 using System.Windows.Forms;
 using Autodesk.Navisworks.Api.Plugins;
-using NavisApp = Autodesk.Navisworks.Api.Application;
 using ElementHost = System.Windows.Forms.Integration.ElementHost;
 using MicroEng.Navisworks;
 
@@ -15,7 +14,6 @@ namespace MicroEng.Navisworks.SmartSets
         public override Control CreateControlPane()
         {
             MicroEngActions.Init();
-            MicroEngActions.Log("SmartSetGeneratorDockPane: CreateControlPane start");
 
             try
             {
@@ -24,7 +22,6 @@ namespace MicroEng.Navisworks.SmartSets
                     Dock = DockStyle.Fill,
                     Child = new SmartSetGeneratorControl()
                 };
-                MicroEngActions.Log("SmartSetGeneratorDockPane: CreateControlPane created ElementHost");
                 return host;
             }
             catch (System.Exception ex)
@@ -49,26 +46,4 @@ namespace MicroEng.Navisworks.SmartSets
         }
     }
 
-    [Plugin("MicroEng.SmartSetGenerator.Command", "MENG",
-        DisplayName = "Smart Set Generator",
-        ToolTip = "Show the Smart Set Generator window.")]
-    [AddInPlugin(AddInLocation.AddIn)]
-    public class SmartSetGeneratorCommand : AddInPlugin
-    {
-        public override int Execute(params string[] parameters)
-        {
-            MicroEngActions.Init();
-            try
-            {
-                MicroEngActions.TryShowSmartSetGenerator(out _);
-            }
-            catch (System.Exception ex)
-            {
-                MicroEngActions.Log($"SmartSetGeneratorCommand failed: {ex}");
-                MessageBox.Show($"Smart Set Generator failed: {ex.Message}", "Smart Set Generator", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-
-            return 0;
-        }
-    }
 }

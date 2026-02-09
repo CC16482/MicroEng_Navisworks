@@ -31,12 +31,14 @@ namespace MicroEng.Navisworks
         private readonly DataMatrixExporter _exporter = new();
 
         private List<DataMatrixAttributeDefinition> _attributes = new();
+        private Dictionary<string, DataMatrixAttributeDefinition> _attributesById = new(StringComparer.OrdinalIgnoreCase);
         private List<DataMatrixAttributeDefinition> _attributeCatalogAll = new();
         private List<DataMatrixRow> _allRows = new();
         private ObservableCollection<DataMatrixRow> _viewRows = new();
         private readonly Dictionary<Guid, ModelItem> _itemCache = new();
         private List<DataMatrixColumnFilter> _columnFilters = new();
         private List<CompiledFilter> _compiledFilters = new();
+        private List<List<CompiledFilter>> _compiledFilterGroups = new();
         private bool _filterCaseSensitive;
         private bool _filterTrimWhitespace = true;
 
@@ -47,13 +49,54 @@ namespace MicroEng.Navisworks
         private List<string> _visibleColumnOverride;
         private List<string> _requiredColumnOverride;
         private bool _updatingScope;
+        private bool _isRefreshingProfiles;
+        private bool _eventsHooked;
+        private bool _uiInitialized;
         private DataMatrixColumnBuilderWindow _columnsWindow;
 
         public DataMatrixControl()
         {
             InitializeComponent();
             MicroEngWpfUiTheme.ApplyTo(this);
-            Loaded += (_, __) => InitializeUi();
+            Loaded += OnLoaded;
+            Unloaded += OnUnloaded;
+        }
+
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            EnsureEventHandlers();
+
+            if (_uiInitialized)
+            {
+                return;
+            }
+
+            _uiInitialized = true;
+            InitializeUi();
+        }
+
+        private void OnUnloaded(object sender, RoutedEventArgs e)
+        {
+            if (!_eventsHooked)
+            {
+                return;
+            }
+
+            DataScraperCache.SessionAdded -= OnDataScraperSessionAdded;
+            DataScraperCache.CacheChanged -= OnDataScraperCacheChanged;
+            _eventsHooked = false;
+        }
+
+        private void EnsureEventHandlers()
+        {
+            if (_eventsHooked)
+            {
+                return;
+            }
+
+            DataScraperCache.SessionAdded += OnDataScraperSessionAdded;
+            DataScraperCache.CacheChanged += OnDataScraperCacheChanged;
+            _eventsHooked = true;
         }
 
         private void InitializeUi()
@@ -65,7 +108,15 @@ namespace MicroEng.Navisworks
                 var profile = ProfileCombo.SelectedItem?.ToString() ?? "Default";
                 MicroEngActions.TryShowDataScraper(profile, out _);
             };
-            ProfileCombo.SelectionChanged += (s, e) => LoadProfileSession();
+            ProfileCombo.SelectionChanged += (s, e) =>
+            {
+                if (_isRefreshingProfiles)
+                {
+                    return;
+                }
+
+                LoadProfileSession();
+            };
 
             ScopeCombo.SelectedIndex = 0;
             ScopeCombo.SelectionChanged += (s, e) => OnScopeChanged();
@@ -82,7 +133,11 @@ namespace MicroEng.Navisworks
             ViewPresetCombo.SelectionChanged += (s, e) => ApplyPresetSelection();
 
             ColumnsButton.Click += (s, e) => ShowColumnsDialog();
-            SyncToggle.Checked += (s, e) => _syncEnabled = true;
+            SyncToggle.Checked += (s, e) =>
+            {
+                _syncEnabled = true;
+                SyncSelectionToModel();
+            };
             SyncToggle.Unchecked += (s, e) => _syncEnabled = false;
             SelectedOnlyCheck.Checked += (s, e) => ApplyFiltersAndSorts();
             SelectedOnlyCheck.Unchecked += (s, e) => ApplyFiltersAndSorts();
@@ -96,18 +151,80 @@ namespace MicroEng.Navisworks
 
         }
 
-        private void RefreshProfiles()
+        private void OnDataScraperSessionAdded(ScrapeSession session)
         {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(() => OnDataScraperSessionAdded(session)));
+                return;
+            }
+
+            var preferred = ProfileCombo.SelectedItem?.ToString();
+            if (string.IsNullOrWhiteSpace(preferred))
+            {
+                preferred = NormalizeProfileName(session?.ProfileName);
+            }
+
+            RefreshProfiles(preferred);
+        }
+
+        private void OnDataScraperCacheChanged()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.BeginInvoke(new Action(OnDataScraperCacheChanged));
+                return;
+            }
+
+            RefreshProfiles(ProfileCombo.SelectedItem?.ToString());
+        }
+
+        private void RefreshProfiles(string preferredProfile = null)
+        {
+            var selectedProfile = preferredProfile;
+            if (string.IsNullOrWhiteSpace(selectedProfile))
+            {
+                selectedProfile = ProfileCombo.SelectedItem?.ToString();
+            }
+            if (string.IsNullOrWhiteSpace(selectedProfile))
+            {
+                selectedProfile = NormalizeProfileName(_currentSession?.ProfileName);
+            }
+
             ProfileCombo.Items.Clear();
             var profiles = DataScraperCache.AllSessions
-                .Select(s => string.IsNullOrWhiteSpace(s.ProfileName) ? "Default" : s.ProfileName)
+                .Select(s => NormalizeProfileName(s.ProfileName))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(p => p)
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            if (!profiles.Any()) profiles.Add("Default");
+            if (profiles.Count == 0) profiles.Add("Default");
             foreach (var p in profiles) ProfileCombo.Items.Add(p);
-            ProfileCombo.SelectedIndex = 0;
+
+            var target = profiles.FirstOrDefault(p => string.Equals(p, selectedProfile, StringComparison.OrdinalIgnoreCase));
+
+            _isRefreshingProfiles = true;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(target))
+                {
+                    ProfileCombo.SelectedItem = target;
+                }
+                else
+                {
+                    ProfileCombo.SelectedIndex = 0;
+                }
+            }
+            finally
+            {
+                _isRefreshingProfiles = false;
+            }
+
             LoadProfileSession();
+        }
+
+        private static string NormalizeProfileName(string profileName)
+        {
+            return string.IsNullOrWhiteSpace(profileName) ? "Default" : profileName;
         }
 
         private void LoadProfileSession()
@@ -121,10 +238,12 @@ namespace MicroEng.Navisworks
             {
                 MatrixGrid.ItemsSource = null;
                 _attributes.Clear();
+                _attributesById.Clear();
                 _attributeCatalogAll.Clear();
                 _allRows.Clear();
                 _columnFilters = new List<DataMatrixColumnFilter>();
                 _compiledFilters = new List<CompiledFilter>();
+                _compiledFilterGroups = new List<List<CompiledFilter>>();
                 _filterCaseSensitive = false;
                 _filterTrimWhitespace = true;
                 _currentSession = null;
@@ -165,7 +284,7 @@ namespace MicroEng.Navisworks
 
             foreach (var id in ids)
             {
-                var attr = _attributes.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase));
+                var attr = GetAttributeById(id);
                 if (attr == null) continue;
                 var headerInfo = new ColumnHeaderInfo(
                     attr.DisplayName ?? attr.PropertyName,
@@ -206,6 +325,7 @@ namespace MicroEng.Navisworks
             {
                 MatrixGrid.ItemsSource = null;
                 _attributes.Clear();
+                _attributesById.Clear();
                 _allRows.Clear();
                 RowsStatus.Text = "Rows: 0";
                 ViewStatus.Text = $"View: {_currentPreset?.Name ?? "(Default)"}";
@@ -218,6 +338,7 @@ namespace MicroEng.Navisworks
             if (visibleIds.Count == 0)
             {
                 _attributes = new List<DataMatrixAttributeDefinition>();
+                _attributesById.Clear();
                 _allRows = new List<DataMatrixRow>();
                 _itemCache.Clear();
 
@@ -243,6 +364,7 @@ namespace MicroEng.Navisworks
                     built.Rows.Where(row => required.All(id => row.Values.ContainsKey(id))).ToList());
             }
             _attributes = built.Attributes;
+            RebuildAttributeLookup();
             _allRows = built.Rows;
             _itemCache.Clear();
 
@@ -523,7 +645,7 @@ namespace MicroEng.Navisworks
         {
             IEnumerable<DataMatrixRow> rows = _allRows;
 
-            if (_compiledFilters.Count > 0)
+            if (_compiledFilterGroups.Count > 0)
             {
                 rows = rows.Where(ColumnFiltersMatch);
             }
@@ -545,21 +667,15 @@ namespace MicroEng.Navisworks
 
         private bool ColumnFiltersMatch(DataMatrixRow row)
         {
-            if (_compiledFilters.Count == 0) return true;
+            if (_compiledFilterGroups.Count == 0) return true;
 
-            foreach (var group in _compiledFilters.GroupBy(f => f.AttributeId, StringComparer.OrdinalIgnoreCase))
+            foreach (var group in _compiledFilterGroups)
             {
-                var list = group.Where(f => f.IsValid).ToList();
-                if (list.Count == 0)
+                var result = FilterMatches(row, group[0]);
+                for (var i = 1; i < group.Count; i++)
                 {
-                    continue;
-                }
-
-                var result = FilterMatches(row, list[0]);
-                for (var i = 1; i < list.Count; i++)
-                {
-                    var current = FilterMatches(row, list[i]);
-                    result = list[i].Join == DataMatrixFilterJoin.And
+                    var current = FilterMatches(row, group[i]);
+                    result = group[i].Join == DataMatrixFilterJoin.And
                         ? result && current
                         : result || current;
                 }
@@ -609,6 +725,12 @@ namespace MicroEng.Navisworks
                 .Where(f => f != null && f.IsEnabled && !string.IsNullOrWhiteSpace(f.AttributeId))
                 .Select(f => CompiledFilter.Create(f))
                 .ToList();
+
+            _compiledFilterGroups = _compiledFilters
+                .Where(f => f.IsValid)
+                .GroupBy(f => f.AttributeId, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.ToList())
+                .ToList();
         }
 
         private void PruneColumnFilters(IList<string> visibleIds)
@@ -650,11 +772,18 @@ namespace MicroEng.Navisworks
 
         private void UpdateColumnHeaderFilterIndicators()
         {
+            var activeColumnIds = new HashSet<string>(
+                (_columnFilters ?? Enumerable.Empty<DataMatrixColumnFilter>())
+                    .Where(f => f != null && f.IsEnabled && !string.IsNullOrWhiteSpace(f.AttributeId))
+                    .Select(f => f.AttributeId),
+                StringComparer.OrdinalIgnoreCase);
+
             foreach (var col in MatrixGrid.Columns)
             {
                 if (col.Header is ColumnHeaderInfo header)
                 {
-                    header.IsFiltered = HasActiveFilterForColumn(header.ColumnId);
+                    header.IsFiltered = !string.IsNullOrWhiteSpace(header.ColumnId)
+                        && activeColumnIds.Contains(header.ColumnId);
                 }
             }
         }
@@ -1087,10 +1216,14 @@ namespace MicroEng.Navisworks
         private void MatrixGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             UpdateSelectionStatus();
+            SyncSelectionToModel();
+        }
 
+        private void SyncSelectionToModel()
+        {
             if (_suppressSelectionSync || !_syncEnabled) return;
             var items = MatrixGrid.SelectedItems.Cast<DataMatrixRow>().ToList();
-            if (!items.Any()) return;
+            if (items.Count == 0) return;
 
             var doc = NavisApp.ActiveDocument;
             if (doc == null) return;
@@ -1102,12 +1235,11 @@ namespace MicroEng.Navisworks
                 if (mi != null) collection.Add(mi);
             }
 
-            if (collection.Any())
+            if (collection.Count > 0)
             {
                 doc.CurrentSelection.CopyFrom(collection);
             }
         }
-
 
         private void MatrixGrid_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
         {
@@ -1228,7 +1360,7 @@ namespace MicroEng.Navisworks
                 if (mi != null) collection.Add(mi);
             }
 
-            if (!collection.Any())
+            if (collection.Count == 0)
             {
                 ShowSnackbar("Selection failed", "Could not resolve selected rows to model items.", WpfUiControls.ControlAppearance.Caution, WpfUiControls.SymbolRegular.ErrorCircle24);
                 return;
@@ -1594,7 +1726,7 @@ namespace MicroEng.Navisworks
 
         private void ExportCsv(bool filtered)
         {
-            if (!_allRows.Any()) return;
+            if (_allRows.Count == 0) return;
             var dlg = new Microsoft.Win32.SaveFileDialog
             {
                 Filter = "CSV Files|*.csv",
@@ -1606,7 +1738,7 @@ namespace MicroEng.Navisworks
 
             // Respect the user's current column order.
             var columns = GetVisibleColumnIdsFromGrid()
-                .Select(id => _attributes.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase)))
+                .Select(GetAttributeById)
                 .Where(a => a != null)
                 .ToList();
 
@@ -1634,7 +1766,7 @@ namespace MicroEng.Navisworks
 
         private void ExportJsonl(bool filtered, DataMatrixJsonlMode mode)
         {
-            if (!_allRows.Any()) return;
+            if (_allRows.Count == 0) return;
             var dlg = new Microsoft.Win32.SaveFileDialog
             {
                 Filter = "JSONL Files|*.jsonl|GZip JSONL|*.jsonl.gz|All files (*.*)|*.*",
@@ -1647,7 +1779,7 @@ namespace MicroEng.Navisworks
 
             // Respect the user's current column order.
             var columns = GetVisibleColumnIdsFromGrid()
-                .Select(id => _attributes.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase)))
+                .Select(GetAttributeById)
                 .Where(attr => attr != null)
                 .ToList();
 
@@ -1774,8 +1906,31 @@ namespace MicroEng.Navisworks
         private string GetColumnDisplayName(string columnId)
         {
             if (string.IsNullOrWhiteSpace(columnId)) return string.Empty;
-            var attr = _attributes?.FirstOrDefault(a => string.Equals(a.Id, columnId, StringComparison.OrdinalIgnoreCase));
+            var attr = GetAttributeById(columnId);
             return attr?.DisplayName ?? attr?.PropertyName ?? columnId;
+        }
+
+        private DataMatrixAttributeDefinition GetAttributeById(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return null;
+            }
+
+            if (_attributesById.TryGetValue(id, out var attr))
+            {
+                return attr;
+            }
+
+            return _attributes?.FirstOrDefault(a => string.Equals(a.Id, id, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void RebuildAttributeLookup()
+        {
+            _attributesById = (_attributes ?? new List<DataMatrixAttributeDefinition>())
+                .Where(a => a != null && !string.IsNullOrWhiteSpace(a.Id))
+                .GroupBy(a => a.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         }
 
         private sealed class ColumnHeaderInfo : INotifyPropertyChanged
@@ -1813,28 +1968,7 @@ namespace MicroEng.Navisworks
 
         private void ShowSnackbar(string title, string message, WpfUiControls.ControlAppearance appearance, WpfUiControls.SymbolRegular icon)
         {
-            if (SnackbarPresenter == null)
-            {
-                return;
-            }
-
-            var snackbar = new WpfUiControls.Snackbar(SnackbarPresenter)
-            {
-                Title = title,
-                Content = message,
-                Appearance = appearance,
-                Icon = new WpfUiControls.SymbolIcon(WpfUiControls.SymbolRegular.PresenceAvailable24)
-                {
-                    Filled = true,
-                    FontSize = 25
-                },
-                Foreground = System.Windows.Media.Brushes.Black,
-                ContentForeground = System.Windows.Media.Brushes.Black,
-                Timeout = TimeSpan.FromSeconds(4),
-                IsCloseButtonEnabled = false
-            };
-
-            snackbar.Show();
+            MicroEngSnackbar.Show(SnackbarPresenter, title, message, appearance, icon);
         }
 
         private class ColumnsDialog : Window

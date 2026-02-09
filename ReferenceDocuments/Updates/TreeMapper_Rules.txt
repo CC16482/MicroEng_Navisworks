@@ -1,0 +1,200 @@
+Below is the “rule set” that actually exists in Navisworks for **Item → Icon =** `File / Layer / Group / Composite Object / Insert / Geometry / Instance / Collection` — and where there are *real constraints* versus where it’s just “whatever the loader/exporter produced”.
+
+The key framing is this:
+
+* The **Selection Tree is a hierarchy Navisworks uses to identify “object paths”** from the **file node down to a particular object**, and it largely reflects the **source CAD/BIM structure**. ([ManualsLib][1])
+* The **Icon** value is Navisworks’ way of tagging each node in that hierarchy as a particular “kind” of node (model/layer/group/instancing/geometry/etc.). Autodesk’s own Selection Tree reference is essentially a glossary of those node kinds. ([Autodesk Help][2])
+* Navisworks selection behavior (what level you actually “grab” when you click something) is governed by **Selection Resolution**, which is literally defined as: Navisworks needs a **starting point for the object path in the Selection Tree**, and you choose where it starts (Model/Layer/Last Object/Geometry/etc.). ([ManualsLib][3])
+
+So: there *are* “top vs bottom” implications, but Navisworks does **not** impose a strict depth schema where each Icon must only appear at one fixed level.
+
+---
+
+## What is actually constrained
+
+### `File`
+
+**Strongest constraint of all the icons.**
+
+* In Autodesk’s terminology, the top icon is “a model (drawing/design file)”. ([Autodesk Help][2])
+* In your UI, that same thing shows as **Icon = `File`** (Navisworks’ property string), and it acts as the **root of an “object path”** used to identify objects “from the file name down to a particular object.” ([ManualsLib][1])
+
+**Practical rule you can treat as “nearly always true”:**
+
+* `File` is the **top node of a model branch** (one per appended file / loaded model).
+* If you see multiple `File` nodes, that’s usually because you have **multiple appended models** (multiple roots).
+
+**Why this matters operationally:**
+Selection Resolution includes “Model” (= start at the model node, selecting all objects in the model). If you’re inadvertently selecting the entire appended file, Autodesk’s own guidance is to change Selection Resolution away from that (e.g., to Last Object or Geometry). ([ManualsLib][3])
+
+---
+
+### `Geometry` and `Instance`
+
+These are the **closest thing to “bottom-of-tree” nodes.**
+
+Autodesk defines:
+
+* **Geometry** = “an item of geometry, such as a polygon.” ([Autodesk Help][2])
+* **Instance** = “an instanced item of geometry.” ([Autodesk Help][2])
+
+And, critically, Selection Resolution explicitly treats **Geometry** as the most specific end of the path:
+
+* “Geometry” selection resolution **selects the last item in the selection tree path** (most specific). 
+
+**Practical rule you can treat as “almost always”:**
+
+* If a node’s Icon is `Geometry` (or `Instance`), it’s generally at/near the **leaf end** of the hierarchy.
+* It may not be the *only* leaf type (because `Instance` can also be leaf-y), but `Geometry` is basically Navisworks’ canonical “bottom-level selectable primitive” concept.
+
+**Where people get tripped up:**
+
+* Selecting/working at `Geometry` level can be *too granular* for many workflows (properties can be less meaningful; instancing can get messy). That’s why “Last Object” exists (more below). 
+
+---
+
+## What is NOT strictly constrained (but has strong conventions)
+
+### `Composite Object`
+
+This is the “bridge” between “a real object” and “raw geometry”.
+
+Autodesk’s definition is explicit:
+
+* `Composite Object` is a **single CAD object represented in Navisworks by a group of geometry items**. ([Autodesk Help][2])
+
+And Navisworks’ selection logic explicitly prefers composite objects:
+
+* “Last Object” selection resolution selects the most specific item in the path **that is marked as a composite object**; if none exists, it falls back to geometry. 
+
+**Practical convention (very strong):**
+
+* `Composite Object` usually sits **above** `Geometry`/`Instance` and **groups** them.
+
+**But is it guaranteed to exist?**
+No. Whether a given physical element appears as a composite object depends heavily on the translator/exporter and source format. The selection logic itself admits that sometimes *no composite exists*, so it falls back to geometry. 
+
+So you can’t enforce “Composite Object must exist at depth N”. You can only say:
+
+* If it exists, it tends to be “near-bottom but not leaf”.
+
+---
+
+### `Group` and `Insert`
+
+These are about **definitions vs occurrences** (instancing semantics), and that alone means they can’t be “fixed depth”.
+
+Autodesk defines:
+
+* `Group` = a group definition (e.g., AutoCAD block definition / MicroStation cell definition). ([Autodesk Help][2])
+* `Insert` = an **instanced group** (an inserted block/cell). ([Autodesk Help][2])
+
+The most “rule-like” thing Autodesk says about these is behavior:
+
+* If a **group** is marked hidden/required, **all instances of that group** are marked hidden/required.
+* If you want to operate on a **single occurrence**, you should mark the **instanced group** (the parent level above) hidden/required instead. ([ManualsLib][1])
+
+That’s a *functional rule* that implies a typical relationship:
+
+**Practical convention:**
+
+* You’ll often see `Insert` “wrapping” an occurrence where the geometry is, because it’s the handle for “this instance here”.
+* `Group` relates to “the definition”, and actions at that level can affect all occurrences. ([ManualsLib][1])
+
+**Does that force them to be in the middle?**
+No. A model can be deeply nested with inserts inside inserts, groups inside collections, etc. There’s no single “group depth”. The only consistent thing is **what they mean**.
+
+---
+
+### `Layer`
+
+Autodesk defines `Layer` as “a layer or level.” ([Autodesk Help][2])
+
+Selection Resolution also treats Layer as a selectable level:
+
+* “Layer” resolution means the object path starts at the layer node, selecting all objects within that layer. ([ManualsLib][3])
+
+**Practical convention:**
+
+* `Layer` tends to be **high-ish** in the tree (often directly below `File` for DWG/DGN-style sources).
+
+**But:**
+
+* Some sources won’t expose meaningful layers in a way you expect, or they’ll have multiple levels of grouping before you hit anything that looks like a “layer” concept.
+
+So: don’t rely on “Layer is always depth 2”. Rely on “Layer is a grouping boundary the loader provides.”
+
+---
+
+### `Collection`
+
+This is the least depth-constrained of the list.
+
+Autodesk defines:
+
+* `Collection` = “a series of items within a Revit model”, and it **may include any other geometry** such as groups, sub-groups, or instanced groups; collections are visible in the Standard tab. ([Autodesk Help][2])
+
+That definition is basically Autodesk explicitly telling you: **Collection can contain almost anything**.
+
+**Practical consequence:**
+
+* `Collection` can appear at multiple levels and can be nested.
+* You should *not* assume it’s “near the top” or “near the bottom”.
+
+---
+
+## A realistic “ordering model” you can use (with caveats)
+
+If you need a “ruling” (for validation, tree mapping, expectations), the closest defensible model is:
+
+1. **Root / model boundary:** `File`
+2. **High-level groupings (format-dependent):** `Layer` and/or `Collection`
+3. **Object definition & instancing structure:** `Group` + `Insert` (possibly nested)
+4. **Object-level wrapper:** `Composite Object` (when present)
+5. **Renderable primitives:** `Geometry` and/or `Instance`
+
+This matches:
+
+* Autodesk’s icon definitions (what each thing *is*). ([Autodesk Help][2])
+* The fact Navisworks uses the hierarchy as an **object path** from file to object. ([ManualsLib][1])
+* The explicit behavior that **Geometry is the last item in the path** when selection resolution is Geometry. 
+* The explicit behavior that **Last Object** hunts for a composite object first and falls back to geometry. 
+
+**But it’s still not a “must follow depth schema.”** It’s a common structure, not a strict constraint.
+
+---
+
+## So… does it matter?
+
+### It matters for behavior (selection, searching, clashing), but not as a strict hierarchy contract.
+
+* Navisworks selection is literally defined in terms of where the object path starts in the Selection Tree (Model, Layer, Last Object, Geometry, etc.). That means the distinction between “top-ish nodes” and “bottom-ish nodes” is operationally real. ([ManualsLib][3])
+* The Selection Tree icon types also directly encode instancing semantics (group vs instanced group), which affects actions like hidden/required at group vs occurrence level. ([ManualsLib][1])
+* But the **exact depth** where you encounter `Layer`, `Group`, `Insert`, or `Collection` is *not guaranteed*, because the hierarchy reflects the source model structure and how the loader translates it into Navisworks’ object path. ([ManualsLib][1])
+
+---
+
+## If you’re building rules, here are “safe” rules vs “unsafe” rules
+
+### Safe rules (low regret)
+
+* **Treat `File` as a root boundary** for a model branch.
+* **Treat `Geometry`/`Instance` as leaf-ish** and don’t expect meaningful substructure below them. 
+* **Prefer `Composite Object` over `Geometry`** when you want “the object” instead of triangles (because “Last Object” is designed exactly for that). 
+* **Treat `Collection` as a generic container** that can appear anywhere and can contain anything (especially in Revit-derived trees). ([Autodesk Help][2])
+* **Assume `Insert` is the “occurrence handle”** and `Group` is the “definition handle” (so actions differ). ([ManualsLib][1])
+
+### Unsafe rules (will break in real models)
+
+* “`Layer` is always directly under `File`.”
+* “`Group` is always above `Insert`” (often true, but not enforceable as a universal depth rule).
+* “Every object has a `Composite Object` node.”
+* “`Collection` is always near the top.”
+
+---
+
+If you tell me what your end goal is (e.g., **validating a Selection Tree export**, writing a **Tree Mapper rule set**, building **Search Sets** that avoid geometry-level selection, or normalizing **multiple authoring formats**), I can turn the above into a concrete set of **if/then rules** (including what to do when a model violates the “typical ordering”).
+
+[1]: https://www.manualslib.com/manual/417294/Autodesk-507b1-90a211-1301-Navisworks-Manage-2010.html?page=192 "Autodesk 507B1-90A211-1301 - NavisWorks Manage 2010 User Manual (Page 192 of 472) | ManualsLib"
+[2]: https://help.autodesk.com/cloudhelp/2016/ENU/Navisworks/files/GUID-BC657B3A-5104-45B7-93A9-C6F4A10ED0D4.htm "Reference for Selection Tree Window"
+[3]: https://www.manualslib.com/manual/417294/Autodesk-507b1-90a211-1301-Navisworks-Manage-2010.html?page=422 "Interface Node; Display Units Page; Selection Page - Autodesk 507B1-90A211-1301 - NavisWorks Manage 2010 User Manual [Page 422] | ManualsLib"

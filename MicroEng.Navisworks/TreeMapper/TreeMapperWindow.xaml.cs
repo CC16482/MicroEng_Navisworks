@@ -29,13 +29,10 @@ namespace MicroEng.Navisworks.TreeMapper
         private readonly DispatcherTimer _previewDebounce;
         private CancellationTokenSource _previewCts;
         private bool _isLoading;
-        private bool _isScrapeRunning;
         private bool _isPublishEnabled;
         private bool _isDirty;
         private string _profileName;
         private string _cacheStatusText;
-        private string _scrapeButtonText = "Run Data Scraper (Entire Model)";
-        private bool _isScrapeEnabled = true;
         private TreeMapperLevelViewModel _selectedLevel;
         private ScrapeSessionOption _selectedSession;
 
@@ -114,18 +111,6 @@ namespace MicroEng.Navisworks.TreeMapper
         {
             get => _cacheStatusText;
             private set => SetField(ref _cacheStatusText, value);
-        }
-
-        public string ScrapeButtonText
-        {
-            get => _scrapeButtonText;
-            private set => SetField(ref _scrapeButtonText, value);
-        }
-
-        public bool IsScrapeEnabled
-        {
-            get => _isScrapeEnabled;
-            private set => SetField(ref _isScrapeEnabled, value);
         }
 
         public bool IsPublishEnabled
@@ -417,13 +402,11 @@ namespace MicroEng.Navisworks.TreeMapper
             if (session == null)
             {
                 CacheStatusText = "No Data Scraper cache found. Run an entire model scrape to populate the Tree Mapper.";
-                ScrapeButtonText = "Run Data Scraper (Entire Model)";
                 UpdatePublishEnabled();
                 return;
             }
 
             CacheStatusText = $"Last scrape: {session.Timestamp:G} | Items scanned: {session.ItemsScanned} | Profile: {session.ProfileName}";
-            ScrapeButtonText = "Refresh Data Scraper Cache";
             UpdatePublishEnabled();
         }
 
@@ -570,45 +553,6 @@ namespace MicroEng.Navisworks.TreeMapper
             Levels.Move(index, index + 1);
         }
 
-        private void RunScrape_Click(object sender, RoutedEventArgs e)
-        {
-            if (_isScrapeRunning)
-            {
-                return;
-            }
-
-            _isScrapeRunning = true;
-            IsScrapeEnabled = false;
-            var previousButtonText = ScrapeButtonText;
-            ScrapeButtonText = "Scraping...";
-
-            try
-            {
-                MicroEngActions.Log("TreeMapper: running Data Scraper (entire model)");
-                var service = new DataScraperService();
-                var items = service.ResolveScope(ScrapeScopeType.EntireModel, null, null, out var description);
-            var session = service.Scrape("TreeMapper", ScrapeScopeType.EntireModel, description, items);
-            RefreshCategoryOptions(session);
-            RefreshSessionOptions(session);
-            SchedulePreviewRebuild();
-            }
-            catch (Exception ex)
-            {
-                MicroEngActions.Log($"TreeMapper scrape failed: {ex}");
-                MessageBox.Show($"Tree Mapper failed to run Data Scraper: {ex.Message}", "MicroEng",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                _isScrapeRunning = false;
-                IsScrapeEnabled = true;
-                if (ScrapeButtonText == "Scraping...")
-                {
-                    ScrapeButtonText = previousButtonText;
-                }
-            }
-        }
-
         private void RefreshSessions_Click(object sender, RoutedEventArgs e)
         {
             RefreshSessionOptions(SelectedSession?.Session ?? DataScraperCache.LastSession);
@@ -617,11 +561,6 @@ namespace MicroEng.Navisworks.TreeMapper
         private void OpenDataScraper_Click(object sender, RoutedEventArgs e)
         {
             MicroEngActions.TryShowDataScraper(null, out _);
-        }
-
-        private void OpenDataMatrix_Click(object sender, RoutedEventArgs e)
-        {
-            MicroEngActions.DataMatrix();
         }
 
         private void SaveProfile_Click(object sender, RoutedEventArgs e)

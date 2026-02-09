@@ -581,6 +581,8 @@ namespace MicroEng.SelectionTreeCom
                 TreeMapperNodeType.Layer => ComApi.nwESelTreeIcon.nwESelTreeIcon_LAYER_NORMAL,
                 TreeMapperNodeType.Group => ComApi.nwESelTreeIcon.nwESelTreeIcon_GROUP_NORMAL,
                 TreeMapperNodeType.Composite => ComApi.nwESelTreeIcon.nwESelTreeIcon_COMPOSITE_NORMAL,
+                TreeMapperNodeType.Insert => ComApi.nwESelTreeIcon.nwESelTreeIcon_INSERT_GROUP_NORMAL,
+                TreeMapperNodeType.Instance => ComApi.nwESelTreeIcon.nwESelTreeIcon_INSERT_GEOMETRY_NORMAL,
                 TreeMapperNodeType.Geometry => ComApi.nwESelTreeIcon.nwESelTreeIcon_GEOMETRY_NORMAL,
                 TreeMapperNodeType.Collection => ComApi.nwESelTreeIcon.nwESelTreeIcon_COLLECTION_NORMAL,
                 TreeMapperNodeType.Item => ComApi.nwESelTreeIcon.nwESelTreeIcon_GEOMETRY_NORMAL,
@@ -682,7 +684,9 @@ namespace MicroEng.SelectionTreeCom
         Composite,
         Geometry,
         Collection,
-        Item
+        Item,
+        Insert,
+        Instance
     }
 
     internal static class SelectionTreeComLog

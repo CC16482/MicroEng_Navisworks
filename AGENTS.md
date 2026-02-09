@@ -5,6 +5,7 @@
 - Latest build has not been rerun since the Data Matrix Filter Builder changes.
 - Recommended: close Navisworks or use `dotnet build /p:DeployToProgramData=false` if ProgramData deploy is locked.
 - Working tree is dirty (build outputs in bin/obj + Data Matrix refactor/column builder + crash-report logging + Quick Colour profile apply fix).
+- Changing PCs: copy `%APPDATA%\MicroEng\Navisworks\TreeMapper\` (Profiles.json + PublishedTree.json) and re-apply TreeSpec/COM registry fixes (see TreeMapper notes below).
 - Benchmark reports are saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\Reports\`.
 - Smart Set recipes saved under `C:\ProgramData\Autodesk\Navisworks Manage 2025\Plugins\MicroEng.Navisworks\SmartSets\Recipes\`.
 - Quick Colour profiles saved under `%APPDATA%\MicroEng\ColourProfiles\` (JSON schema v1).
@@ -17,6 +18,10 @@
 - TreeMapper publish now stamps DocumentFile/DocumentFileKey (fallback to active document) so trees are model-bound.
 - Selection Tree COM plugin strips `Int32:`/type prefixes from display values (display-only).
 - Selection Tree COM plugin reloads snapshot when file length or write time changes to avoid stale root-only view (fixes “only Floors” after publish).
+- TreeMapper UI shifted to vertical flow (profile -> explanation -> builder -> preview) with SizeToContent height.
+- TreeMapper node type labels aligned to Navisworks terms (File, Composite Object, Insert, Instance).
+- TreeMapper node type icons added in builder grid and preview tree (WPF UI symbols).
+- TreeMapper Collection icon updated to Connected20 (matches Navisworks “Collection” symbol).
 - Column Builder: Filter-by-selection now **scans only selected keys** (no full item→property index build) to avoid long GC/UI stalls; scan cancels/restarts on selection changes.
 - Column Builder: When selection filter is active, only **expanded categories** refresh their property view; collapsed categories are just hidden/shown.
 - Column Builder: When selection is empty, the tree is hidden and **no processing** should occur (fast path).
@@ -193,6 +198,8 @@
   - If desired, we can add display counts or hide Missing nodes when count is zero.
 
 ## Open issues
+- TreeMapper: enforce File as the first/only header row (IsFileHeader exists in VM but not wired in window logic yet).
+- TreeMapper: rename preview header to “Tree Preview” and confirm window height shrinks when table shrinks.
 - **Column Builder filter-by-selection still freezing** after selection results appear in some runs. Previous logs showed UI stalls during selection index build; new selected-keys scan fix needs validation on new PC.
 - Data Scraper: verify Selection/Search set scopes populate and resolve items correctly.
 - Data Matrix Column Builder: confirm filtering + rapid toggles no longer crash (WPF-UI animations).
@@ -206,6 +213,13 @@
 - Viewpoints Generator: PropertyGroups mode is a placeholder (plan empty).
 
 ## Key files touched
+- `MicroEng.Navisworks/TreeMapper/TreeMapperWindow.xaml`
+- `MicroEng.Navisworks/TreeMapper/TreeMapperWindow.xaml.cs`
+- `MicroEng.Navisworks/TreeMapper/TreeMapperModels.cs`
+- `MicroEng.Navisworks/TreeMapper/TreeMapperViewModels.cs`
+- `MicroEng.Navisworks/TreeMapper/TreeMapperNodeTypeToLabelConverter.cs`
+- `MicroEng.Navisworks/TreeMapper/TreeMapperNodeTypeToSymbolConverter.cs`
+- `MicroEng.SelectionTreeCom/TreeMapperSelectionTreeCom.cs`
 - `MicroEng.Navisworks/NavisworksSelectionSetUtils.cs`
 - `MicroEng.Navisworks/DataScraperService.cs`
 - `MicroEng.Navisworks/DataMatrixModels.cs`

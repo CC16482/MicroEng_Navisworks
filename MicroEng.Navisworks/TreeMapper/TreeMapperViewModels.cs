@@ -40,7 +40,29 @@ namespace MicroEng.Navisworks.TreeMapper
         public ObservableCollection<string> CategoryOptions { get; }
         public ObservableCollection<string> PropertyOptions { get; }
 
-        public IReadOnlyList<TreeMapperNodeType> NodeTypeOptions { get; } = Enum.GetValues(typeof(TreeMapperNodeType)).Cast<TreeMapperNodeType>().ToList();
+        private static readonly IReadOnlyList<TreeMapperNodeType> NodeTypeOrder = new List<TreeMapperNodeType>
+        {
+            TreeMapperNodeType.Model,
+            TreeMapperNodeType.Layer,
+            TreeMapperNodeType.Group,
+            TreeMapperNodeType.Composite,
+            TreeMapperNodeType.Insert,
+            TreeMapperNodeType.Geometry,
+            TreeMapperNodeType.Instance,
+            TreeMapperNodeType.Collection,
+            TreeMapperNodeType.Item
+        };
+
+        private static readonly IReadOnlyList<TreeMapperNodeType> NodeTypeOrderWithoutFile = NodeTypeOrder
+            .Where(t => t != TreeMapperNodeType.Model)
+            .ToList();
+
+        private static readonly IReadOnlyList<TreeMapperNodeType> NodeTypeFileOnly = new List<TreeMapperNodeType>
+        {
+            TreeMapperNodeType.Model
+        };
+
+        public IReadOnlyList<TreeMapperNodeType> NodeTypeOptions => IsFileHeader ? NodeTypeFileOnly : NodeTypeOrderWithoutFile;
         public IReadOnlyList<TreeMapperSortMode> SortModeOptions { get; } = Enum.GetValues(typeof(TreeMapperSortMode)).Cast<TreeMapperSortMode>().ToList();
 
         public TreeMapperNodeType NodeType
@@ -51,6 +73,23 @@ namespace MicroEng.Navisworks.TreeMapper
                 if (SetField(ref _nodeType, value))
                 {
                     _onChanged?.Invoke();
+                }
+            }
+        }
+
+        private bool _isFileHeader;
+        public bool IsFileHeader
+        {
+            get => _isFileHeader;
+            set
+            {
+                if (SetField(ref _isFileHeader, value))
+                {
+                    OnPropertyChanged(nameof(NodeTypeOptions));
+                    if (_isFileHeader && _nodeType != TreeMapperNodeType.Model)
+                    {
+                        NodeType = TreeMapperNodeType.Model;
+                    }
                 }
             }
         }

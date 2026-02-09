@@ -39,7 +39,9 @@ namespace MicroEng.Navisworks.TreeMapper
         Composite,
         Geometry,
         Collection,
-        Item
+        Item,
+        Insert,
+        Instance
     }
 
     internal enum TreeMapperSortMode

@@ -8,9 +8,9 @@
         xmlns:treemapper="clr-namespace:MicroEng.Navisworks.TreeMapper"
         Title="Tree Mapper"
         Width="1100"
-        Height="720"
         MinWidth="900"
-        MinHeight="600"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
         Background="{DynamicResource ApplicationBackgroundBrush}"
         Foreground="{DynamicResource TextFillColorPrimaryBrush}"
         FontSize="12"
@@ -80,6 +80,8 @@
                     </Setter.Value>
                 </Setter>
             </Style>
+            <treemapper:TreeMapperNodeTypeToSymbolConverter x:Key="TreeMapperNodeTypeToSymbolConverter" />
+            <treemapper:TreeMapperNodeTypeToLabelConverter x:Key="TreeMapperNodeTypeToLabelConverter" />
         </ResourceDictionary>
     </Window.Resources>
 
@@ -137,22 +139,6 @@
                                    Click="OpenDataScraper_Click">
                             <ui:SymbolIcon Symbol="DatabaseLightning20" FontSize="18" />
                         </ui:Button>
-                        <ui:Button Width="36"
-                                   Height="30"
-                                   Padding="0"
-                                   Margin="0,0,12,0"
-                                   ToolTip="Open Data Matrix"
-                                   Click="OpenDataMatrix_Click">
-                            <ui:SymbolIcon Symbol="TableSettings20" FontSize="18" />
-                        </ui:Button>
-                        <ui:Button MinWidth="190"
-                                   IsEnabled="{Binding IsScrapeEnabled}"
-                                   Click="RunScrape_Click">
-                            <StackPanel Orientation="Horizontal">
-                                <ui:SymbolIcon Symbol="DatabaseLightning20" Margin="0,0,6,0" />
-                                <ui:TextBlock Text="{Binding ScrapeButtonText}" />
-                            </StackPanel>
-                        </ui:Button>
                         <ui:Button Content="Publish to Selection Tree"
                                    Appearance="Primary"
                                    Background="White"
@@ -167,17 +153,18 @@
         </ui:Card>
 
         <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="3*" />
-                <ColumnDefinition Width="2*" />
-            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-            <ui:Card Grid.Column="0" Padding="12" Margin="0,0,12,0">
+            <ui:Card Grid.Row="0" Padding="12" Margin="0,0,0,12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
 
                     <ui:TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Tree Profile" />
@@ -205,38 +192,79 @@
                                      MinWidth="220"
                                      Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" />
                         </Grid>
+                    </StackPanel>
+                </Grid>
+            </ui:Card>
 
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <ui:Button Click="AddLevel_Click" Margin="0,0,8,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="Add20" Margin="0,0,6,0" />
-                                    <ui:TextBlock Text="Add Level" />
-                                </StackPanel>
-                            </ui:Button>
-                            <ui:Button Click="RemoveLevel_Click" Margin="0,0,8,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="Dismiss16" Margin="0,0,6,0" />
-                                    <ui:TextBlock Text="Remove" />
-                                </StackPanel>
-                            </ui:Button>
-                            <ui:Button Click="MoveLevelUp_Click" Margin="0,0,8,0">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="ArrowUp16" Margin="0,0,6,0" />
-                                    <ui:TextBlock Text="Move Up" />
-                                </StackPanel>
-                            </ui:Button>
-                            <ui:Button Click="MoveLevelDown_Click">
-                                <StackPanel Orientation="Horizontal">
-                                    <ui:SymbolIcon Symbol="ArrowDown16" Margin="0,0,6,0" />
-                                    <ui:TextBlock Text="Move Down" />
-                                </StackPanel>
-                            </ui:Button>
-                        </StackPanel>
+            <ui:Card Grid.Row="1" Padding="12" Margin="0,0,0,12">
+                <Expander Header="Tree Mapper Help"
+                          IsExpanded="False"
+                          Background="Transparent"
+                          Foreground="{DynamicResource TextFillColorPrimaryBrush}">
+                    <StackPanel Margin="2,6,0,0">
+                        <ui:TextBlock Text="How to build a useful Selection Tree"
+                                      FontWeight="SemiBold"
+                                      Margin="0,0,0,6" />
+                        <ui:TextBlock Text="- File is the root of each appended model. Use it once as the first level."
+                                      TextWrapping="Wrap" />
+                        <ui:TextBlock Text="- Geometry/Instance are leaf-level; put them at the bottom for the most granular selection."
+                                      TextWrapping="Wrap" />
+                        <ui:TextBlock Text="- Composite Object groups geometry into an object-level node (it may not exist for all items)."
+                                      TextWrapping="Wrap" />
+                        <ui:TextBlock Text="- Group = definition (affects all instances). Insert = occurrence (single instance)."
+                                      TextWrapping="Wrap" />
+                        <ui:TextBlock Text="- Layer is a high-level boundary when provided by the source model; not guaranteed."
+                                      TextWrapping="Wrap" />
+                        <ui:TextBlock Text="- Collection is a generic container that can appear anywhere; avoid assuming depth."
+                                      TextWrapping="Wrap" />
+                        <ui:TextBlock Text="- Typical order: File -> Layer/Collection -> Group/Insert -> Composite Object -> Geometry/Instance."
+                                      TextWrapping="Wrap"
+                                      Margin="0,6,0,0" />
+                        <ui:TextBlock Text="- Avoid hard rules like 'Layer must be depth 2' or 'Composite Object always exists'."
+                                      TextWrapping="Wrap" />
+                    </StackPanel>
+                </Expander>
+            </ui:Card>
+
+            <ui:Card Grid.Row="2" Padding="12" Margin="0,0,0,12">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <ui:TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Tree Builder" />
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,6,0,8">
+                        <ui:Button Click="AddLevel_Click" Margin="0,0,8,0">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Add20" Margin="0,0,6,0" />
+                                <ui:TextBlock Text="Add Level" />
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button Click="RemoveLevel_Click" Margin="0,0,8,0">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="Dismiss16" Margin="0,0,6,0" />
+                                <ui:TextBlock Text="Remove" />
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button Click="MoveLevelUp_Click" Margin="0,0,8,0">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ArrowUp16" Margin="0,0,6,0" />
+                                <ui:TextBlock Text="Move Up" />
+                            </StackPanel>
+                        </ui:Button>
+                        <ui:Button Click="MoveLevelDown_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <ui:SymbolIcon Symbol="ArrowDown16" Margin="0,0,6,0" />
+                                <ui:TextBlock Text="Move Down" />
+                            </StackPanel>
+                        </ui:Button>
                     </StackPanel>
 
                     <ui:DataGrid x:Name="LevelsGrid"
                                  Grid.Row="2"
-                                 Margin="0,10,0,0"
                                  ItemsSource="{Binding Levels}"
                                  SelectedItem="{Binding SelectedLevel, Mode=TwoWay}"
                                  AutoGenerateColumns="False"
@@ -257,14 +285,31 @@
                             <DataGridTemplateColumn Header="Node Type" Width="140">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
-                                        <TextBlock Text="{Binding NodeType}" VerticalAlignment="Center" />
+                                        <StackPanel Orientation="Horizontal">
+                                            <ui:SymbolIcon Symbol="{Binding NodeType, Converter={StaticResource TreeMapperNodeTypeToSymbolConverter}}"
+                                                           FontSize="16"
+                                                           Margin="0,0,6,0" />
+                                            <TextBlock Text="{Binding NodeType, Converter={StaticResource TreeMapperNodeTypeToLabelConverter}}"
+                                                       VerticalAlignment="Center" />
+                                        </StackPanel>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                                 <DataGridTemplateColumn.CellEditingTemplate>
                                     <DataTemplate>
                                         <ComboBox ItemsSource="{Binding NodeTypeOptions}"
                                                   SelectedItem="{Binding NodeType, UpdateSourceTrigger=PropertyChanged}"
-                                                  Height="26" />
+                                                  Height="26">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <ui:SymbolIcon Symbol="{Binding Converter={StaticResource TreeMapperNodeTypeToSymbolConverter}}"
+                                                                       FontSize="16"
+                                                                       Margin="0,0,6,0" />
+                                                        <TextBlock Text="{Binding Converter={StaticResource TreeMapperNodeTypeToLabelConverter}}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellEditingTemplate>
                             </DataGridTemplateColumn>
@@ -327,11 +372,11 @@
                 </Grid>
             </ui:Card>
 
-            <ui:Card Grid.Column="1" Padding="12">
+            <ui:Card Grid.Row="3" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <ui:TextBlock Style="{StaticResource SectionHeaderStyle}" Text="Preview" />
                     <TreeView Grid.Row="1"
@@ -344,7 +389,12 @@
                         <TreeView.Resources>
                             <HierarchicalDataTemplate DataType="{x:Type treemapper:TreeMapperPreviewNode}"
                                                       ItemsSource="{Binding Children}">
-                                <ui:TextBlock Text="{Binding DisplayLabel}" TextWrapping="Wrap" />
+                                <StackPanel Orientation="Horizontal">
+                                    <ui:SymbolIcon Symbol="{Binding NodeType, Converter={StaticResource TreeMapperNodeTypeToSymbolConverter}}"
+                                                   FontSize="16"
+                                                   Margin="0,0,6,0" />
+                                    <ui:TextBlock Text="{Binding DisplayLabel}" TextWrapping="Wrap" />
+                                </StackPanel>
                             </HierarchicalDataTemplate>
                         </TreeView.Resources>
                     </TreeView>

@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
+using System.Windows.Documents;
 using System.Windows.Threading;
 using Wpf.Ui;
 using Wpf.Ui.Appearance;
@@ -819,22 +821,150 @@ namespace MicroEng.Navisworks
                 backgroundBrush.Freeze();
                 var foregroundBrush = new SolidColorBrush(foregroundColor);
                 foregroundBrush.Freeze();
+                var transparentBrush = Brushes.Transparent;
 
-                foreach (var button in FindVisualChildren<Button>(root))
+                var buttons = FindLogicalChildren<Button>(root).ToList();
+                if (buttons.Count == 0)
                 {
-                    if (button.Appearance != ControlAppearance.Primary)
+                    buttons = FindVisualChildren<Button>(root).ToList();
+                }
+
+                foreach (var button in buttons)
+                {
+                    var hasLocalStyle = button.ReadLocalValue(FrameworkElement.StyleProperty) != DependencyProperty.UnsetValue;
+                    var hasTextContent = HasTextualButtonContent(button.Content);
+                    if (hasTextContent && !hasLocalStyle)
                     {
-                        continue;
+                        // Shared action-button baseline for tool buttons (Run/Close/Column Builder/etc.).
+                        // Use WPF UI default font (no forced custom family).
+                        button.ClearValue(Button.FontFamilyProperty);
+                        button.ClearValue(Button.FontWeightProperty);
+                        button.FontWeight = FontWeights.Normal;
+                        button.FontStretch = FontStretches.Normal;
+                        button.FontSize = 13;
+                        button.SetValue(TextOptions.TextFormattingModeProperty, TextFormattingMode.Display);
+                        button.Padding = new Thickness(12, 6, 12, 6);
+                        button.MinHeight = 32;
+
+                        if (button.Content is string content)
+                        {
+                            button.Content = RemoveInjectedTextSpacing(content);
+                        }
                     }
 
-                    button.Background = backgroundBrush;
-                    button.BorderBrush = backgroundBrush;
-                    button.Foreground = foregroundBrush;
+                    if (button.Appearance == ControlAppearance.Primary)
+                    {
+                        button.Background = backgroundBrush;
+                        button.BorderBrush = transparentBrush;
+                        button.MouseOverBorderBrush = transparentBrush;
+                        button.PressedBorderBrush = transparentBrush;
+                        button.BorderThickness = new Thickness(0);
+                        button.Foreground = foregroundBrush;
+                        // Use WPF UI default font (no forced custom family).
+                        button.ClearValue(Button.FontFamilyProperty);
+                        button.ClearValue(Button.FontWeightProperty);
+                        button.FontWeight = FontWeights.Normal;
+                        button.FontStretch = FontStretches.Normal;
+                        button.FontSize = 13;
+                        if (hasTextContent)
+                        {
+                            // Keep primary action button geometry identical across windows/tools.
+                            button.Padding = new Thickness(12, 6, 12, 6);
+                            button.MinHeight = 32;
+                        }
+                        // Revert to the control's default corner radius from theme resources.
+                        button.ClearValue(Button.CornerRadiusProperty);
+                        button.SetValue(Typography.StandardLigaturesProperty, false);
+                        button.SetValue(Typography.DiscretionaryLigaturesProperty, false);
+                        button.SetValue(Typography.KerningProperty, false);
+                        button.SetValue(TextOptions.TextFormattingModeProperty, TextFormattingMode.Display);
+
+                        if (button.Content is string content)
+                        {
+                            button.Content = RemoveInjectedTextSpacing(content);
+                        }
+                    }
                 }
             }
             catch
             {
                 // ignore
+            }
+        }
+
+        private static string RemoveInjectedTextSpacing(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+
+            // Strip spacing characters inserted by previous tracking logic.
+            return new string(text.Where(c => c != '\u00A0' && c != '\u202F' && (c < '\u2000' || c > '\u200A')).ToArray());
+        }
+
+        private static bool HasTextualButtonContent(object content)
+        {
+            switch (content)
+            {
+                case string s:
+                    return !string.IsNullOrWhiteSpace(s);
+                case System.Windows.Controls.TextBlock tb:
+                    return !string.IsNullOrWhiteSpace(tb.Text);
+                case DependencyObject dep:
+                    try
+                    {
+                        foreach (var child in LogicalTreeHelper.GetChildren(dep))
+                        {
+                            if (HasTextualButtonContent(child))
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // ignore
+                    }
+
+                    return false;
+                default:
+                    return false;
+            }
+        }
+
+        private static IEnumerable<T> FindLogicalChildren<T>(DependencyObject parent)
+            where T : DependencyObject
+        {
+            if (parent == null)
+            {
+                yield break;
+            }
+
+            IEnumerable children;
+            try
+            {
+                children = LogicalTreeHelper.GetChildren(parent);
+            }
+            catch
+            {
+                yield break;
+            }
+
+            foreach (var child in children)
+            {
+                if (child is T match)
+                {
+                    yield return match;
+                }
+
+                if (child is DependencyObject dependencyChild)
+                {
+                    foreach (var nested in FindLogicalChildren<T>(dependencyChild))
+                    {
+                        yield return nested;
+                    }
+                }
             }
         }
 

@@ -56,8 +56,10 @@
         <ui:Button Grid.Row="0"
                    Grid.Column="1"
                    Content="Close"
-                   Appearance="Primary" Foreground="{DynamicResource TextFillColorInverseBrush}" FontWeight="Bold"
+                   Appearance="Primary"
+                   Foreground="{DynamicResource TextFillColorInverseBrush}"
                    Padding="12,6"
+                   MinHeight="32"
                    Click="Close_Click" />
 
         <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0">
